@@ -6,6 +6,7 @@
 #define BASE_TOKEN_H
 
 #include <cstdint>
+#include <functional>
 
 namespace base {
 
@@ -53,5 +54,14 @@ inline constexpr bool operator>=(token_t a, token_t b) noexcept {
 token_t next_token() noexcept;
 
 }  // namespace base
+
+namespace std {
+template <>
+struct hash<base::token_t> {
+  std::size_t operator()(base::token_t t) const noexcept {
+    return uint64_t(t);
+  }
+};
+}  // namespace std
 
 #endif  // BASE_TOKEN_H
