@@ -96,7 +96,7 @@ static void TestManagerImplementation_FDs(event::Manager& m, bool async) {
   write_some_data(fd0, kHelloWorld, kHelloLen);
 
   VLOG(0) << "task: waiting for finish";
-  m.wait(&task);
+  event::wait(m, &task);
   VLOG(0) << "task: got finish";
   EXPECT_OK(task.result());
 
@@ -139,7 +139,7 @@ static void TestManagerImplementation_Signals(event::Manager& m, bool async) {
   ::kill(::getpid(), SIGUSR2);
 
   VLOG(0) << "task: waiting for finish";
-  m.wait(&task);
+  event::wait(m, &task);
   VLOG(0) << "task: got finish";
   auto lock = acquire(mu);
   EXPECT_OK(task.result());
@@ -184,7 +184,7 @@ static void TestManagerImplementation_Timers(event::Manager& m, bool async) {
 
   lock.unlock();
   VLOG(0) << "task: waiting for finish";
-  m.wait(&task);
+  event::wait(m, &task);
   VLOG(0) << "task: got finish";
   lock.lock();
   EXPECT_GE(counter, 5);
@@ -201,7 +201,7 @@ static void TestManagerImplementation_Timers(event::Manager& m, bool async) {
 
   lock.unlock();
   VLOG(0) << "task: waiting for finish";
-  m.wait(&task);
+  event::wait(m, &task);
   VLOG(0) << "got: counter = " << counter;
   lock.lock();
   EXPECT_OK(task.result());
@@ -250,7 +250,7 @@ static void TestManagerImplementation_Events(event::Manager& m, bool async) {
   cv.notify_all();
   lock.unlock();
   VLOG(0) << "task: waiting for finish";
-  m.wait(&task);
+  event::wait(m, &task);
   VLOG(0) << "task: got finish";
   EXPECT_OK(task.result());
 

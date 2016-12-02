@@ -6,8 +6,8 @@
 #define EVENT_MANAGER_H
 
 #include <functional>
-#include <initializer_list>
 #include <memory>
+#include <vector>
 
 #include "base/duration.h"
 #include "base/result.h"
@@ -400,23 +400,6 @@ class Manager {
     dispatcher().dispatch(std::move(callback));
   }
 
-  // Blocks until at least |n| of the Tasks in |il| have finished.
-  // PRECONDITION: |n <= il.size()|
-  void wait_n(std::initializer_list<Task*> il, std::size_t n) const;
-
-  // Blocks until at least one of the Tasks in |il| has finished.
-  void wait_any(std::initializer_list<Task*> il) const {
-    wait_n(il, (il.size() >= 1) ? 1 : 0);
-  }
-
-  // Blocks until every Task in |il| has finished.
-  void wait_all(std::initializer_list<Task*> il) const {
-    wait_n(il, il.size());
-  }
-
-  // Blocks until the given Task has finished.
-  void wait(Task* task) const { wait_n({task}, 1); }
-
   // Registers an event handler for a file descriptor.
   base::Result fd(FileDescriptor* out, int fd, Set set,
                   std::shared_ptr<Handler> handler) const;
@@ -458,6 +441,27 @@ Manager& system_manager();
 // THREAD SAFETY: This function is thread-safe.
 //
 void set_system_manager(Manager m);
+
+// Blocks until at least |n| of the Tasks in |tv| have finished.
+// PRECONDITION: |n <= tv.size()|
+void wait_n(std::vector<Manager> mv, std::vector<Task*> tv, std::size_t n);
+
+// Blocks until at least one of the Tasks in |tv| has finished.
+inline void wait_any(std::vector<Manager> mv, std::vector<Task*> tv) {
+  std::size_t n = tv.empty() ? 0 : 1;
+  wait_n(std::move(mv), std::move(tv), n);
+}
+
+// Blocks until every Task in |tv| has finished.
+inline void wait_all(std::vector<Manager> mv, std::vector<Task*> tv) {
+  std::size_t n = tv.size();
+  wait_n(std::move(mv), std::move(tv), n);
+}
+
+// Blocks until the given Task has finished.
+inline void wait(Manager m, Task* task) {
+  wait_n({m}, {task}, 1);
+}
 
 inline Manager& Manager::or_system_manager() {
   if (ptr_)

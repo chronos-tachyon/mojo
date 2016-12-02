@@ -1166,11 +1166,12 @@ struct WaitData {
 };
 }  // anonymous namespace
 
-void Manager::wait_n(std::initializer_list<Task*> il, std::size_t n) const {
-  if (n > il.size())
+void wait_n(std::vector<Manager> mv, std::vector<Task*> tv,
+            std::size_t n) {
+  if (n > tv.size())
     throw std::logic_error(
-        "event::Manager::wait_n asked to wait for more task completions than "
-        "there are provided tasks");
+        "event::wait_n asked to wait for more task "
+        "completions than there are provided tasks");
 
   auto closure = [](std::shared_ptr<WaitData> data) {
     auto lock = acquire_lock(data->mu);
@@ -1180,27 +1181,32 @@ void Manager::wait_n(std::initializer_list<Task*> il, std::size_t n) const {
   };
 
   auto data = std::make_shared<WaitData>();
-  for (Task* task : il) {
+  for (Task* task : tv) {
     task->on_finished(callback(closure, data));
+  }
+
+  bool any_threaded = false;
+  for (const Manager& m : mv) {
+    if (m.dispatcher().type() == DispatcherType::threaded_dispatcher) {
+      any_threaded = true;
+      break;
+    }
   }
 
   auto lock = acquire_lock(data->mu);
   while (data->done < n) {
-    switch (dispatcher().type()) {
-      case DispatcherType::inline_dispatcher:
-      case DispatcherType::async_dispatcher:
-        // Inline? Maybe it's blocked on I/O. Try donating.
-        // Async? Just donate.
-        break;
-
-      default:
-        // Threaded? Don't be so eager to trash our code cache.
-        using MS = std::chrono::milliseconds;
-        data->cv.wait_for(lock, MS(1));
-        if (data->done >= n) return;
+    // Inline? Maybe it's blocked on I/O. Try donating.
+    // Async? Just donate.
+    // Threaded? Don't be so eager to join the fray.
+    if (any_threaded) {
+      using MS = std::chrono::milliseconds;
+      data->cv.wait_for(lock, MS(1));
+      if (data->done >= n) return;
     }
     lock.unlock();
-    donate(false).assert_ok();
+    for (const Manager& m : mv) {
+      m.donate(false).assert_ok();
+    }
     lock.lock();
   }
 }
