@@ -4,7 +4,9 @@
 #include "base/clock.h"
 
 #include <time.h>
+
 #include <cstring>
+#include <mutex>
 #include <stdexcept>
 #include <system_error>
 
@@ -38,14 +40,43 @@ Time SystemClock::now() const {
   return Time::from_epoch(Duration::raw(false, ts.tv_sec, ts.tv_nsec));
 }
 
-Clock& system_wallclock() {
-  static auto& ref = *new Clock(std::make_shared<SystemClock>(CLOCK_REALTIME));
-  return ref;
+static std::mutex g_sysclk_mu;
+static Clock* g_sysclk_wall = nullptr;
+static Clock* g_sysclk_mono = nullptr;
+
+static void initialize_clocks() {
+  if (g_sysclk_wall == nullptr) g_sysclk_wall = new Clock;
+  if (g_sysclk_mono == nullptr) g_sysclk_mono = new Clock;
+  if (!*g_sysclk_wall) {
+    *g_sysclk_wall = Clock(std::make_shared<SystemClock>(CLOCK_REALTIME));
+  }
+  if (!*g_sysclk_mono) {
+    *g_sysclk_mono = Clock(std::make_shared<SystemClock>(CLOCK_MONOTONIC));
+  }
 }
 
-Clock& system_monotonic_clock() {
-  static auto& ref = *new Clock(std::make_shared<SystemClock>(CLOCK_MONOTONIC));
-  return ref;
+Clock system_wallclock() {
+  std::unique_lock<std::mutex> lock(g_sysclk_mu);
+  initialize_clocks();
+  return *g_sysclk_wall;
+}
+
+Clock system_monotonic_clock() {
+  std::unique_lock<std::mutex> lock(g_sysclk_mu);
+  initialize_clocks();
+  return *g_sysclk_mono;
+}
+
+void set_system_wallclock(Clock clock) {
+  std::unique_lock<std::mutex> lock(g_sysclk_mu);
+  initialize_clocks();
+  *g_sysclk_wall = std::move(clock);
+}
+
+void set_system_monotonic_clock(Clock clock) {
+  std::unique_lock<std::mutex> lock(g_sysclk_mu);
+  initialize_clocks();
+  *g_sysclk_mono = std::move(clock);
 }
 
 }  // namespace base
