@@ -54,6 +54,13 @@ base::Result Task::result() const {
   return result_;
 }
 
+bool Task::result_will_throw() const noexcept {
+  auto lock = acquire_lock();
+  if (state_ < Task::State::done) return true;
+  if (eptr_) return true;
+  return false;
+}
+
 void Task::add_subtask(Task* subtask) {
   auto lock = acquire_lock();
   if (state_ > State::running) {

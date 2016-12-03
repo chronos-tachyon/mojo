@@ -25,6 +25,9 @@ namespace event {
 // stuck waiting on a resource, e.g. because a networked host is down. Task
 // deadlines are strictly advisory: the operation must check for them.
 //
+// - To set a deadline, call |event::Manager::set_deadline()|. The Manager will
+//   arrange for |Task::expire()| to be called when the deadline expires.
+//
 // Task also supports asynchronous cancellation: the caller can arrange for
 // |Task::cancel()| to be called, and the asynchronous callee can observe this
 // request and cancel the long-running operation.
@@ -91,6 +94,17 @@ class Task {
 
   // Returns true iff the Task is in the |running| state, i.e. it has been
   // started, its deadline has not expired, AND it has not been cancelled.
+  //
+  // Typical usage:
+  //
+  //    while (!done) {
+  //      if (!task->is_running()) {
+  //        task->finish_cancel();
+  //        return;
+  //      }
+  //      ...;  // incremental long-running operation
+  //    }
+  //
   bool is_running() const noexcept { return state() == State::running; }
 
   // Returns true iff the Task is in the terminal state, |done|.
@@ -101,18 +115,26 @@ class Task {
   // PRECONDITION: |is_finished() == true|.
   base::Result result() const;
 
+  // Returns true if |result()| will throw an exception.
+  bool result_will_throw() const noexcept;
+
   // Registers another Task as a subtask of this Task.
-  // If this Task is |expiring|, |cancelling|, or |done|, then all subtasks
-  // will be cancelled.
+  // - If this Task reaches |expiring|, |cancelling|, or |done|, then all
+  //   subtasks will be cancelled.
+  // - Will cancel |task| immediately if this Task is already |done|.
   void add_subtask(Task* task);
 
   // Registers a Callback to execute when the Task reaches the |done| state.
+  // - Will execute |callback| immediately if this Task is already |done|.
   void on_finished(std::unique_ptr<Callback> callback);
 
   // Marks the task as having exceeded its deadline.
   // - Changes |ready| to |done| with result DEADLINE_EXCEEDED and returns true
   // - Changes |running| to |expiring| and returns false
   // - Has no effect otherwise (and returns false)
+  //
+  // This is normally called via |event::Manager::set_deadline()| and friends.
+  //
   bool expire() noexcept;
 
   // Requests that the Task be cancelled.
@@ -122,9 +144,9 @@ class Task {
   // - Has no effect otherwise (and returns false)
   bool cancel() noexcept;
 
-  // Marks the Task as running.
-  // - Returns true if the state changed from |ready| to |running|
-  // - Returns false if the state was |done|
+  // Marks the Task as running, unless the Task was already cancelled.
+  // - Changes |ready| to |running| and returns true
+  // - Has no effect if state was |done| (and returns false)
   // PRECONDITION: state is |ready| or |done|
   bool start();
 
