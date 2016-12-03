@@ -9,6 +9,7 @@
 #include <mutex>
 #include <thread>
 
+#include "base/logging.h"
 #include "base/result_testing.h"
 #include "event/dispatcher.h"
 
@@ -208,7 +209,7 @@ TEST(ThreadPoolDispatcher, EndToEnd) {
   auto inc_callback = [&mu, &cv, &n](std::size_t i) {
     EXPECT_LT(i, 10U);
     auto lock = acquire(mu);
-    std::cerr << "hello from increment callback #" << i << std::endl;
+    VLOG(0) << "hello from increment callback #" << i;
     ++n;
     cv.notify_all();
     return base::Result();
@@ -216,11 +217,11 @@ TEST(ThreadPoolDispatcher, EndToEnd) {
 
   auto done_callback = [&mu, &cv, &n, &done] {
     auto lock = acquire(mu);
-    std::cerr << "hello from done callback" << std::endl;
+    VLOG(0) << "hello from done callback";
     while (n < 10) cv.wait(lock);
     done = true;
     cv.notify_all();
-    std::cerr << "done" << std::endl;
+    VLOG(0) << "done";
     return base::Result();
   };
 
@@ -245,9 +246,9 @@ TEST(ThreadPoolDispatcher, EndToEnd) {
   EXPECT_FAILED_PRECONDITION(d->uncork());
 
   lock.lock();
-  std::cerr << "waiting on done" << std::endl;
+  VLOG(0) << "waiting on done";
   while (!done) cv.wait(lock);
-  std::cerr << "got done" << std::endl;
+  VLOG(0) << "got done";
   EXPECT_EQ(10, n);
   for (i = 0; i < 10; i++) {
     EXPECT_OK(tasks[i].result());
@@ -271,9 +272,9 @@ TEST(ThreadPoolDispatcher, EndToEnd) {
   expected.current_num_workers = 3;
   EXPECT_PRED2(equalish, expected, d->stats());
 
-  std::cerr << "waiting on shutdown" << std::endl;
+  VLOG(0) << "waiting on shutdown";
   d->shutdown();
-  std::cerr << "got shutdown" << std::endl;
+  VLOG(0) << "got shutdown";
 
   expected.min_workers = 0;
   expected.max_workers = 0;
@@ -296,7 +297,7 @@ TEST(ThreadPoolDispatcher, ThrowingCallback) {
   expected.current_num_workers = 1;
   EXPECT_EQ(expected, d->stats());
 
-  std::cerr << "dispatching callbacks that throw" << std::endl;
+  VLOG(0) << "dispatching callbacks that throw";
   std::array<event::Task, 5> tasks;
   for (std::size_t i = 0; i < 5; ++i) {
     d->dispatch(&tasks[i], event::callback(Throw()));
@@ -314,3 +315,6 @@ TEST(ThreadPoolDispatcher, ThrowingCallback) {
   expected.caught_exceptions = 5;
   EXPECT_PRED2(equalish, expected, d->stats());
 }
+
+static void init() __attribute__((constructor));
+static void init() { base::log_stderr_set_level(0); }

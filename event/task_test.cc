@@ -5,11 +5,13 @@
 
 #include <iostream>
 
+#include "base/logging.h"
 #include "base/result_testing.h"
 #include "event/task.h"
 
 static const char* const kStateNames[] = {
-    "ready", "running", "cancelling", "finishing", "done", "cancelled",
+    "ready",     "running",   "expiring",  "cancelling", "unknown#4",
+    "unknown#5", "unknown#6", "unknown#7", "done",
 };
 
 static std::ostream& operator<<(std::ostream& os, event::Task::State s) {
@@ -23,71 +25,141 @@ TEST(Task, Inline) {
     return base::Result();
   };
 
-  std::cerr << "1. create task" << std::endl;
+  VLOG(0) << "1. create task";
   event::Task task;
   task.on_finished(event::callback(inc));
   EXPECT_EQ(event::Task::State::ready, task.state());
   EXPECT_FALSE(task.is_finished());
   EXPECT_EQ(0, n);
 
-  std::cerr << "1. start task" << std::endl;
+  VLOG(0) << "1. start task";
   EXPECT_TRUE(task.start());
   EXPECT_EQ(event::Task::State::running, task.state());
   EXPECT_FALSE(task.is_finished());
   EXPECT_EQ(0, n);
 
-  std::cerr << "1. finish task [OK]" << std::endl;
+  VLOG(0) << "1. finish task [OK]";
   EXPECT_TRUE(task.finish_ok());
   EXPECT_EQ(event::Task::State::done, task.state());
   EXPECT_TRUE(task.is_finished());
   EXPECT_OK(task.result());
   EXPECT_EQ(1, n);
 
-  std::cerr << "1. on_finished after finish" << std::endl;
+  VLOG(0) << "1. on_finished after finish";
   task.on_finished(event::callback(inc));
   EXPECT_EQ(2, n);
 
-  std::cerr << "2. reset task" << std::endl;
+  VLOG(0) << "2. reset task";
   n = 0;
   task.reset();
   task.on_finished(event::callback(inc));
   EXPECT_EQ(event::Task::State::ready, task.state());
   EXPECT_EQ(0, n);
 
-  std::cerr << "2. cancel task" << std::endl;
+  VLOG(0) << "2. cancel task";
   EXPECT_TRUE(task.cancel());
-  EXPECT_EQ(event::Task::State::cancelled, task.state());
-  EXPECT_FALSE(task.is_cancelling());
+  EXPECT_EQ(event::Task::State::done, task.state());
   EXPECT_TRUE(task.is_finished());
   EXPECT_CANCELLED(task.result());
   EXPECT_EQ(1, n);
 
-  std::cerr << "3. reset task" << std::endl;
+  VLOG(0) << "3. reset task";
   n = 0;
   task.reset();
   task.on_finished(event::callback(inc));
   EXPECT_EQ(event::Task::State::ready, task.state());
   EXPECT_EQ(0, n);
 
-  std::cerr << "3. start task" << std::endl;
+  VLOG(0) << "3. start task";
   EXPECT_TRUE(task.start());
 
-  std::cerr << "3. cancel task" << std::endl;
+  VLOG(0) << "3. cancel task";
   EXPECT_FALSE(task.cancel());
   EXPECT_EQ(event::Task::State::cancelling, task.state());
-  EXPECT_TRUE(task.is_cancelling());
   EXPECT_FALSE(task.is_finished());
   EXPECT_EQ(0, n);
 
-  std::cerr << "3. finish task [CANCELLED]" << std::endl;
+  VLOG(0) << "3. finish task [CANCELLED]";
   EXPECT_TRUE(task.finish_cancel());
-  EXPECT_EQ(event::Task::State::cancelled, task.state());
+  EXPECT_EQ(event::Task::State::done, task.state());
+  EXPECT_TRUE(task.is_finished());
+  EXPECT_CANCELLED(task.result());
+  EXPECT_EQ(1, n);
+
+  VLOG(0) << "4. reset task";
+  n = 0;
+  task.reset();
+  task.on_finished(event::callback(inc));
+  EXPECT_EQ(event::Task::State::ready, task.state());
+  EXPECT_EQ(0, n);
+
+  VLOG(0) << "4. expire task";
+  EXPECT_TRUE(task.expire());
+  EXPECT_EQ(event::Task::State::done, task.state());
+  EXPECT_TRUE(task.is_finished());
+  EXPECT_DEADLINE_EXCEEDED(task.result());
+  EXPECT_EQ(1, n);
+
+  VLOG(0) << "5. reset task";
+  n = 0;
+  task.reset();
+  task.on_finished(event::callback(inc));
+  EXPECT_EQ(event::Task::State::ready, task.state());
+  EXPECT_EQ(0, n);
+
+  VLOG(0) << "5. start task";
+  EXPECT_TRUE(task.start());
+
+  VLOG(0) << "5. expire task";
+  EXPECT_FALSE(task.expire());
+  EXPECT_EQ(event::Task::State::expiring, task.state());
+  EXPECT_FALSE(task.is_finished());
+  EXPECT_EQ(0, n);
+
+  VLOG(0) << "5. finish task [DEADLINE_EXCEEDED]";
+  EXPECT_TRUE(task.finish_cancel());
+  EXPECT_EQ(event::Task::State::done, task.state());
+  EXPECT_TRUE(task.is_finished());
+  EXPECT_DEADLINE_EXCEEDED(task.result());
+  EXPECT_EQ(1, n);
+
+  VLOG(0) << "6. reset task";
+  n = 0;
+  task.reset();
+  task.on_finished(event::callback(inc));
+  EXPECT_EQ(event::Task::State::ready, task.state());
+  EXPECT_EQ(0, n);
+
+  VLOG(0) << "6. start task";
+  EXPECT_TRUE(task.start());
+
+  VLOG(0) << "6. expire task";
+  EXPECT_FALSE(task.expire());
+  EXPECT_EQ(event::Task::State::expiring, task.state());
+  EXPECT_FALSE(task.is_finished());
+  EXPECT_EQ(0, n);
+
+  VLOG(0) << "6. cancel task";
+  EXPECT_FALSE(task.cancel());
+  EXPECT_EQ(event::Task::State::cancelling, task.state());
+  EXPECT_FALSE(task.is_finished());
+  EXPECT_EQ(0, n);
+
+  VLOG(0) << "6. expire task again";
+  EXPECT_FALSE(task.expire());
+  EXPECT_EQ(event::Task::State::cancelling, task.state());
+  EXPECT_FALSE(task.is_finished());
+  EXPECT_EQ(0, n);
+
+  VLOG(0) << "6. finish task [CANCELLED]";
+  EXPECT_TRUE(task.finish_cancel());
+  EXPECT_EQ(event::Task::State::done, task.state());
   EXPECT_TRUE(task.is_finished());
   EXPECT_CANCELLED(task.result());
   EXPECT_EQ(1, n);
 }
 
-TEST(Task, Subtask) {
+TEST(Task, SubtaskCancel) {
   event::Task parent;
   EXPECT_TRUE(parent.start());
 
@@ -107,7 +179,35 @@ TEST(Task, Subtask) {
   child1.finish_cancel();
   parent.finish_cancel();
 
-  EXPECT_EQ(event::Task::State::cancelled, parent.state());
+  EXPECT_EQ(event::Task::State::done, parent.state());
   EXPECT_EQ(event::Task::State::done, child0.state());
-  EXPECT_EQ(event::Task::State::cancelled, child1.state());
+  EXPECT_EQ(event::Task::State::done, child1.state());
 }
+
+TEST(Task, SubtaskExpire) {
+  event::Task parent;
+  EXPECT_TRUE(parent.start());
+
+  event::Task child0, child1;
+  parent.add_subtask(&child0);
+  parent.add_subtask(&child1);
+  EXPECT_TRUE(child0.start());
+  EXPECT_TRUE(child1.start());
+
+  child0.finish_ok();
+  EXPECT_FALSE(parent.expire());
+
+  EXPECT_EQ(event::Task::State::expiring, parent.state());
+  EXPECT_EQ(event::Task::State::done, child0.state());
+  EXPECT_EQ(event::Task::State::cancelling, child1.state());
+
+  child1.finish_cancel();
+  parent.finish_cancel();
+
+  EXPECT_EQ(event::Task::State::done, parent.state());
+  EXPECT_EQ(event::Task::State::done, child0.state());
+  EXPECT_EQ(event::Task::State::done, child1.state());
+}
+
+static void init() __attribute__((constructor));
+static void init() { base::log_stderr_set_level(0); }
