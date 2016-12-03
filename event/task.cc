@@ -67,7 +67,11 @@ void Task::add_subtask(Task* subtask) {
       break;
 
     default:
-      subtasks_.push_back(subtask);
+      // OPTIMIZATION: It's a common pattern to reset and reuse the same
+      //               subtask multiple times. If |subtask| was already the
+      //               most recently added subtask, don't add it twice.
+      if (subtasks_.empty() || subtasks_.back() != subtask)
+        subtasks_.push_back(subtask);
   }
 }
 
