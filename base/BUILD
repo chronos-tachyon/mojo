@@ -51,6 +51,14 @@ cc_library(
 )
 
 cc_library(
+  name = "fd",
+  srcs = ["fd.cc"],
+  hdrs = ["fd.h"],
+  deps = [":result"],
+  visibility = ["//visibility:public"],
+)
+
+cc_library(
   name = "logging",
   srcs = ["logging.cc"],
   hdrs = ["logging.h"],
