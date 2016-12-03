@@ -1146,6 +1146,38 @@ base::Result Manager::generic(Generic* out,
   return result;
 }
 
+base::Result Manager::set_deadline(Task* task, base::Time at) {
+  auto* t = new Timer;
+  auto closure0 = [t] {
+    delete t;
+    return base::Result();
+  };
+  auto closure1 = [task](Data unused) {
+    task->expire();
+    return base::Result();
+  };
+  task->on_finished(callback(closure0));
+  auto r = timer(t, handler(closure1));
+  if (r) r = t->set_at(at);
+  return r;
+}
+
+base::Result Manager::set_timeout(Task* task, base::Duration delay) {
+  auto* t = new Timer;
+  auto closure0 = [t] {
+    delete t;
+    return base::Result();
+  };
+  auto closure1 = [task](Data unused) {
+    task->expire();
+    return base::Result();
+  };
+  task->on_finished(callback(closure0));
+  auto r = timer(t, handler(closure1));
+  if (r) r = t->set_delay(delay);
+  return r;
+}
+
 base::Result Manager::donate(bool forever) const {
   assert_valid();
   return ptr_->donate(forever);
@@ -1166,8 +1198,7 @@ struct WaitData {
 };
 }  // anonymous namespace
 
-void wait_n(std::vector<Manager> mv, std::vector<Task*> tv,
-            std::size_t n) {
+void wait_n(std::vector<Manager> mv, std::vector<Task*> tv, std::size_t n) {
   if (n > tv.size())
     throw std::logic_error(
         "event::wait_n asked to wait for more task "

@@ -415,6 +415,12 @@ class Manager {
   // Registers an event handler for a generic event.
   base::Result generic(Generic* out, std::shared_ptr<Handler> handler) const;
 
+  // Arranges for |task->expire()| to be called at time |at|.
+  base::Result set_deadline(Task* task, base::Time at);
+
+  // Arranges for |task->expire()| to be called after |delay|.
+  base::Result set_timeout(Task* task, base::Duration delay);
+
   // Donates the current thread to the Manager, if supported.
   base::Result donate(bool forever) const;
 
