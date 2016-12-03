@@ -23,15 +23,7 @@ cc_library(
     "set.h",
     "task.h",
   ],
-  deps = [
-    "//base:cleanup",
-    "//base:debug",
-    "//base:logging",
-    "//base:result",
-    "//base:time",
-    "//base:token",
-    "//base:util",
-  ],
+  deps = ["//base"],
   visibility = ["//visibility:public"],
 )
 
@@ -40,6 +32,7 @@ cc_test(
   srcs = ["callback_test.cc"],
   deps = [
     ":event",
+    "//base",
     "//base:result_testing",
     "//external:gtest",
   ],
@@ -50,7 +43,7 @@ cc_test(
   srcs = ["dispatcher_test.cc"],
   deps = [
     ":event",
-    "//base:logging",
+    "//base",
     "//base:result_testing",
     "//external:gtest",
   ],
@@ -61,6 +54,7 @@ cc_test(
   srcs = ["handler_test.cc"],
   deps = [
     ":event",
+    "//base",
     "//base:result_testing",
     "//external:gtest",
   ],
@@ -71,11 +65,8 @@ cc_test(
   srcs = ["manager_test.cc"],
   deps = [
     ":event",
-    "//base:cleanup",
-    "//base:logging",
+    "//base",
     "//base:result_testing",
-    "//base:time",
-    "//base:util",
     "//external:gtest",
   ],
 )
@@ -85,9 +76,8 @@ cc_test(
   srcs = ["poller_test.cc"],
   deps = [
     ":event",
-    "//base:cleanup",
+    "//base",
     "//base:result_testing",
-    "//base:util",
     "//external:gtest",
   ],
 )
@@ -97,7 +87,7 @@ cc_test(
   srcs = ["task_test.cc"],
   deps = [
     ":event",
-    "//base:logging",
+    "//base",
     "//base:result_testing",
     "//external:gtest",
   ],
