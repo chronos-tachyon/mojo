@@ -14,7 +14,7 @@
 
 namespace base {
 
-// Stopwatch is a class for measuring Durations on a Clock.
+// Stopwatch is a class for measuring Durations on a MonotonicClock.
 //
 // Example usage:
 //
@@ -50,9 +50,10 @@ class Stopwatch {
     Stopwatch* ptr_;
   };
 
-  // Stopwatches are constructed from Clocks.
+  // Stopwatches are constructed from MonotonicClocks.
   // The default constructor uses the system_monotonic_clock().
-  Stopwatch(Clock c) noexcept : clock_(std::move(c)), running_(false) {}
+  Stopwatch(MonotonicClock c) noexcept : clock_(std::move(c)),
+                                         running_(false) {}
   Stopwatch() : Stopwatch(system_monotonic_clock()) {}
 
   // Stopwatches are neither copyable nor moveable.
@@ -89,9 +90,9 @@ class Stopwatch {
   }
 
  private:
-  Clock clock_;
-  Time start_;
-  Time stop_;
+  MonotonicClock clock_;
+  MonotonicTime start_;
+  MonotonicTime stop_;
   Duration cumulative_;
   bool running_;
 };

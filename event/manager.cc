@@ -993,7 +993,7 @@ void Timer::assert_valid() const {
   if (!valid()) throw std::logic_error("event::Timer is empty");
 }
 
-base::Result Timer::set_at(base::Time at) {
+base::Result Timer::set_at(base::MonotonicTime at) {
   assert_valid();
   base::Duration delay = at.since_epoch();
   if (delay.is_zero() || delay.is_neg())
@@ -1018,7 +1018,7 @@ base::Result Timer::set_periodic(base::Duration period) {
   return ptr_->timer_arm(t_, period, period, false);
 }
 
-base::Result Timer::set_periodic_at(base::Duration period, base::Time at) {
+base::Result Timer::set_periodic_at(base::Duration period, base::MonotonicTime at) {
   assert_valid();
   base::Duration delay = at.since_epoch();
   if (period.is_zero() || period.is_neg())
@@ -1146,7 +1146,7 @@ base::Result Manager::generic(Generic* out,
   return result;
 }
 
-base::Result Manager::set_deadline(Task* task, base::Time at) {
+base::Result Manager::set_deadline(Task* task, base::MonotonicTime at) {
   auto* t = new Timer;
   auto closure0 = [t] {
     delete t;

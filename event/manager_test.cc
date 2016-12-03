@@ -288,7 +288,7 @@ static void TestManagerImplementation_TaskTimeouts(event::Manager m) {
     return base::Result();
   };
 
-  base::Time at = base::monotonic_now() + base::milliseconds(3);
+  base::MonotonicTime at = base::monotonic_now() + base::milliseconds(3);
   EXPECT_OK(m.set_deadline(&task, at));
 
   EXPECT_TRUE(task.start());

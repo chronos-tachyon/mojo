@@ -5,15 +5,21 @@
 
 #include "base/stopwatch.h"
 
-struct FakeClock : public base::ClockImpl {
-  base::Time t;
+struct FakeClock : public base::MonotonicClockImpl {
+  base::MonotonicTime t;
 
-  base::Time now() const override { return t; }
+  base::MonotonicTime now() const override { return t; }
+  base::MonotonicTime convert(base::Time t) const override {
+    throw std::logic_error("not implemented");
+  }
+  base::Time convert(base::MonotonicTime t) const override {
+    throw std::logic_error("not implemented");
+  }
 };
 
 TEST(Stopwatch, EndToEnd) {
   auto fc = std::make_shared<FakeClock>();
-  base::Clock c(fc);
+  base::MonotonicClock c(fc);
 
   EXPECT_EQ(fc->t, c.now());
   fc->t += base::seconds(1);

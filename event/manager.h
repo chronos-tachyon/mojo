@@ -9,6 +9,7 @@
 #include <memory>
 #include <vector>
 
+#include "base/clock.h"
 #include "base/duration.h"
 #include "base/result.h"
 #include "base/time.h"
@@ -173,8 +174,11 @@ class Timer {
   }
 
   // Arms the timer as a one-shot timer for the given absolute time.
-  // The Time is specified in terms of the |base::system_monotonic_clock()|.
-  base::Result set_at(base::Time at);
+  // The time is specified in terms of the |base::system_monotonic_clock()|.
+  base::Result set_at(base::MonotonicTime at);
+  base::Result set_at(base::Time at) {
+    return set_at(base::system_monotonic_clock().convert(at));
+  }
 
   // Arms the timer as a one-shot timer for the given time (relative to now).
   base::Result set_delay(base::Duration delay);
@@ -184,8 +188,11 @@ class Timer {
 
   // Arms the timer as a periodic timer with the given period.
   // The first event will arrive at the given absolute time.
-  // The Time is specified in terms of the |base::system_monotonic_clock()|.
-  base::Result set_periodic_at(base::Duration period, base::Time at);
+  // The time is specified in terms of the |base::system_monotonic_clock()|.
+  base::Result set_periodic_at(base::Duration period, base::MonotonicTime at);
+  base::Result set_periodic_at(base::Duration period, base::Time at) {
+    return set_periodic_at(period, base::system_monotonic_clock().convert(at));
+  }
 
   // Arms the timer as a periodic timer with the given period.
   // The first event will arrive at the given time (relative to now).
@@ -416,7 +423,10 @@ class Manager {
   base::Result generic(Generic* out, std::shared_ptr<Handler> handler) const;
 
   // Arranges for |task->expire()| to be called at time |at|.
-  base::Result set_deadline(Task* task, base::Time at);
+  base::Result set_deadline(Task* task, base::MonotonicTime at);
+  base::Result set_deadline(Task* task, base::Time at) {
+    return set_deadline(task, base::system_monotonic_clock().convert(at));
+  }
 
   // Arranges for |task->expire()| to be called after |delay|.
   base::Result set_timeout(Task* task, base::Duration delay);
@@ -465,9 +475,7 @@ inline void wait_all(std::vector<Manager> mv, std::vector<Task*> tv) {
 }
 
 // Blocks until the given Task has finished.
-inline void wait(Manager m, Task* task) {
-  wait_n({m}, {task}, 1);
-}
+inline void wait(Manager m, Task* task) { wait_n({m}, {task}, 1); }
 
 inline Manager& Manager::or_system_manager() {
   if (ptr_)

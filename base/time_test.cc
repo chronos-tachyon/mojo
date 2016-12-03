@@ -10,3 +10,9 @@ TEST(Time, AsString) {
   base::Time t = epoch + base::seconds(9000) + base::nanoseconds(1);
   EXPECT_EQ("Time(Duration(false, 9000, 1))", t.as_string());
 }
+
+TEST(MonotonicTime, AsString) {
+  base::MonotonicTime epoch;
+  base::MonotonicTime t = epoch + base::seconds(9000) + base::nanoseconds(1);
+  EXPECT_EQ("MonotonicTime(Duration(false, 9000, 1))", t.as_string());
+}

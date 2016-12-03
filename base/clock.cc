@@ -19,39 +19,91 @@ void Clock::assert_valid() const {
   if (!ptr_) throw std::logic_error("base::Clock is empty");
 }
 
-class SystemClock : public ClockImpl {
+void MonotonicClock::assert_valid() const {
+  if (!ptr_) throw std::logic_error("base::MonotonicClock is empty");
+}
+
+class SystemWallClock : public ClockImpl {
  public:
-  explicit SystemClock(clockid_t id) noexcept : id_(id) {}
-
-  Time now() const override;
-
- private:
-  clockid_t id_;
+  SystemWallClock() noexcept = default;
+  Time now() const override {
+    struct timespec ts;
+    ::bzero(&ts, sizeof(ts));
+    int rc = clock_gettime(CLOCK_REALTIME, &ts);
+    if (rc != 0) {
+      int err_no = errno;
+      throw std::system_error(err_no, std::system_category(),
+                              "clock_gettime(2)");
+    }
+    return Time::from_epoch(Duration::raw(false, ts.tv_sec, ts.tv_nsec));
+  }
 };
 
-Time SystemClock::now() const {
-  struct timespec ts;
-  ::bzero(&ts, sizeof(ts));
-  int rc = clock_gettime(id_, &ts);
-  if (rc != 0) {
-    int err_no = errno;
-    throw std::system_error(err_no, std::system_category(), "clock_gettime(2)");
+static Duration compute_wall_minus_mono() {
+  struct timespec ts0, ts1, ts2;
+  ::bzero(&ts0, sizeof(ts0));
+  ::bzero(&ts1, sizeof(ts1));
+  ::bzero(&ts2, sizeof(ts2));
+  clock_gettime(CLOCK_MONOTONIC, &ts0);
+  clock_gettime(CLOCK_REALTIME, &ts1);
+  clock_gettime(CLOCK_MONOTONIC, &ts2);
+
+  ts2.tv_sec -= ts0.tv_sec;
+  while (ts2.tv_nsec < ts0.tv_nsec) {
+    --ts2.tv_sec;
+    ts2.tv_nsec += internal::NS_PER_S;
   }
-  return Time::from_epoch(Duration::raw(false, ts.tv_sec, ts.tv_nsec));
+  ts2.tv_nsec -= ts0.tv_nsec;
+  uint64_t ns =
+      uint64_t(ts2.tv_sec) * internal::NS_PER_S + uint64_t(ts2.tv_nsec);
+  ns /= 2;
+
+  Duration mt =
+      Duration::raw(false, ts0.tv_sec, ts0.tv_nsec) + base::nanoseconds(ns);
+  Duration wt = Duration::raw(false, ts1.tv_sec, ts1.tv_nsec);
+  return wt - mt;
 }
+
+static Duration wall_minus_mono() {
+  static Duration d = compute_wall_minus_mono();
+  return d;
+}
+
+class SystemMonotonicClock : public MonotonicClockImpl {
+ public:
+  SystemMonotonicClock() noexcept = default;
+  MonotonicTime now() const override {
+    struct timespec ts;
+    ::bzero(&ts, sizeof(ts));
+    int rc = clock_gettime(CLOCK_MONOTONIC, &ts);
+    if (rc != 0) {
+      int err_no = errno;
+      throw std::system_error(err_no, std::system_category(),
+                              "clock_gettime(2)");
+    }
+    return MonotonicTime::from_epoch(
+        Duration::raw(false, ts.tv_sec, ts.tv_nsec));
+  }
+  MonotonicTime convert(Time t) const override {
+    return MonotonicTime::from_epoch(t.since_epoch() - wall_minus_mono());
+  }
+  Time convert(MonotonicTime t) const override {
+    return Time::from_epoch(t.since_epoch() + wall_minus_mono());
+  }
+};
 
 static std::mutex g_sysclk_mu;
 static Clock* g_sysclk_wall = nullptr;
-static Clock* g_sysclk_mono = nullptr;
+static MonotonicClock* g_sysclk_mono = nullptr;
 
 static void initialize_clocks() {
   if (g_sysclk_wall == nullptr) g_sysclk_wall = new Clock;
-  if (g_sysclk_mono == nullptr) g_sysclk_mono = new Clock;
   if (!*g_sysclk_wall) {
-    *g_sysclk_wall = Clock(std::make_shared<SystemClock>(CLOCK_REALTIME));
+    *g_sysclk_wall = Clock(std::make_shared<SystemWallClock>());
   }
+  if (g_sysclk_mono == nullptr) g_sysclk_mono = new MonotonicClock;
   if (!*g_sysclk_mono) {
-    *g_sysclk_mono = Clock(std::make_shared<SystemClock>(CLOCK_MONOTONIC));
+    *g_sysclk_mono = MonotonicClock(std::make_shared<SystemMonotonicClock>());
   }
 }
 
@@ -61,7 +113,7 @@ Clock system_wallclock() {
   return *g_sysclk_wall;
 }
 
-Clock system_monotonic_clock() {
+MonotonicClock system_monotonic_clock() {
   std::unique_lock<std::mutex> lock(g_sysclk_mu);
   initialize_clocks();
   return *g_sysclk_mono;
@@ -73,7 +125,7 @@ void set_system_wallclock(Clock clock) {
   *g_sysclk_wall = std::move(clock);
 }
 
-void set_system_monotonic_clock(Clock clock) {
+void set_system_monotonic_clock(MonotonicClock clock) {
   std::unique_lock<std::mutex> lock(g_sysclk_mu);
   initialize_clocks();
   *g_sysclk_mono = std::move(clock);

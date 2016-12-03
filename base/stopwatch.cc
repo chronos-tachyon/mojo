@@ -10,7 +10,7 @@
 namespace base {
 
 std::pair<Duration, Duration> Stopwatch::durations() const {
-  Time end = stop_;
+  MonotonicTime end = stop_;
   if (running_)
     end = clock_.now();
   Duration d = end - start_;
@@ -19,7 +19,7 @@ std::pair<Duration, Duration> Stopwatch::durations() const {
 
 void Stopwatch::start() {
   assert_stopped();
-  Time now = clock_.now();
+  MonotonicTime now = clock_.now();
   cumulative_ += (stop_ - start_);
   start_ = now;
   running_ = true;
@@ -32,8 +32,8 @@ void Stopwatch::stop() {
 }
 
 void Stopwatch::reset() {
-  start_ = Time();
-  stop_ = Time();
+  start_ = MonotonicTime();
+  stop_ = MonotonicTime();
   cumulative_ = Duration();
   running_ = false;
 }
