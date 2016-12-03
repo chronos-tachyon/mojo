@@ -18,6 +18,7 @@
 
 #include "base/cleanup.h"
 #include "base/logging.h"
+#include "base/util.h"
 
 namespace {
 
@@ -25,13 +26,9 @@ static std::size_t num_cores() {
   return 4;  // TODO: actually look up the core count
 }
 
-static std::unique_lock<std::mutex> acquire_lock(std::mutex& mu) {
-  return std::unique_lock<std::mutex>(mu);
-}
-
 static void log_exception(std::exception_ptr eptr) {
   static std::mutex mu;
-  auto lock = acquire_lock(mu);
+  auto lock = base::acquire_lock(mu);
   try {
     std::rethrow_exception(eptr);
   } catch (const std::system_error& e) {
@@ -129,12 +126,12 @@ class InlineDispatcher : public Dispatcher {
   }
 
   void dispatch(Task* task, std::unique_ptr<Callback> callback) override {
-    auto lock = acquire_lock(mu_);
+    auto lock = base::acquire_lock(mu_);
     invoke(lock, busy_, done_, caught_, Work(task, std::move(callback)));
   }
 
   DispatcherStats stats() const override {
-    auto lock = acquire_lock(mu_);
+    auto lock = base::acquire_lock(mu_);
     DispatcherStats tmp;
     tmp.active_count = busy_;
     tmp.completed_count = done_;
@@ -166,12 +163,12 @@ class AsyncDispatcher : public Dispatcher {
   }
 
   void dispatch(Task* task, std::unique_ptr<Callback> callback) override {
-    auto lock = acquire_lock(mu_);
+    auto lock = base::acquire_lock(mu_);
     work_.emplace(task, std::move(callback));
   }
 
   DispatcherStats stats() const override {
-    auto lock = acquire_lock(mu_);
+    auto lock = base::acquire_lock(mu_);
     DispatcherStats tmp;
     tmp.pending_count = work_.size();
     tmp.active_count = busy_;
@@ -185,7 +182,7 @@ class AsyncDispatcher : public Dispatcher {
   }
 
   base::Result donate(bool forever) override {
-    auto lock = acquire_lock(mu_);
+    auto lock = base::acquire_lock(mu_);
     Work item;
     while (!work_.empty()) {
       item = std::move(work_.front());
@@ -220,7 +217,7 @@ class ThreadPoolDispatcher : public Dispatcher {
         caught_(0),
         corked_(false) {
     if (min > max) throw std::logic_error("min > max");
-    auto lock = acquire_lock(mu_);
+    auto lock = base::acquire_lock(mu_);
     ensure();
     while (current_ < min_) curr_cv_.wait(lock);
   }
@@ -232,7 +229,7 @@ class ThreadPoolDispatcher : public Dispatcher {
   }
 
   void dispatch(Task* task, std::unique_ptr<Callback> callback) override {
-    auto lock = acquire_lock(mu_);
+    auto lock = base::acquire_lock(mu_);
     work_.emplace(task, std::move(callback));
     if (corked_) return;
     std::size_t n = work_.size();
@@ -247,7 +244,7 @@ class ThreadPoolDispatcher : public Dispatcher {
   }
 
   DispatcherStats stats() const override {
-    auto lock = acquire_lock(mu_);
+    auto lock = base::acquire_lock(mu_);
     DispatcherStats tmp;
     tmp.min_workers = min_;
     tmp.max_workers = max_;
@@ -262,13 +259,13 @@ class ThreadPoolDispatcher : public Dispatcher {
   }
 
   void shutdown() override {
-    auto lock = acquire_lock(mu_);
+    auto lock = base::acquire_lock(mu_);
     min_ = max_ = desired_ = 0;
     while (current_ > desired_) curr_cv_.wait(lock);
   }
 
   base::Result adjust(const DispatcherOptions& opts) override {
-    auto lock = acquire_lock(mu_);
+    auto lock = base::acquire_lock(mu_);
     std::size_t min, max;
     bool has_min, has_max;
     std::tie(has_min, min) = opts.min_workers();
@@ -290,7 +287,7 @@ class ThreadPoolDispatcher : public Dispatcher {
   }
 
   base::Result cork() override {
-    auto lock = acquire_lock(mu_);
+    auto lock = base::acquire_lock(mu_);
     if (corked_)
       return base::Result::failed_precondition(
           "event::Dispatcher is already corked");
@@ -299,7 +296,7 @@ class ThreadPoolDispatcher : public Dispatcher {
   }
 
   base::Result uncork() override {
-    auto lock = acquire_lock(mu_);
+    auto lock = base::acquire_lock(mu_);
     if (!corked_)
       return base::Result::failed_precondition(
           "event::Dispatcher is not corked");
@@ -324,7 +321,7 @@ class ThreadPoolDispatcher : public Dispatcher {
 
     Work item;
     MS ms(kInitialTimeout);
-    auto lock = acquire_lock(mu_);
+    auto lock = base::acquire_lock(mu_);
     ++current_;
     curr_cv_.notify_all();
     auto cleanup = base::cleanup([this] {
@@ -433,14 +430,14 @@ static std::shared_ptr<Dispatcher>* g_sys_i = nullptr;
 static std::shared_ptr<Dispatcher>* g_sys_d = nullptr;
 
 std::shared_ptr<Dispatcher> system_inline_dispatcher() {
-  auto lock = acquire_lock(g_sys_mu);
+  auto lock = base::acquire_lock(g_sys_mu);
   if (g_sys_i == nullptr) g_sys_i = new std::shared_ptr<Dispatcher>;
   if (!*g_sys_i) *g_sys_i = std::make_shared<InlineDispatcher>();
   return *g_sys_i;
 }
 
 std::shared_ptr<Dispatcher> system_dispatcher() {
-  auto lock = acquire_lock(g_sys_mu);
+  auto lock = base::acquire_lock(g_sys_mu);
   if (g_sys_d == nullptr) g_sys_d = new std::shared_ptr<Dispatcher>;
   if (!*g_sys_d) 
     *g_sys_d = std::make_shared<ThreadPoolDispatcher>(nullptr, 1, num_cores());
@@ -448,7 +445,7 @@ std::shared_ptr<Dispatcher> system_dispatcher() {
 }
 
 void set_system_dispatcher(std::shared_ptr<Dispatcher> ptr) {
-  auto lock = acquire_lock(g_sys_mu);
+  auto lock = base::acquire_lock(g_sys_mu);
   if (g_sys_d == nullptr) g_sys_d = new std::shared_ptr<Dispatcher>;
   g_sys_d->swap(ptr);
 }

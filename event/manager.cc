@@ -19,14 +19,12 @@
 #include <vector>
 
 #include "base/cleanup.h"
+#include "base/util.h"
 
-using Lock = std::unique_lock<std::mutex>;
 using EventVec = std::vector<std::pair<int, event::Set>>;
 using CallbackVec = std::vector<std::unique_ptr<event::Callback>>;
 
 namespace {
-
-static Lock acquire_lock(std::mutex& mu) { return Lock(mu); }
 
 template <typename T>
 static void vec_erase_all(std::vector<T>& vec, const T& item) noexcept {
@@ -167,7 +165,7 @@ static void populate_data_from_siginfo(event::Data* out, const siginfo_t& si) {
 
 // This thread services the read end of the signal handler pipe.
 static void signal_thread_body() {
-  Lock lock(g_sig_mu, std::defer_lock);
+  base::Lock lock(g_sig_mu, std::defer_lock);
   std::vector<int> vec;
   siginfo_t si;
   base::Result result;
@@ -198,7 +196,7 @@ static void signal_thread_body() {
 //
 // Bootstraps the signal handler thread iff it has not yet been set up.
 static base::Result sig_tee_add(int fd, int signo) {
-  Lock lock(g_sig_mu);
+  auto lock = base::acquire_lock(g_sig_mu);
 
   // Bootstrap the signal handler thread, if needed.
   if (!g_sig_tee) {
@@ -232,7 +230,7 @@ static base::Result sig_tee_add(int fd, int signo) {
 
 // Asks that the signal handler thread stop sending |signo| signals to |fd|.
 static base::Result sig_tee_remove(int fd, int signo) noexcept {
-  Lock lock(g_sig_mu);
+  auto lock = base::acquire_lock(g_sig_mu);
 
   if (!g_sig_tee) return base::Result::not_found();
 
@@ -260,7 +258,7 @@ static base::Result sig_tee_remove(int fd, int signo) noexcept {
 
 // Asks that the signal handler thread stop sending ANY signals to |fd|.
 static void sig_tee_remove_all(int fd) noexcept {
-  Lock lock(g_sig_mu);
+  auto lock = base::acquire_lock(g_sig_mu);
 
   if (!g_sig_tee) return;
 
@@ -350,11 +348,9 @@ class ManagerImpl {
     Record() noexcept : Record(Type::undefined, -1, Set(), nullptr) {}
   };
 
-  Lock acquire_lock() const { return Lock(mu_); }
-
-  base::Result donate_as_poller(Lock lock, bool forever);
-  base::Result donate_as_mixed(Lock lock, bool forever);
-  base::Result donate_as_worker(Lock lock, bool forever);
+  base::Result donate_as_poller(base::Lock lock, bool forever);
+  base::Result donate_as_mixed(base::Lock lock, bool forever);
+  base::Result donate_as_worker(base::Lock lock, bool forever);
 
   void handle_event(CallbackVec* cbvec, int fd, Set set);
   void handle_pipe_event(CallbackVec* cbvec);
@@ -387,7 +383,7 @@ ManagerImpl::ManagerImpl(std::unique_ptr<Poller> p,
       current_(0),
       pipe_(pipe),
       running_(true) {
-  auto lock = acquire_lock();
+  auto lock = base::acquire_lock(mu_);
   auto closure = [this] { donate(true).ignore_ok(); };
   for (std::size_t i = 0; i < min_; ++i) {
     std::thread(closure).detach();
@@ -401,7 +397,7 @@ base::Result ManagerImpl::fd_add(base::token_t* out, int fd, Set set,
                                  std::shared_ptr<Handler> handler) {
   *out = base::token_t();
 
-  auto lock = acquire_lock();
+  auto lock = base::acquire_lock(mu_);
   base::token_t t = base::next_token();
 
   records_[t] = Record(Type::fd, fd, set, std::move(handler));
@@ -448,7 +444,7 @@ base::Result ManagerImpl::fd_add(base::token_t* out, int fd, Set set,
 base::Result ManagerImpl::fd_get(Set* out, int fd, base::token_t t) {
   out->clear();
 
-  auto lock = acquire_lock();
+  auto lock = base::acquire_lock(mu_);
   auto it = records_.find(t);
   if (it == records_.end()) return base::Result::not_found();
   if (it->second.type != Type::fd) return base::Result::wrong_type();
@@ -458,7 +454,7 @@ base::Result ManagerImpl::fd_get(Set* out, int fd, base::token_t t) {
 }
 
 base::Result ManagerImpl::fd_modify(int fd, base::token_t t, Set set) {
-  auto lock = acquire_lock();
+  auto lock = base::acquire_lock(mu_);
 
   auto it = records_.find(t);
   if (it == records_.end()) return base::Result::not_found();
@@ -492,7 +488,7 @@ base::Result ManagerImpl::fd_modify(int fd, base::token_t t, Set set) {
 }
 
 base::Result ManagerImpl::fd_remove(int fd, base::token_t t) {
-  auto lock = acquire_lock();
+  auto lock = base::acquire_lock(mu_);
 
   auto it = records_.find(t);
   if (it == records_.end()) return base::Result::not_found();
@@ -536,7 +532,7 @@ base::Result ManagerImpl::signal_add(base::token_t* out, int signo,
   *out = base::token_t();
   assert_valid_signo(signo);
 
-  auto lock = acquire_lock();
+  auto lock = base::acquire_lock(mu_);
   base::token_t t = base::next_token();
 
   records_[t] = Record(Type::signal, signo, Set(), std::move(handler));
@@ -571,7 +567,7 @@ base::Result ManagerImpl::signal_add(base::token_t* out, int signo,
 base::Result ManagerImpl::signal_remove(int signo, base::token_t t) {
   assert_valid_signo(signo);
 
-  auto lock = acquire_lock();
+  auto lock = base::acquire_lock(mu_);
   auto it = records_.find(t);
   if (it == records_.end()) return base::Result::not_found();
   if (it->second.type != Type::signal) return base::Result::wrong_type();
@@ -604,7 +600,7 @@ base::Result ManagerImpl::signal_remove(int signo, base::token_t t) {
 base::Result ManagerImpl::timer_add(base::token_t* out,
                                     std::shared_ptr<Handler> handler) {
   *out = base::token_t();
-  auto lock = acquire_lock();
+  auto lock = base::acquire_lock(mu_);
   base::token_t t = base::next_token();
 
   int fd = ::timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC | TFD_NONBLOCK);
@@ -632,7 +628,7 @@ base::Result ManagerImpl::timer_add(base::token_t* out,
 
 base::Result ManagerImpl::timer_arm(base::token_t t, base::Duration delay,
                                     base::Duration period, bool delay_abs) {
-  auto lock = acquire_lock();
+  auto lock = base::acquire_lock(mu_);
   auto it = records_.find(t);
   if (it == records_.end()) return base::Result::not_found();
   if (it->second.type != Type::timer) return base::Result::wrong_type();
@@ -657,7 +653,7 @@ base::Result ManagerImpl::timer_arm(base::token_t t, base::Duration delay,
 }
 
 base::Result ManagerImpl::timer_remove(base::token_t t) {
-  auto lock = acquire_lock();
+  auto lock = base::acquire_lock(mu_);
   auto it = records_.find(t);
   if (it == records_.end()) return base::Result::not_found();
   if (it->second.type != Type::timer) return base::Result::wrong_type();
@@ -677,7 +673,7 @@ base::Result ManagerImpl::generic_add(base::token_t* out,
                                       std::shared_ptr<Handler> handler) {
   *out = base::token_t();
 
-  auto lock = acquire_lock();
+  auto lock = base::acquire_lock(mu_);
   base::token_t t = base::next_token();
   records_[t] = Record(Type::generic, -1, Set(), std::move(handler));
   *out = t;
@@ -689,7 +685,7 @@ base::Result ManagerImpl::generic_fire(base::token_t t, int value) {
   data.token = t;
   data.int_value = value;
   data.events = Set::event_bit();
-  auto lock = acquire_lock();
+  auto lock = base::acquire_lock(mu_);
   auto it = records_.find(t);
   if (it == records_.end()) return base::Result::not_found();
   if (it->second.type != Type::generic) return base::Result::wrong_type();
@@ -697,7 +693,7 @@ base::Result ManagerImpl::generic_fire(base::token_t t, int value) {
 }
 
 base::Result ManagerImpl::generic_remove(base::token_t t) {
-  auto lock = acquire_lock();
+  auto lock = base::acquire_lock(mu_);
   auto it = records_.find(t);
   if (it == records_.end()) return base::Result::not_found();
   if (it->second.type != Type::generic) return base::Result::wrong_type();
@@ -706,7 +702,7 @@ base::Result ManagerImpl::generic_remove(base::token_t t) {
 }
 
 base::Result ManagerImpl::donate(bool forever) {
-  auto lock = acquire_lock();
+  auto lock = base::acquire_lock(mu_);
   if (current_ >= max_) {
     return donate_as_worker(std::move(lock), forever);
   } else if (current_ >= min_) {
@@ -716,7 +712,7 @@ base::Result ManagerImpl::donate(bool forever) {
   }
 }
 
-base::Result ManagerImpl::donate_as_poller(Lock lock, bool forever) {
+base::Result ManagerImpl::donate_as_poller(base::Lock lock, bool forever) {
   ++current_;
   curr_cv_.notify_all();
   auto cleanup = base::cleanup([this] {
@@ -753,7 +749,7 @@ base::Result ManagerImpl::donate_as_poller(Lock lock, bool forever) {
   return base::Result();
 }
 
-base::Result ManagerImpl::donate_as_mixed(Lock lock, bool forever) {
+base::Result ManagerImpl::donate_as_mixed(base::Lock lock, bool forever) {
   auto donate_ok = [](const base::Result& result) {
     return result.ok() || result.code() == base::Result::Code::NOT_IMPLEMENTED;
   };
@@ -800,7 +796,7 @@ base::Result ManagerImpl::donate_as_mixed(Lock lock, bool forever) {
   return base::Result();
 }
 
-base::Result ManagerImpl::donate_as_worker(Lock lock, bool forever) {
+base::Result ManagerImpl::donate_as_worker(base::Lock lock, bool forever) {
   lock.unlock();
   return d_->donate(forever);
 }
@@ -902,7 +898,7 @@ void ManagerImpl::handle_fd_event(CallbackVec* cbvec, int fd, Set set,
 }
 
 base::Result ManagerImpl::shutdown() noexcept {
-  auto lock = acquire_lock();
+  auto lock = base::acquire_lock(mu_);
 
   if (!running_) return base::Result::failed_precondition("already stopped");
 
@@ -1205,7 +1201,7 @@ void wait_n(std::vector<Manager> mv, std::vector<Task*> tv, std::size_t n) {
         "completions than there are provided tasks");
 
   auto closure = [](std::shared_ptr<WaitData> data) {
-    auto lock = acquire_lock(data->mu);
+    auto lock = base::acquire_lock(data->mu);
     ++data->done;
     data->cv.notify_all();
     return base::Result();
@@ -1224,7 +1220,7 @@ void wait_n(std::vector<Manager> mv, std::vector<Task*> tv, std::size_t n) {
     }
   }
 
-  auto lock = acquire_lock(data->mu);
+  auto lock = base::acquire_lock(data->mu);
   while (data->done < n) {
     // Inline? Maybe it's blocked on I/O. Try donating.
     // Async? Just donate.
@@ -1303,7 +1299,7 @@ static std::mutex g_sysmgr_mu;
 static Manager* g_sysmgr_ptr = nullptr;
 
 Manager& system_manager() {
-  auto lock = acquire_lock(g_sysmgr_mu);
+  auto lock = base::acquire_lock(g_sysmgr_mu);
   if (g_sysmgr_ptr == nullptr) {
     ManagerOptions o;
     std::unique_ptr<Manager> m(new Manager);
@@ -1314,7 +1310,7 @@ Manager& system_manager() {
 }
 
 void set_system_manager(Manager m) {
-  auto lock = acquire_lock(g_sysmgr_mu);
+  auto lock = base::acquire_lock(g_sysmgr_mu);
   if (g_sysmgr_ptr == nullptr) {
     g_sysmgr_ptr = new Manager(std::move(m));
   } else {

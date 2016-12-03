@@ -30,6 +30,7 @@ cc_library(
     "//base:result",
     "//base:time",
     "//base:token",
+    "//base:util",
   ],
   visibility = ["//visibility:public"],
 )
@@ -49,6 +50,7 @@ cc_test(
   srcs = ["dispatcher_test.cc"],
   deps = [
     ":event",
+    "//base:logging",
     "//base:result_testing",
     "//external:gtest",
   ],
@@ -72,6 +74,8 @@ cc_test(
     "//base:cleanup",
     "//base:logging",
     "//base:result_testing",
+    "//base:time",
+    "//base:util",
     "//external:gtest",
   ],
 )
@@ -81,7 +85,9 @@ cc_test(
   srcs = ["poller_test.cc"],
   deps = [
     ":event",
+    "//base:cleanup",
     "//base:result_testing",
+    "//base:util",
     "//external:gtest",
   ],
 )
@@ -91,6 +97,7 @@ cc_test(
   srcs = ["task_test.cc"],
   deps = [
     ":event",
+    "//base:logging",
     "//base:result_testing",
     "//external:gtest",
   ],

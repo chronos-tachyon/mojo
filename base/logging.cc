@@ -3,6 +3,7 @@
 
 #include "base/debug.h"
 #include "base/logging.h"
+#include "base/util.h"
 
 #include <sys/syscall.h>
 #include <sys/time.h>
@@ -84,10 +85,6 @@ static Vec* g_vec = nullptr;
 static base::GetTidFunc g_gtid = nullptr;
 static base::GetTimeOfDayFunc g_gtod = nullptr;
 
-static std::unique_lock<std::mutex> acquire_lock() {
-  return std::unique_lock<std::mutex>(g_mu);
-}
-
 static const Info* map_find(std::unique_lock<std::mutex>& lock,
                             const char* file, unsigned int line) noexcept {
   if (g_map == nullptr) return nullptr;
@@ -112,7 +109,7 @@ static Vec& vec_get(std::unique_lock<std::mutex>& lock) {
 
 static bool want(const char* file, unsigned int line, unsigned int n,
                  signed char level) {
-  auto lock = acquire_lock();
+  auto lock = base::acquire_lock(g_mu);
   if (level >= LOG_LEVEL_DFATAL) return true;
   if (level < g_min) {
     const Info* info = map_find(lock, file, line);
@@ -153,7 +150,7 @@ Logger::Logger(const char* file, unsigned int line, unsigned int every_n,
 
 Logger::~Logger() noexcept(false) {
   if (ss_) {
-    auto lock = acquire_lock();
+    auto lock = acquire_lock(g_mu);
 
     char ch;
     if (level_ >= LOG_LEVEL_DFATAL) {
@@ -219,19 +216,19 @@ Logger::~Logger() noexcept(false) {
 }
 
 void log_set_gettid(GetTidFunc func) {
-  auto lock = acquire_lock();
+  auto lock = acquire_lock(g_mu);
   g_gtid = func;
 }
 
 void log_set_gettimeofday(GetTimeOfDayFunc func) {
-  auto lock = acquire_lock();
+  auto lock = acquire_lock(g_mu);
   g_gtod = func;
 }
 
 void log_stderr_set_level(signed char level) { log_fd_set_level(2, level); }
 
 void log_fd_set_level(int fd, signed char level) {
-  auto lock = acquire_lock();
+  auto lock = acquire_lock(g_mu);
   auto& vec = vec_get(lock);
   bool found = false;
   for (auto& target : vec) {
@@ -247,7 +244,7 @@ void log_fd_set_level(int fd, signed char level) {
 }
 
 void log_fd_remove(int fd) {
-  auto lock = acquire_lock();
+  auto lock = acquire_lock(g_mu);
   auto& vec = vec_get(lock);
   auto it = vec.begin();
   while (it != vec.end()) {

@@ -62,7 +62,10 @@ cc_library(
   name = "logging",
   srcs = ["logging.cc"],
   hdrs = ["logging.h"],
-  deps = [":debug"],
+  deps = [
+    ":debug",
+    ":util",
+  ],
   visibility = ["//visibility:public"],
 )
 
@@ -173,5 +176,12 @@ cc_library(
   name = "token",
   srcs = ["token.cc"],
   hdrs = ["token.h"],
+  visibility = ["//visibility:public"],
+)
+
+cc_library(
+  name = "util",
+  srcs = ["util.cc"],
+  hdrs = ["util.h"],
   visibility = ["//visibility:public"],
 )

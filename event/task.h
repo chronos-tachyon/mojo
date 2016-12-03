@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "base/result.h"
+#include "base/util.h"
 #include "event/callback.h"
 
 namespace event {
@@ -88,7 +89,7 @@ class Task {
 
   // Returns the current state of the Task.
   State state() const noexcept {
-    auto lock = acquire_lock();
+    auto lock = base::acquire_lock(mu_);
     return state_;
   }
 
@@ -173,10 +174,6 @@ class Task {
  private:
   static base::Result incomplete_result();
   static base::Result exception_result();
-
-  std::unique_lock<std::mutex> acquire_lock() const {
-    return std::unique_lock<std::mutex>(mu_);
-  }
 
   bool cancel_impl(State next, base::Result result) noexcept;
   void finish_impl(std::unique_lock<std::mutex> lock, base::Result result,

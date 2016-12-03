@@ -19,15 +19,12 @@
 #include "base/clock.h"
 #include "base/logging.h"
 #include "base/result_testing.h"
+#include "base/util.h"
 #include "event/manager.h"
 #include "event/task.h"
 
 static constexpr char kHelloWorld[] = "Hello, world!\n";
 static constexpr std::size_t kHelloLen = sizeof(kHelloWorld) - 1;
-
-static std::unique_lock<std::mutex> acquire(std::mutex& mu) {
-  return std::unique_lock<std::mutex>(mu);
-}
 
 static void write_some_data(int fd, const void* ptr, std::size_t len) {
   int n;
@@ -113,7 +110,7 @@ static void TestManagerImplementation_Signals(event::Manager& m) {
 
   auto handler = [&task, &mu, &flags, &predicate](int bit, event::Data data) {
     VLOG(0) << "hello from handler";
-    auto lock = acquire(mu);
+    auto lock = base::acquire_lock(mu);
     flags |= bit;
     VLOG(0) << "flags = " << flags;
     bool done = predicate(flags);
@@ -141,7 +138,7 @@ static void TestManagerImplementation_Signals(event::Manager& m) {
   VLOG(0) << "task: waiting for finish";
   event::wait(m, &task);
   VLOG(0) << "task: got finish";
-  auto lock = acquire(mu);
+  auto lock = base::acquire_lock(mu);
   EXPECT_OK(task.result());
   EXPECT_EQ(7, flags);
   lock.unlock();
@@ -161,7 +158,7 @@ static void TestManagerImplementation_Timers(event::Manager& m) {
 
   auto timer_closure = [&task, &mu, &counter, &predicate](event::Data data) {
     VLOG(0) << "hello from timer handler, int_value = " << data.int_value;
-    auto lock = acquire(mu);
+    auto lock = base::acquire_lock(mu);
     counter += data.int_value;
     bool done = predicate(counter);
     lock.unlock();
@@ -173,7 +170,7 @@ static void TestManagerImplementation_Timers(event::Manager& m) {
   };
 
   ASSERT_TRUE(task.start());
-  auto lock = acquire(mu);
+  auto lock = base::acquire_lock(mu);
 
   VLOG(0) << "registering timer";
   event::Timer t;
@@ -237,7 +234,7 @@ static void TestManagerImplementation_Events(event::Manager& m) {
   VLOG(0) << "spawning thread";
   std::thread thd([&mu, &cv, &ready, &e] {
     VLOG(0) << "hello from thread";
-    auto lock = acquire(mu);
+    auto lock = base::acquire_lock(mu);
     while (!ready) cv.wait(lock);
     VLOG(0) << "got: ready = true";
     e.fire(42);
@@ -245,7 +242,7 @@ static void TestManagerImplementation_Events(event::Manager& m) {
   });
 
   VLOG(0) << "notify: ready = true";
-  auto lock = acquire(mu);
+  auto lock = base::acquire_lock(mu);
   ready = true;
   cv.notify_all();
   lock.unlock();
@@ -271,7 +268,7 @@ static void TestManagerImplementation_TaskTimeouts(event::Manager m) {
 
   auto closure = [&mu, &a, &b, &task, &t] (event::Data data) {
     if (task.is_running()) {
-      auto lock = acquire(mu);
+      auto lock = base::acquire_lock(mu);
       auto i = data.int_value;
       while (i > 0) {
         unsigned int c = a + b;

@@ -20,7 +20,7 @@ base::Result Task::exception_result() {
 }
 
 void Task::reset() {
-  auto lock = acquire_lock();
+  auto lock = base::acquire_lock(mu_);
   switch (state_) {
     case State::ready:
     case State::done:
@@ -48,21 +48,21 @@ static void assert_finished(Task::State state) {
 }
 
 base::Result Task::result() const {
-  auto lock = acquire_lock();
+  auto lock = base::acquire_lock(mu_);
   assert_finished(state_);
   if (eptr_) std::rethrow_exception(eptr_);
   return result_;
 }
 
 bool Task::result_will_throw() const noexcept {
-  auto lock = acquire_lock();
+  auto lock = base::acquire_lock(mu_);
   if (state_ < Task::State::done) return true;
   if (eptr_) return true;
   return false;
 }
 
 void Task::add_subtask(Task* subtask) {
-  auto lock = acquire_lock();
+  auto lock = base::acquire_lock(mu_);
   if (state_ > State::running) {
     lock.unlock();
     subtask->cancel();
@@ -76,7 +76,7 @@ void Task::add_subtask(Task* subtask) {
 }
 
 void Task::on_finished(std::unique_ptr<Callback> cb) {
-  auto lock = acquire_lock();
+  auto lock = base::acquire_lock(mu_);
   if (state_ >= State::done) {
     lock.unlock();
     system_inline_dispatcher()->dispatch(nullptr, std::move(cb));
@@ -94,7 +94,7 @@ bool Task::cancel() noexcept {
 }
 
 bool Task::cancel_impl(State next, base::Result result) noexcept {
-  auto lock = acquire_lock();
+  auto lock = base::acquire_lock(mu_);
   std::vector<Task*> subtasks;
   if (state_ == State::ready) {
     finish_impl(std::move(lock), std::move(result), nullptr);
@@ -112,7 +112,7 @@ bool Task::cancel_impl(State next, base::Result result) noexcept {
 }
 
 bool Task::start() {
-  auto lock = acquire_lock();
+  auto lock = base::acquire_lock(mu_);
   if (state_ == State::ready) {
     state_ = State::running;
     return true;
@@ -122,7 +122,7 @@ bool Task::start() {
 }
 
 bool Task::finish(base::Result result) {
-  auto lock = acquire_lock();
+  auto lock = base::acquire_lock(mu_);
   if (state_ >= State::done) return false;
   if (state_ >= State::running) {
     finish_impl(std::move(lock), std::move(result), nullptr);
@@ -132,7 +132,7 @@ bool Task::finish(base::Result result) {
 }
 
 bool Task::finish_cancel() {
-  auto lock = acquire_lock();
+  auto lock = base::acquire_lock(mu_);
   if (state_ >= State::done) return false;
   if (state_ >= State::running) {
     auto r = base::Result::cancelled();
@@ -144,7 +144,7 @@ bool Task::finish_cancel() {
 }
 
 bool Task::finish_exception(std::exception_ptr eptr) {
-  auto lock = acquire_lock();
+  auto lock = base::acquire_lock(mu_);
   if (state_ >= State::done) return false;
   if (state_ >= State::running) {
     finish_impl(std::move(lock), exception_result(), eptr);

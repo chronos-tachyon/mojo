@@ -15,11 +15,8 @@
 
 #include "base/cleanup.h"
 #include "base/result_testing.h"
+#include "base/util.h"
 #include "event/poller.h"
-
-static std::unique_lock<std::mutex> acquire(std::mutex& mu) {
-  return std::unique_lock<std::mutex>(mu);
-}
 
 static void write_some_data(int fd, uint32_t* counter) {
   static constexpr std::size_t len = sizeof(std::size_t);
@@ -94,7 +91,7 @@ static void TestPollerImplementation(std::unique_ptr<event::Poller> p) {
   bool done = false;
 
   std::thread t1([&mu, &cv, &ready, fd0, &x] {
-    auto lock = acquire(mu);
+    auto lock = base::acquire_lock(mu);
     while (!ready) cv.wait(lock);
     write_some_data(fd0, &x);
   });
@@ -102,13 +99,13 @@ static void TestPollerImplementation(std::unique_ptr<event::Poller> p) {
     std::vector<std::pair<int, event::Set>> vec;
     EXPECT_TRUE(p->wait(&vec, -1));
     EXPECT_EQ(1U, vec.size());
-    auto lock = acquire(mu);
+    auto lock = base::acquire_lock(mu);
     read_some_data(fd1, &y);
     done = true;
     cv.notify_all();
   });
 
-  auto lock = acquire(mu);
+  auto lock = base::acquire_lock(mu);
   ready = true;
   cv.notify_all();
   while (!done) cv.wait(lock);

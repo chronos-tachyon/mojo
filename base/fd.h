@@ -1,3 +1,7 @@
+// base/fd.h - Wrapper for file descriptors
+// Copyright © 2016 by Donald King <chronos@chronos-tachyon.net>
+// Available under the MIT License. See LICENSE for details.
+
 #ifndef BASE_FD_H
 #define BASE_FD_H
 

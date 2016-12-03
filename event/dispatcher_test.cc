@@ -57,10 +57,6 @@ static std::ostream& operator<<(std::ostream& os,
   return os;
 }
 
-static std::unique_lock<std::mutex> acquire(std::mutex& mu) {
-  return std::unique_lock<std::mutex>(mu);
-}
-
 struct Closure {
   int* counter;
 
@@ -208,7 +204,7 @@ TEST(ThreadPoolDispatcher, EndToEnd) {
 
   auto inc_callback = [&mu, &cv, &n](std::size_t i) {
     EXPECT_LT(i, 10U);
-    auto lock = acquire(mu);
+    auto lock = base::acquire_lock(mu);
     VLOG(0) << "hello from increment callback #" << i;
     ++n;
     cv.notify_all();
@@ -216,7 +212,7 @@ TEST(ThreadPoolDispatcher, EndToEnd) {
   };
 
   auto done_callback = [&mu, &cv, &n, &done] {
-    auto lock = acquire(mu);
+    auto lock = base::acquire_lock(mu);
     VLOG(0) << "hello from done callback";
     while (n < 10) cv.wait(lock);
     done = true;
@@ -234,7 +230,7 @@ TEST(ThreadPoolDispatcher, EndToEnd) {
   event::Task donetask;
   d->dispatch(&donetask, event::callback(done_callback));
 
-  auto lock = acquire(mu);
+  auto lock = base::acquire_lock(mu);
   EXPECT_EQ(0, n);
   EXPECT_FALSE(done);
   lock.unlock();
