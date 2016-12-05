@@ -8,7 +8,7 @@
 namespace base {
 
 bool debug() noexcept;
-void set_debug(bool value);
+void set_debug(bool value) noexcept;
 
 }  // namespace base
 

@@ -23,7 +23,7 @@ bool debug() noexcept {
   return g_debug;
 }
 
-void set_debug(bool value) {
+void set_debug(bool value) noexcept {
   auto lock = acquire_lock(g_mu);
   g_debug = value;
 }
