@@ -5,9 +5,27 @@
 
 #include <stdexcept>
 
-#include "base/duration.h"
+#include "base/logging.h"
 
 namespace base {
+
+void Stopwatch::Measurement::assert_valid() const {
+  if (!ptr_) {
+    LOG(FATAL) << "BUG: base::Stopwatch::Measurement is empty!";
+  }
+}
+
+void Stopwatch::assert_stopped() const {
+  if (running_) {
+    LOG(DFATAL) << "BUG: base::Stopwatch is running!";
+  }
+}
+
+void Stopwatch::assert_running() const {
+  if (!running_) {
+    LOG(DFATAL) << "BUG: base::Stopwatch is not running!";
+  }
+}
 
 std::pair<Duration, Duration> Stopwatch::durations() const {
   MonotonicTime end = stop_;

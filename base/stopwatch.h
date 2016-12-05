@@ -5,7 +5,6 @@
 #ifndef BASE_STOPWATCH_H
 #define BASE_STOPWATCH_H
 
-#include <stdexcept>
 #include <utility>
 
 #include "base/clock.h"
@@ -28,6 +27,17 @@ namespace base {
 class Stopwatch {
  public:
   // Measurement is a RAII helper class for automatically stopping a Stopwatch.
+  //
+  // Example usage:
+  //
+  //    base::Stopwatch stopwatch;
+  //    if (expensive) {
+  //      auto measurement = stopwatch.measure();
+  //      ...;  // perform expensive operation
+  //    }
+  //    auto dur = stopwatch.elapsed();
+  //    LOG(INFO) << "Operation took " << dur.microseconds() << " µs";
+  //
   class Measurement {
    public:
     Measurement(const Measurement&) = delete;
@@ -121,10 +131,6 @@ inline void Stopwatch::Measurement::swap(Measurement& other) noexcept {
   swap(ptr_, other.ptr_);
 }
 
-inline void Stopwatch::Measurement::assert_valid() const {
-  if (!ptr_) throw std::logic_error("null pointer");
-}
-
 inline void Stopwatch::Measurement::start() {
   assert_valid();
   ptr_->start();
@@ -143,14 +149,6 @@ inline void Stopwatch::Measurement::release() {
 inline void swap(Stopwatch::Measurement& a,
                  Stopwatch::Measurement& b) noexcept {
   a.swap(b);
-}
-
-inline void Stopwatch::assert_stopped() const {
-  if (running_) throw std::logic_error("base::Stopwatch is running");
-}
-
-inline void Stopwatch::assert_running() const {
-  if (!running_) throw std::logic_error("base::Stopwatch is not running");
 }
 
 }  // namespace base
