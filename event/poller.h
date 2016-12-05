@@ -10,7 +10,9 @@
 #include <memory>
 #include <vector>
 
+#include "base/fd.h"
 #include "base/result.h"
+#include "base/token.h"
 #include "event/set.h"
 
 namespace event {
@@ -41,6 +43,9 @@ class Poller {
   Poller() noexcept = default;
 
  public:
+  using Event = std::pair<base::token_t, Set>;
+  using EventVec = std::vector<Event>;
+
   virtual ~Poller() noexcept = default;
 
   // Pollers are neither copyable nor moveable.
@@ -54,15 +59,15 @@ class Poller {
 
   // Registers a file descriptor and a set of events.
   // Analogous to epoll_ctl(EPOLL_CTL_ADD).
-  virtual base::Result add(int fd, Set set) = 0;
+  virtual base::Result add(base::FD fd, base::token_t t, Set set) = 0;
 
   // Modifies the set of events associated with a file descriptor.
   // Analogous to epoll_ctl(EPOLL_CTL_MOD).
-  virtual base::Result modify(int fd, Set set) = 0;
+  virtual base::Result modify(base::FD fd, base::token_t t, Set set) = 0;
 
   // Cancels the registration of a file descriptor.
   // Analogous to epoll_ctl(EPOLL_CTL_DEL).
-  virtual base::Result remove(int fd) = 0;
+  virtual base::Result remove(base::FD fd) = 0;
 
   // Waits for events to arrive on file descriptors.
   // - If |timeout_ms < 0|, blocks indefinitely until an event comes in.
@@ -70,11 +75,10 @@ class Poller {
   // - If |timeout_ms == 0|, does not block.
   //
   // Upon return, the pending events (if any) have been appended to |out|, in
-  // the form of <file descriptor, witnessed events> pairs.
+  // the form of <token, witnessed events> pairs.
   //
   // NOTE: |out| is not cleared by this function before appending events.
-  virtual base::Result wait(std::vector<std::pair<int, Set>>* out,
-                            int timeout_ms) const = 0;
+  virtual base::Result wait(EventVec* out, int timeout_ms) const = 0;
 };
 
 // A PollerOptions holds user-available choices in the selection and
@@ -104,7 +108,7 @@ class PollerOptions {
 };
 
 // Constructs a new Poller instance.
-base::Result new_poller(std::unique_ptr<Poller>* out,
+base::Result new_poller(std::shared_ptr<Poller>* out,
                         const PollerOptions& opts);
 
 }  // namespace event

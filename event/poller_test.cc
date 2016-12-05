@@ -15,15 +15,17 @@
 
 #include "base/cleanup.h"
 #include "base/result_testing.h"
+#include "base/token.h"
 #include "base/util.h"
 #include "event/poller.h"
 
-static void write_some_data(int fd, uint32_t* counter) {
+static void write_some_data(base::FD fd, uint32_t* counter) {
   static constexpr std::size_t len = sizeof(std::size_t);
   std::size_t value = ++*counter;
+  auto pair = fd->acquire_fd();
   int n;
 redo:
-  n = ::write(fd, &value, sizeof(value));
+  n = ::write(pair.first, &value, sizeof(value));
   if (n < 0) {
     int err_no = errno;
     if (err_no == EINTR) goto redo;
@@ -32,13 +34,14 @@ redo:
   if (std::size_t(n) != len) throw std::runtime_error("partial write");
 }
 
-static void read_some_data(int fd, uint32_t* counter) {
+static void read_some_data(base::FD fd, uint32_t* counter) {
   static constexpr std::size_t len = sizeof(std::size_t);
   std::size_t value;
+  auto pair = fd->acquire_fd();
   int n;
 redo:
   value = 0;
-  n = ::read(fd, &value, len);
+  n = ::read(pair.first, &value, len);
   if (n < 0) {
     int err_no = errno;
     if (err_no == EINTR) goto redo;
@@ -49,36 +52,39 @@ redo:
   EXPECT_EQ(value, *counter);
 }
 
-static void TestPollerImplementation(std::unique_ptr<event::Poller> p) {
-  int fds[2] = {-1, -1};
-  ASSERT_EQ(0, ::socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC,
-                            0, fds));
-  const int fd0 = fds[0];
-  const int fd1 = fds[1];
-  auto cleanup0 = base::cleanup([fd0] { ::close(fd0); });
-  auto cleanup1 = base::cleanup([fd1] { ::close(fd1); });
+static void TestPollerImplementation(std::shared_ptr<event::Poller> p) {
+  base::SocketPair s;
+  base::Result r = base::make_socketpair(&s, AF_UNIX, SOCK_STREAM, 0);
+  ASSERT_OK(r);
 
-  EXPECT_EQ(0, ::shutdown(fd0, SHUT_RD));
-  EXPECT_EQ(0, ::shutdown(fd1, SHUT_WR));
+  {
+    auto pair = s.left->acquire_fd();
+    EXPECT_EQ(0, ::shutdown(pair.first, SHUT_RD));
+  }
+  {
+    auto pair = s.right->acquire_fd();
+    EXPECT_EQ(0, ::shutdown(pair.first, SHUT_WR));
+  }
 
-  ASSERT_OK(p->add(fd1, event::Set::readable_bit()));
+  auto t = base::next_token();
+  ASSERT_OK(p->add(s.right, t, event::Set::readable_bit()));
 
-  std::vector<std::pair<int, event::Set>> vec;
+  event::Poller::EventVec vec;
   EXPECT_OK(p->wait(&vec, 0));
   EXPECT_EQ(0U, vec.size());
 
   uint32_t x = 0, y = 0;
 
-  write_some_data(fd0, &x);
+  write_some_data(s.left, &x);
   vec.clear();
   EXPECT_TRUE(p->wait(&vec, 0));
   EXPECT_EQ(1U, vec.size());
   if (!vec.empty()) {
-    EXPECT_EQ(fd1, vec.front().first);
+    EXPECT_EQ(t, vec.front().first);
     EXPECT_EQ(event::Set::readable_bit(), vec.front().second);
   }
 
-  read_some_data(fd1, &y);
+  read_some_data(s.right, &y);
   EXPECT_TRUE(p->wait(&vec, 0));
   EXPECT_EQ(1U, vec.size());
   vec.clear();
@@ -90,17 +96,17 @@ static void TestPollerImplementation(std::unique_ptr<event::Poller> p) {
   bool ready = false;
   bool done = false;
 
-  std::thread t1([&mu, &cv, &ready, fd0, &x] {
+  std::thread t1([&mu, &cv, &ready, &s, &x] {
     auto lock = base::acquire_lock(mu);
     while (!ready) cv.wait(lock);
-    write_some_data(fd0, &x);
+    write_some_data(s.left, &x);
   });
-  std::thread t2([&mu, &cv, &done, &p, fd1, &y] {
-    std::vector<std::pair<int, event::Set>> vec;
+  std::thread t2([&mu, &cv, &done, &p, &s, &y] {
+    event::Poller::EventVec vec;
     EXPECT_TRUE(p->wait(&vec, -1));
     EXPECT_EQ(1U, vec.size());
     auto lock = base::acquire_lock(mu);
-    read_some_data(fd1, &y);
+    read_some_data(s.right, &y);
     done = true;
     cv.notify_all();
   });
@@ -117,7 +123,7 @@ static void TestPollerImplementation(std::unique_ptr<event::Poller> p) {
 
 TEST(Poller, Default) {
   event::PollerOptions o;
-  std::unique_ptr<event::Poller> p;
+  std::shared_ptr<event::Poller> p;
   ASSERT_OK(event::new_poller(&p, o));
   TestPollerImplementation(std::move(p));
 }
@@ -125,7 +131,7 @@ TEST(Poller, Default) {
 TEST(Poller, EPoll) {
   event::PollerOptions o;
   o.set_type(event::PollerType::epoll_poller);
-  std::unique_ptr<event::Poller> p;
+  std::shared_ptr<event::Poller> p;
   ASSERT_OK(event::new_poller(&p, o));
   TestPollerImplementation(std::move(p));
 }

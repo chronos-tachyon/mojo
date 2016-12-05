@@ -7,13 +7,12 @@
 
 #include <condition_variable>
 #include <cstdint>
+#include <exception>
 #include <mutex>
 
 namespace base {
 
 using Lock = std::unique_lock<std::mutex>;
-
-inline Lock acquire_lock(std::mutex& mu) { return Lock(mu); }
 
 // RWMutex is a readers-writers lock with a strong writers bias.
 // It's intended for protecting frequently-read, rarely-updated data.
@@ -28,118 +27,143 @@ class RWMutex {
   RWMutex& operator=(const RWMutex&) = delete;
   RWMutex& operator=(RWMutex&&) = delete;
 
-  void lock() {
-    auto lock = acquire_lock(mu_);
-    ++writers_;
-    while (locked_ || readers_ > 0) wcv_.wait(lock);
-    locked_ = true;
-  }
+  // Acquire/Release the mutex in exclusive writer mode.
+  void lock();
+  bool try_lock();
+  void unlock();
 
-  bool try_lock() {
-    Lock lock(mu_, std::try_to_lock);
-    if (!lock.owns_lock()) return false;
-    if (locked_ || readers_ > 0) return false;
-    ++writers_;
-    locked_ = true;
-    return true;
-  }
-
-  void unlock() {
-    auto lock = acquire_lock(mu_);
-    locked_ = false;
-    --writers_;
-    if (writers_ == 0)
-      rcv_.notify_all();
-    else
-      wcv_.notify_one();
-  }
-
-  void lock_read() {
-    auto lock = acquire_lock(mu_);
-    while (writers_ > 0) rcv_.wait(lock);
-    ++readers_;
-  }
-
-  bool try_lock_read() {
-    Lock lock(mu_, std::try_to_lock);
-    if (!lock.owns_lock()) return false;
-    if (writers_ > 0) return false;
-    ++readers_;
-  }
-
-  void unlock_read() {
-    auto lock = acquire_lock(mu_);
-    --readers_;
-    if (writers_ > 0 && readers_ == 0) wcv_.notify_one();
-  }
+  // Acquire/Release the mutex in shared reader mode.
+  void lock_read();
+  bool try_lock_read();
+  void unlock_read();
 
  private:
-  std::mutex mu_;
-  std::condition_variable wcv_;
-  std::condition_variable rcv_;
-  std::size_t readers_;  // # of read locks
-  std::size_t writers_;  // # of (active + pending) write locks
-  bool locked_;          // True iff a writer holds the lock
+  mutable std::mutex mu_;        // protect the fields below
+  std::condition_variable wcv_;  // notify waiting writers
+  std::condition_variable rcv_;  // notify waiting readers
+  std::size_t readers_;          // # of read locks
+  std::size_t writers_;          // # of (active + pending) write locks
+  bool locked_;                  // true iff a writer holds the lock
 };
 
+// WLock is a customization of unique_lock for using RWMutex in writer mode.
+using WLock = std::unique_lock<RWMutex>;
+
+// RLock is an RAII class for locking/unlocking a RWMutex in reader mode.
 class RLock {
  public:
-  // RLocks are default constructible.
-  RLock() noexcept : mu_(nullptr), held_(false) {}
+  // RLock usually locks its mutex upon construction.
+  explicit RLock(RWMutex& rwmu) : ptr_(&rwmu), held_(false) { lock(); }
+  RLock(RWMutex& rwmu, std::defer_lock_t) noexcept : ptr_(&rwmu),
+                                                     held_(false) {}
+  RLock(RWMutex& rwmu, std::try_to_lock_t)
+      : ptr_(&rwmu), held_(ptr_->try_lock_read()) {}
+  RLock(RWMutex& rwmu, std::adopt_lock_t) : ptr_(&rwmu), held_(true) {}
 
-  // RLocks are moveable.
-  RLock(RLock&& x) noexcept : mu_(x.mu_), held_(x.held_) { x.held_ = false; }
+  // RLock is default constructible.
+  RLock() noexcept : ptr_(nullptr), held_(false) {}
 
-  // Acquire a read lock.
-  explicit RLock(RWMutex& mu) : mu_(&mu), held_(true) { mu_->lock_read(); }
-  RLock(RWMutex& mu, std::defer_lock_t) noexcept : mu_(&mu), held_(false) {}
-  RLock(RWMutex& mu, std::try_to_lock_t) : mu_(&mu), held_(mu_->try_lock_read()) {}
-  RLock(RWMutex& mu, std::adopt_lock_t) : mu_(&mu), held_(true) {}
+  // RLock is not copyable.
+  RLock(const RLock&) = delete;
+  RLock& operator=(const RLock&) = delete;
 
-  // RLocks are moveable.
+  // RLock is moveable.
+  RLock(RLock&& x) noexcept : ptr_(x.ptr_), held_(x.held_) {
+    x.ptr_ = nullptr;
+    x.held_ = false;
+  }
   RLock& operator=(RLock&& x) noexcept {
-    if (held_) mu_->unlock_read();
-    mu_ = x.mu_;
+    if (held_) unlock();
+    ptr_ = x.ptr_;
     held_ = x.held_;
+    x.ptr_ = nullptr;
     x.held_ = false;
     return *this;
   }
 
-  // RLocks release their mutexes upon destruction.
-  ~RLock() {
-    if (held_) mu_->unlock_read();
+  // RLock unlocks its mutex upon destruction, but only if it holds the lock.
+  ~RLock() noexcept {
+    if (held_) unlock();
   }
 
-  // RLocks are not copyable.
-  RLock(const RLock&) = delete;
-  RLock& operator=(const RLock&) = delete;
+  // Locks the mutex.
+  // - It is an error to call this if the mutex is already locked.
+  // - It is an error to call this if no mutex is associated with this lock.
+  void lock();
 
+  // Unlocks the mutex.
+  // - It is an error to call this if the mutex is not locked.
+  void unlock();
+
+  // Swaps this RLock with another.
   void swap(RLock& x) noexcept {
-    using std::swap;
-    swap(mu_, x.mu_);
-    swap(held_, x.held_);
+    std::swap(ptr_, x.ptr_);
+    std::swap(held_, x.held_);
   }
 
+  // Releases ownership of the lock, without unlocking it.
+  // - After this call, the RLock is in the default constructed state.
   RWMutex* release() noexcept {
-    RWMutex* mu = mu_;
+    RWMutex* rwmu = ptr_;
+    ptr_ = nullptr;
     held_ = false;
-    mu_ = nullptr;
-    return mu;
+    return rwmu;
   }
 
-  RWMutex* mutex() const noexcept { return mu_; }
+  // Accessor methods for checking the state of the lock.
+  RWMutex* mutex() const noexcept { return ptr_; }
   bool owns_lock() const noexcept { return held_; }
   explicit operator bool() const noexcept { return held_; }
 
  private:
-  RWMutex* mu_;
+  RWMutex* ptr_;
   bool held_;
 };
 
-using WLock = std::unique_lock<RWMutex>;
+inline Lock acquire_lock(std::mutex& mu) { return Lock(mu); }
+inline WLock acquire_write(RWMutex& rwmu) { return WLock(rwmu); }
+inline RLock acquire_read(RWMutex& rwmu) { return RLock(rwmu); }
 
-inline RLock acquire_read(RWMutex& mu) { return RLock(mu); }
-inline WLock acquire_write(RWMutex& mu) { return WLock(mu); }
+class null_pointer {
+ public:
+  constexpr null_pointer() noexcept : what_("") {}
+  constexpr null_pointer(const char* what) noexcept : what_(what ? what : "") {}
+  constexpr const char* what() const noexcept { return what_; }
+
+ private:
+  const char* what_;
+};
+
+template <typename T>
+T* assert_notnull(T* ptr, const char* what) noexcept {
+  if (ptr)
+    return ptr;
+  else
+    throw null_pointer(what);
+}
+
+template <typename T>
+std::unique_ptr<T> assert_notnull(std::unique_ptr<T> ptr, const char* what) noexcept {
+  if (ptr)
+    return std::move(ptr);
+  else
+    throw null_pointer(what);
+}
+
+template <typename T>
+std::shared_ptr<T> assert_notnull(std::shared_ptr<T> ptr, const char* what) noexcept {
+  if (ptr)
+    return std::move(ptr);
+  else
+    throw null_pointer(what);
+}
+
+#define ASSERT_NOTNULL(x) ::base::assert_notnull((x), #x " == nullptr")
+#ifdef NDEBUG
+#define DASSERT_NOTNULL(x) (x)
+#else
+#define DASSERT_NOTNULL(x) ASSERT_NOTNULL(x)
+#endif
 
 }  // namespace base
 

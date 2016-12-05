@@ -19,15 +19,19 @@
 #include <vector>
 
 #include "base/cleanup.h"
+#include "base/logging.h"
 #include "base/util.h"
 
-using EventVec = std::vector<std::pair<int, event::Set>>;
+using TeeVec = std::vector<base::FD>;
+using TeeMap = std::unordered_map<int, TeeVec>;
 using CallbackVec = std::vector<std::unique_ptr<event::Callback>>;
+using base::token_t;
 
 namespace {
 
 template <typename T>
-static void vec_erase_all(std::vector<T>& vec, const T& item) noexcept {
+static bool vec_erase_all(std::vector<T>& vec, const T& item) noexcept {
+  bool found = false;
   auto begin = vec.begin(), it = vec.end();
   while (it != begin) {
     --it;
@@ -35,62 +39,10 @@ static void vec_erase_all(std::vector<T>& vec, const T& item) noexcept {
       auto tmp = it - 1;
       vec.erase(it);
       it = tmp + 1;
+      found = true;
     }
   }
-}
-
-static base::Result read_exactly(int fd, void* ptr, std::size_t len,
-                                 const char* what) noexcept {
-  int n;
-redo:
-  ::bzero(ptr, len);
-  n = ::read(fd, ptr, len);
-  if (n < 0) {
-    int err_no = errno;
-    if (err_no == EINTR) goto redo;
-    return base::Result::from_errno(err_no, "read(2) from ", what);
-  }
-  if (std::size_t(n) != len) {
-    return base::Result::internal("short read(2) from ", what);
-  }
-  return base::Result();
-}
-
-static base::Result write_exactly(int fd, const void* ptr, std::size_t len,
-                                  const char* what) noexcept {
-  int n;
-redo:
-  n = ::write(fd, ptr, len);
-  if (n < 0) {
-    int err_no = errno;
-    if (err_no == EINTR) goto redo;
-    return base::Result::from_errno(err_no, "write(2) from ", what);
-  }
-  if (std::size_t(n) != len) {
-    return base::Result::internal("short write(2) from ", what);
-  }
-  return base::Result();
-}
-
-struct Pipe {
-  int read_fd;
-  int write_fd;
-
-  Pipe(int rfd, int wfd) noexcept : read_fd(rfd), write_fd(wfd) {}
-  Pipe() noexcept : Pipe(-1, -1) {}
-};
-
-static base::Result make_pipe(Pipe* out) noexcept {
-  *out = Pipe();
-  int pipefds[2];
-  int rc = ::pipe2(pipefds, O_CLOEXEC);
-  if (rc != 0) {
-    int err_no = errno;
-    return base::Result::from_errno(err_no, "pipe2(2)");
-  }
-  out->read_fd = pipefds[0];
-  out->write_fd = pipefds[1];
-  return base::Result();
+  return found;
 }
 
 // Signal handler implementation details {{{
@@ -102,35 +54,6 @@ static constexpr std::size_t NUM_SIGNALS =
     64  // reasonable guess
 #endif
     ;
-
-static void assert_valid_signo(int signo) {
-  if (signo < 0 || std::size_t(signo) >= NUM_SIGNALS)
-    throw std::out_of_range("invalid signal number");
-}
-
-// Guards: g_sig_pipe_rfd, g_sig_pipe_wfd, g_sig_tee
-static std::mutex g_sig_mu;
-
-// FD for the write end of the signal handler pipe.
-// Only the signal handler itself should write to this pipe.
-// THREAD SAFETY NOTE: this value MUST remain constant after initialization
-static int g_sig_pipe_wfd = -1;
-
-// FD for the read end of the signal handler pipe.
-// Only the background thread should read from this pipe.
-// THREAD SAFETY NOTE: this value MUST remain constant after initialization
-static int g_sig_pipe_rfd = -1;
-
-// FDs interested in receiving signals, arranged by signal number.
-// When the background thread reads an event, it will tee into these FDs.
-static std::unordered_map<int, std::vector<int>>* g_sig_tee = nullptr;
-
-// This is the actual signal handler.
-// Happily, write(2) is safe to call from within a signal handler.
-// Sadly, we can't do much error checking.
-static void sigaction_handler(int signo, siginfo_t* si, void* context) {
-  write(g_sig_pipe_wfd, si, sizeof(*si));
-}
 
 // This parses out the guts of a siginfo_t and makes event::Data sausage.
 static void populate_data_from_siginfo(event::Data* out, const siginfo_t& si) {
@@ -163,16 +86,37 @@ static void populate_data_from_siginfo(event::Data* out, const siginfo_t& si) {
   }
 }
 
+// Guards: g_sig_pipe_rfd, g_sig_pipe_wfd, g_sig_tee
+static std::mutex g_sig_mu;
+
+// The signal handler pipe.
+// Only the signal handler itself should write to this pipe.
+// Only the background thread should read from this pipe.
+// THREAD SAFETY NOTE: these values MUST remain constant after initialization
+static base::FD* g_sig_pipe_rfd = nullptr;
+static int g_sig_pipe_wfd = -1;
+
+// FDs interested in receiving signals, arranged by signal number.
+// When the background thread reads an event, it will tee into these FDs.
+static TeeMap* g_sig_tee = nullptr;
+
+// This is the actual signal handler.
+// Happily, write(2) is safe to call from within a signal handler.
+// Sadly, we can't do much error checking.
+static void sigaction_handler(int signo, siginfo_t* si, void* context) {
+  ::write(g_sig_pipe_wfd, si, sizeof(*si));
+}
+
 // This thread services the read end of the signal handler pipe.
 static void signal_thread_body() {
   base::Lock lock(g_sig_mu, std::defer_lock);
-  std::vector<int> vec;
+  TeeVec vec;
   siginfo_t si;
-  base::Result result;
+  base::Result r;
   while (true) {
-    result = read_exactly(g_sig_pipe_rfd, &si, sizeof(si), "signal pipe");
-    result.expect_ok();
-    if (!result.ok()) continue;
+    r = base::read_exactly(*g_sig_pipe_rfd, &si, sizeof(si), "signal pipe");
+    r.expect_ok();
+    if (!r) continue;
 
     lock.lock();
     auto it = g_sig_tee->find(si.si_signo);
@@ -184,9 +128,9 @@ static void signal_thread_body() {
 
     event::Data data;
     populate_data_from_siginfo(&data, si);
-    for (int tee_fd : vec) {
-      result = write_exactly(tee_fd, &data, sizeof(data), "pipe");
-      result.expect_ok();
+    for (const auto& fd : vec) {
+      r = base::write_exactly(fd, &data, sizeof(data), "pipe");
+      r.expect_ok();
     }
   }
 }
@@ -195,17 +139,18 @@ static void signal_thread_body() {
 // |fd| each time a |signo| signal arrives.
 //
 // Bootstraps the signal handler thread iff it has not yet been set up.
-static base::Result sig_tee_add(int fd, int signo) {
+static base::Result sig_tee_add(base::FD fd, int signo) {
   auto lock = base::acquire_lock(g_sig_mu);
 
   // Bootstrap the signal handler thread, if needed.
   if (!g_sig_tee) {
-    Pipe pipe;
-    auto result = make_pipe(&pipe);
-    if (!result.ok()) return result;
-    g_sig_pipe_rfd = pipe.read_fd;
-    g_sig_pipe_wfd = pipe.write_fd;
-    g_sig_tee = new std::unordered_map<int, std::vector<int>>;
+    base::Pipe pipe;
+    base::Result r = base::make_pipe(&pipe);
+    if (!r) return r;
+    g_sig_pipe_rfd = new base::FD;
+    *g_sig_pipe_rfd = std::move(pipe.read);
+    g_sig_pipe_wfd = pipe.write->release_fd();
+    g_sig_tee = new TeeMap;
     std::thread(signal_thread_body).detach();
   }
 
@@ -224,19 +169,19 @@ static base::Result sig_tee_add(int fd, int signo) {
   }
 
   // Add |fd| to the tee list for |signo|.
-  vec.push_back(fd);
+  vec.push_back(std::move(fd));
   return base::Result();
 }
 
 // Asks that the signal handler thread stop sending |signo| signals to |fd|.
-static base::Result sig_tee_remove(int fd, int signo) noexcept {
+static base::Result sig_tee_remove(base::FD fd, int signo) noexcept {
   auto lock = base::acquire_lock(g_sig_mu);
 
   if (!g_sig_tee) return base::Result::not_found();
 
   // Remove |fd| from the tee list for |signo|.
   auto& vec = (*g_sig_tee)[signo];
-  vec_erase_all(vec, fd);
+  if (!vec_erase_all(vec, fd)) return base::Result::not_found();
 
   // Unregister the signal handler for |signo|, if needed.
   if (vec.empty()) {
@@ -257,7 +202,7 @@ static base::Result sig_tee_remove(int fd, int signo) noexcept {
 }
 
 // Asks that the signal handler thread stop sending ANY signals to |fd|.
-static void sig_tee_remove_all(int fd) noexcept {
+static void sig_tee_remove_all(base::FD fd) noexcept {
   auto lock = base::acquire_lock(g_sig_mu);
 
   if (!g_sig_tee) return;
@@ -271,10 +216,10 @@ static void sig_tee_remove_all(int fd) noexcept {
     vec_erase_all(vec, fd);
 
     // And if the tee list is empty, unregister the signal handler.
-    auto old = it;
+    auto old = it;  // Whee, STL iterators are fun.
     ++it;
     if (vec.empty()) {
-      g_sig_tee->erase(old);  // Whee, STL iterators are fun.
+      g_sig_tee->erase(old);
       struct sigaction sa;
       ::bzero(&sa, sizeof(sa));
       sa.sa_handler = SIG_DFL;
@@ -291,34 +236,44 @@ namespace event {
 
 class ManagerImpl {
  public:
-  ManagerImpl(std::unique_ptr<Poller> p, std::shared_ptr<Dispatcher> d,
-              Pipe pipe, std::size_t min_pollers, std::size_t max_pollers);
+  ManagerImpl(std::shared_ptr<Poller> p, std::shared_ptr<Dispatcher> d,
+              base::Pipe pipe, std::size_t min_pollers,
+              std::size_t max_pollers);
   ~ManagerImpl() noexcept;
 
-  Poller& poller() noexcept { return *p_; }
-  const Poller& poller() const noexcept { return *p_; }
-  Dispatcher& dispatcher() noexcept { return *d_; }
-  const Dispatcher& dispatcher() const noexcept { return *d_; }
+  bool is_running() const noexcept {
+    auto lock = base::acquire_lock(mu_);
+    return running_;
+  }
 
-  base::Result fd_add(base::token_t* out, int fd, Set set,
+  std::shared_ptr<Poller> poller() const noexcept {
+    auto lock = base::acquire_lock(mu_);
+    return DASSERT_NOTNULL(p_);
+  }
+
+  std::shared_ptr<Dispatcher> dispatcher() const noexcept {
+    auto lock = base::acquire_lock(mu_);
+    return DASSERT_NOTNULL(d_);
+  }
+
+  base::Result fd_add(token_t* out, base::FD fd, Set set,
                       std::shared_ptr<Handler> handler);
-  base::Result fd_get(Set* out, int fd, base::token_t t);
-  base::Result fd_modify(int fd, base::token_t t, Set set);
-  base::Result fd_remove(int fd, base::token_t t);
+  base::Result fd_get(Set* out, token_t t);
+  base::Result fd_modify(token_t t, Set set);
+  base::Result fd_remove(token_t t);
 
-  base::Result signal_add(base::token_t* out, int signo,
+  base::Result signal_add(token_t* out, int signo,
                           std::shared_ptr<Handler> handler);
-  base::Result signal_remove(int signo, base::token_t t);
+  base::Result signal_remove(token_t t);
 
-  base::Result timer_add(base::token_t* out, std::shared_ptr<Handler> handler);
-  base::Result timer_arm(base::token_t t, base::Duration delay,
-                         base::Duration period, bool delay_abs);
-  base::Result timer_remove(base::token_t t);
+  base::Result timer_add(token_t* out, std::shared_ptr<Handler> handler);
+  base::Result timer_arm(token_t t, base::Duration delay, base::Duration period,
+                         bool delay_abs);
+  base::Result timer_remove(token_t t);
 
-  base::Result generic_add(base::token_t* out,
-                           std::shared_ptr<Handler> handler);
-  base::Result generic_fire(base::token_t t, int value);
-  base::Result generic_remove(base::token_t t);
+  base::Result generic_add(token_t* out, std::shared_ptr<Handler> handler);
+  base::Result generic_fire(token_t t, int value);
+  base::Result generic_remove(token_t t);
 
   base::Result donate(bool forever);
 
@@ -335,54 +290,64 @@ class ManagerImpl {
 
   struct Record {
     std::shared_ptr<Handler> h;
-    int n;
-    Type type;
+    token_t t;
     Set set;
 
-    Record(Type type, int n, Set set, std::shared_ptr<Handler> h) noexcept
+    Record(token_t t, Set set, std::shared_ptr<Handler> h) noexcept
         : h(std::move(h)),
-          n(n),
-          type(type),
+          t(t),
           set(set) {}
+    Record() noexcept : Record(token_t(), Set(), nullptr) {}
+  };
 
-    Record() noexcept : Record(Type::undefined, -1, Set(), nullptr) {}
+  struct Source {
+    std::vector<Record> records;
+    base::FD fd;
+    int signo;
+    token_t gt;
+    Type type;
+
+    Source() noexcept : signo(0), type(Type::undefined) {}
+    explicit operator bool() const noexcept { return !records.empty(); }
   };
 
   base::Result donate_as_poller(base::Lock lock, bool forever);
   base::Result donate_as_mixed(base::Lock lock, bool forever);
   base::Result donate_as_worker(base::Lock lock, bool forever);
 
-  void handle_event(CallbackVec* cbvec, int fd, Set set);
+  void handle_event(CallbackVec* cbvec, token_t gt, Set set);
   void handle_pipe_event(CallbackVec* cbvec);
-  void handle_timer_event(CallbackVec* cbvec, int fd, base::token_t t);
-  void handle_fd_event(CallbackVec* cbvec, int fd, Set set,
-                       const std::vector<base::token_t>& t);
+  void handle_timer_event(CallbackVec* cbvec, const ManagerImpl::Source& src);
+  void handle_fd_event(CallbackVec* cbvec, const ManagerImpl::Source& src,
+                       Set set);
 
-  const std::unique_ptr<Poller> p_;
-  const std::shared_ptr<Dispatcher> d_;
   mutable std::mutex mu_;
   std::condition_variable curr_cv_;
-  std::unordered_map<int, std::vector<base::token_t>> fds_;
-  std::unordered_map<int, std::vector<base::token_t>> signals_;
-  std::unordered_map<int, base::token_t> timers_;
-  std::unordered_map<base::token_t, Record> records_;
+  std::unordered_map<int, token_t> fdmap_;       // fd -> global token
+  std::unordered_map<int, token_t> sigmap_;      // signo -> global token
+  std::unordered_map<token_t, token_t> ltmap_;   // local -> global token
+  std::unordered_map<token_t, Source> sources_;  // global token -> source
+  std::shared_ptr<Poller> p_;
+  std::shared_ptr<Dispatcher> d_;
+  base::Pipe pipe_;
   std::size_t min_;
   std::size_t max_;
   std::size_t current_;
-  Pipe pipe_;
   bool running_;
 };
 
-ManagerImpl::ManagerImpl(std::unique_ptr<Poller> p,
-                         std::shared_ptr<Dispatcher> d, Pipe pipe,
+ManagerImpl::ManagerImpl(std::shared_ptr<Poller> p,
+                         std::shared_ptr<Dispatcher> d, base::Pipe pipe,
                          std::size_t min_pollers, std::size_t max_pollers)
-    : p_(std::move(p)),
-      d_(std::move(d)),
+    : p_(DASSERT_NOTNULL(std::move(p))),
+      d_(DASSERT_NOTNULL(std::move(d))),
+      pipe_(std::move(pipe)),
       min_(min_pollers),
       max_(max_pollers),
       current_(0),
-      pipe_(pipe),
       running_(true) {
+  DASSERT_NOTNULL(pipe_.write);
+  DASSERT_NOTNULL(pipe_.read);
   auto lock = base::acquire_lock(mu_);
   auto closure = [this] { donate(true).ignore_ok(); };
   for (std::size_t i = 0; i < min_; ++i) {
@@ -393,246 +358,300 @@ ManagerImpl::ManagerImpl(std::unique_ptr<Poller> p,
 
 ManagerImpl::~ManagerImpl() noexcept { shutdown().ignore_ok(); }
 
-base::Result ManagerImpl::fd_add(base::token_t* out, int fd, Set set,
+base::Result ManagerImpl::fd_add(base::token_t* out, base::FD fd, Set set,
                                  std::shared_ptr<Handler> handler) {
-  *out = base::token_t();
+  DASSERT_NOTNULL(out);
+  DASSERT_NOTNULL(fd);
+  DASSERT_NOTNULL(handler);
+
+  *out = token_t();
+  const int fdnum = ([&fd] {
+    auto pair = fd->acquire_fd();
+    return pair.first;
+  })();
+  if (fdnum == -1)
+    return base::Result::invalid_argument("file descriptor is closed");
 
   auto lock = base::acquire_lock(mu_);
-  base::token_t t = base::next_token();
+  std::shared_ptr<Poller> p = DASSERT_NOTNULL(p_);
 
-  records_[t] = Record(Type::fd, fd, set, std::move(handler));
-  auto cleanup0 = base::cleanup([this, t] { records_.erase(t); });
-
-  auto fdit = fds_.find(fd);
-  bool is_new = false;
-  if (fdit == fds_.end()) {
-    fdit = fds_.emplace(std::piecewise_construct, std::make_tuple(fd),
-                        std::make_tuple())
-               .first;
-    is_new = true;
+  token_t gt;
+  bool added_gt = false;
+  auto fdit = fdmap_.find(fdnum);
+  if (fdit == fdmap_.end()) {
+    gt = base::next_token();
+    fdmap_[fdnum] = gt;
+    added_gt = true;
+  } else {
+    gt = fdit->second;
   }
-  fdit->second.push_back(t);
-  auto cleanup1 = base::cleanup([this, fdit] {
-    fdit->second.pop_back();
-    if (fdit->second.empty()) fds_.erase(fdit);
+  auto cleanup0 = base::cleanup([this, fdnum, added_gt] {
+    if (added_gt) fdmap_.erase(fdnum);
   });
 
-  base::Result result;
-  if (is_new) {
-    result = p_->add(fd, set);
+  token_t t = base::next_token();
+  ltmap_[t] = gt;
+  auto cleanup1 = base::cleanup([this, t] { ltmap_.erase(t); });
+
+  auto& src = sources_[gt];
+  if (src) {
+    fd = nullptr;
+  } else {
+    src.type = Type::fd;
+    src.fd = std::move(fd);
+    src.gt = gt;
+  }
+  src.records.emplace_back(t, set, std::move(handler));
+  auto cleanup2 = base::cleanup([this, gt, &src] {
+    src.records.pop_back();
+    if (src.records.empty()) sources_.erase(gt);
+  });
+
+  base::Result r;
+  if (added_gt) {
+    r = p->add(src.fd, gt, set);
   } else {
     Set before;
-    for (const auto othertoken : fdit->second) {
-      if (othertoken != t) {
-        auto it = records_.find(othertoken);
-        if (it == records_.end()) continue;
-        before |= it->second.set;
-      }
+    for (const auto& rec : src.records) {
+      if (rec.t != t) before |= rec.set;
     }
     Set after = before | set;
     if (before != after) {
-      result = p_->modify(fd, after);
+      r = p->modify(src.fd, gt, after);
     }
   }
-  if (!result.ok()) return result;
-  cleanup1.cancel();
-  cleanup0.cancel();
-  *out = t;
-  return base::Result();
+  if (r) {
+    *out = t;
+    cleanup2.cancel();
+    cleanup1.cancel();
+    cleanup0.cancel();
+  }
+  return r;
 }
 
-base::Result ManagerImpl::fd_get(Set* out, int fd, base::token_t t) {
-  out->clear();
+base::Result ManagerImpl::fd_get(Set* out, base::token_t t) {
+  DASSERT_NOTNULL(out)->clear();
 
   auto lock = base::acquire_lock(mu_);
-  auto it = records_.find(t);
-  if (it == records_.end()) return base::Result::not_found();
-  if (it->second.type != Type::fd) return base::Result::wrong_type();
-  if (it->second.n != fd) return base::Result::invalid_argument("wrong fd");
-  *out = it->second.set;
-  return base::Result();
+  auto ltit = ltmap_.find(t);
+  if (ltit == ltmap_.end()) return base::Result::not_found();
+  auto gt = ltit->second;
+
+  auto srcit = sources_.find(gt);
+  if (srcit == sources_.end()) return base::Result::not_found();
+  if (srcit->second.type != Type::fd) return base::Result::wrong_type();
+  const auto& src = srcit->second;
+
+  for (const auto& rec : src.records) {
+    if (rec.t == t) {
+      *out = rec.set;
+      return base::Result();
+    }
+  }
+  return base::Result::not_found();
 }
 
-base::Result ManagerImpl::fd_modify(int fd, base::token_t t, Set set) {
+base::Result ManagerImpl::fd_modify(base::token_t t, Set set) {
   auto lock = base::acquire_lock(mu_);
+  std::shared_ptr<Poller> p = DASSERT_NOTNULL(p_);
 
-  auto it = records_.find(t);
-  if (it == records_.end()) return base::Result::not_found();
-  if (it->second.type != Type::fd) return base::Result::wrong_type();
-  if (it->second.n != fd) return base::Result::invalid_argument("wrong fd");
-  auto& rec = it->second;
+  auto ltit = ltmap_.find(t);
+  if (ltit == ltmap_.end()) return base::Result::not_found();
+  auto gt = ltit->second;
 
-  auto fdit = fds_.find(fd);
-  if (fdit == fds_.end()) return base::Result::not_found();
+  auto srcit = sources_.find(gt);
+  if (srcit == sources_.end()) return base::Result::not_found();
+  if (srcit->second.type != Type::fd) return base::Result::wrong_type();
+  auto& src = srcit->second;
 
-  auto& vec = fdit->second;
+  Record* myrec = nullptr;
   Set before, after;
-  for (const auto othertoken : vec) {
-    if (othertoken == t) {
-      before |= rec.set;
+  for (auto& rec : src.records) {
+    before |= rec.set;
+    if (rec.t == t) {
       after |= set;
+      myrec = &rec;
     } else {
-      auto rit = records_.find(othertoken);
-      if (rit == records_.end()) continue;
-      before |= rit->second.set;
-      after |= rit->second.set;
+      after |= rec.set;
     }
   }
+  if (myrec == nullptr) return base::Result::not_found();
 
-  base::Result result;
+  base::Result r;
   if (before != after) {
-    result = p_->modify(fd, after);
+    r = p->modify(src.fd, gt, after);
   }
-  if (result.ok()) rec.set = set;
-  return result;
+  if (r) myrec->set = set;
+  return r;
 }
 
-base::Result ManagerImpl::fd_remove(int fd, base::token_t t) {
+base::Result ManagerImpl::fd_remove(base::token_t t) {
   auto lock = base::acquire_lock(mu_);
+  std::shared_ptr<Poller> p = DASSERT_NOTNULL(p_);
 
-  auto it = records_.find(t);
-  if (it == records_.end()) return base::Result::not_found();
-  if (it->second.type != Type::fd) return base::Result::wrong_type();
-  if (it->second.n != fd) return base::Result::invalid_argument("wrong fd");
-  auto rec = std::move(it->second);
-  records_.erase(it);
+  auto ltit = ltmap_.find(t);
+  if (ltit == ltmap_.end()) return base::Result::not_found();
+  auto gt = ltit->second;
 
-  auto fdit = fds_.find(fd);
-  if (fdit == fds_.end()) return base::Result::not_found();
+  auto srcit = sources_.find(gt);
+  if (srcit == sources_.end()) return base::Result::not_found();
+  if (srcit->second.type != Type::fd) return base::Result::wrong_type();
+  auto& src = srcit->second;
 
-  auto& vec = fdit->second;
-  auto vit = vec.begin();
   Set before, after;
-  while (vit != vec.end()) {
-    if (*vit == t) {
-      before |= rec.set;
-      vec.erase(vit);
+  auto rit = src.records.begin();
+  while (rit != src.records.end()) {
+    auto& rec = *rit;
+    before |= rec.set;
+    if (rec.t == t) {
+      src.records.erase(rit);
     } else {
-      auto rit = records_.find(*vit);
-      if (rit != records_.end()) {
-        before |= rit->second.set;
-        after |= rit->second.set;
-      }
-      ++vit;
+      after |= rec.set;
+      ++rit;
     }
   }
 
-  base::Result result;
-  if (vec.empty()) {
-    fds_.erase(fdit);
-    result = p_->remove(fd);
+  base::Result r;
+  ltmap_.erase(t);
+  if (src.records.empty()) {
+    auto fd = std::move(src.fd);
+    const int fdnum = ([&fd] {
+      auto pair = fd->acquire_fd();
+      return pair.first;
+    })();
+    sources_.erase(gt);
+    fdmap_.erase(fdnum);
+    r = p->remove(fd);
   } else if (before != after) {
-    result = p_->modify(fd, after);
+    r = p->modify(src.fd, gt, after);
   }
-  return result;
+  return r;
 }
 
 base::Result ManagerImpl::signal_add(base::token_t* out, int signo,
                                      std::shared_ptr<Handler> handler) {
-  *out = base::token_t();
-  assert_valid_signo(signo);
+  *DASSERT_NOTNULL(out) = token_t();
+  DASSERT_NOTNULL(handler);
+
+  if (signo < 0 || std::size_t(signo) >= NUM_SIGNALS) {
+    return base::Result::invalid_argument("invalid signal number ", signo);
+  }
 
   auto lock = base::acquire_lock(mu_);
-  base::token_t t = base::next_token();
 
-  records_[t] = Record(Type::signal, signo, Set(), std::move(handler));
-  auto cleanup0 = base::cleanup([this, t] { records_.erase(t); });
-
-  auto sit = signals_.find(signo);
-  if (sit == signals_.end()) {
-    sit = signals_
-              .emplace(std::piecewise_construct, std::make_tuple(signo),
-                       std::make_tuple())
-              .first;
+  token_t gt;
+  bool added_gt = false;
+  auto sigit = sigmap_.find(signo);
+  if (sigit == sigmap_.end()) {
+    gt = base::next_token();
+    sigmap_[signo] = gt;
+    added_gt = true;
+  } else {
+    gt = sigit->second;
   }
-  auto& vec = sit->second;
-  bool was_empty = vec.empty();
-  vec.push_back(t);
-  auto cleanup1 = base::cleanup([this, sit, &vec] {
-    vec.pop_back();
-    if (vec.empty()) signals_.erase(sit);
+  auto cleanup0 = base::cleanup([this, signo, added_gt] {
+    if (added_gt) sigmap_.erase(signo);
   });
 
-  if (was_empty) {
-    auto result = sig_tee_add(pipe_.write_fd, signo);
-    if (!result.ok()) return result;
-  }
+  token_t t = base::next_token();
+  ltmap_[t] = gt;
+  auto cleanup1 = base::cleanup([this, t] { ltmap_.erase(t); });
 
-  cleanup0.cancel();
-  cleanup1.cancel();
-  *out = t;
-  return base::Result();
+  auto& src = sources_[gt];
+  if (!src) {
+    src.type = Type::signal;
+    src.signo = signo;
+    src.gt = gt;
+  }
+  src.records.emplace_back(t, Set(), std::move(handler));
+  auto cleanup2 = base::cleanup([this, gt, &src] {
+    src.records.pop_back();
+    if (src.records.empty()) sources_.erase(gt);
+  });
+
+  base::Result r;
+  if (added_gt) {
+    r = sig_tee_add(pipe_.write, signo);
+  }
+  if (r) {
+    *out = t;
+    cleanup2.cancel();
+    cleanup1.cancel();
+    cleanup0.cancel();
+  }
+  return r;
 }
 
-base::Result ManagerImpl::signal_remove(int signo, base::token_t t) {
-  assert_valid_signo(signo);
-
+base::Result ManagerImpl::signal_remove(base::token_t t) {
   auto lock = base::acquire_lock(mu_);
-  auto it = records_.find(t);
-  if (it == records_.end()) return base::Result::not_found();
-  if (it->second.type != Type::signal) return base::Result::wrong_type();
-  if (it->second.n != signo)
-    return base::Result::invalid_argument("wrong signal");
-  auto rec = std::move(it->second);
-  records_.erase(it);
+  auto ltit = ltmap_.find(t);
+  if (ltit == ltmap_.end()) return base::Result::not_found();
+  auto gt = ltit->second;
 
-  auto sit = signals_.find(signo);
-  if (sit == signals_.end()) return base::Result::not_found();
+  auto srcit = sources_.find(gt);
+  if (srcit == sources_.end()) return base::Result::not_found();
+  if (srcit->second.type != Type::signal) return base::Result::wrong_type();
+  auto& src = srcit->second;
 
-  auto& vec = sit->second;
-  auto vit = vec.begin();
-  while (vit != vec.end()) {
-    if (*vit == t) {
-      vec.erase(vit);
+  auto rit = src.records.begin();
+  while (rit != src.records.end()) {
+    auto& rec = *rit;
+    if (rec.t == t) {
+      src.records.erase(rit);
     } else {
-      ++vit;
+      ++rit;
     }
   }
 
-  base::Result result;
-  if (vec.empty()) {
-    result = sig_tee_remove(pipe_.write_fd, signo);
-    signals_.erase(sit);
+  base::Result r;
+  ltmap_.erase(t);
+  if (src.records.empty()) {
+    int signo = src.signo;
+    sigmap_.erase(signo);
+    sources_.erase(gt);
+    r = sig_tee_remove(pipe_.write, signo);
   }
-  return result;
+  return r;
 }
 
 base::Result ManagerImpl::timer_add(base::token_t* out,
                                     std::shared_ptr<Handler> handler) {
-  *out = base::token_t();
-  auto lock = base::acquire_lock(mu_);
-  base::token_t t = base::next_token();
+  *DASSERT_NOTNULL(out) = token_t();
+  DASSERT_NOTNULL(handler);
 
-  int fd = ::timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC | TFD_NONBLOCK);
-  if (fd == -1) {
+  int fdnum = ::timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC | TFD_NONBLOCK);
+  if (fdnum == -1) {
     int err_no = errno;
     return base::Result::from_errno(err_no, "timerfd_create(2)");
   }
-  auto cleanup0 = base::cleanup([fd] { ::close(fd); });
+  base::FD fd = base::FDHolder::make(fdnum);
 
-  records_[t] = Record(Type::timer, fd, Set(), std::move(handler));
-  timers_[fd] = t;
-  auto cleanup1 = base::cleanup([this, t, fd] {
-    timers_.erase(fd);
-    records_.erase(t);
-  });
+  auto lock = base::acquire_lock(mu_);
+  std::shared_ptr<Poller> p = DASSERT_NOTNULL(p_);
 
-  auto result = p_->add(fd, Set::readable_bit());
-  if (!result.ok()) return result;
+  token_t t = base::next_token();
+  auto& src = sources_[t];
+  src.type = Type::timer;
+  src.fd = std::move(fd);
+  src.gt = t;
+  src.records.emplace_back(t, Set(), std::move(handler));
+  auto cleanup = base::cleanup([this, t] { sources_.erase(t); });
 
-  *out = t;
-  cleanup1.cancel();
-  cleanup0.cancel();
-  return base::Result();
+  base::Result r = p->add(src.fd, t, Set::readable_bit());
+  if (r) {
+    *out = t;
+    cleanup.cancel();
+  }
+  return r;
 }
 
 base::Result ManagerImpl::timer_arm(base::token_t t, base::Duration delay,
                                     base::Duration period, bool delay_abs) {
   auto lock = base::acquire_lock(mu_);
-  auto it = records_.find(t);
-  if (it == records_.end()) return base::Result::not_found();
-  if (it->second.type != Type::timer) return base::Result::wrong_type();
-  auto& rec = it->second;
+  auto srcit = sources_.find(t);
+  if (srcit == sources_.end()) return base::Result::not_found();
+  if (srcit->second.type != Type::timer) return base::Result::wrong_type();
+  auto& src = srcit->second;
 
   int flags = 0;
   if (delay_abs) flags |= TFD_TIMER_ABSTIME;
@@ -644,7 +663,8 @@ base::Result ManagerImpl::timer_arm(base::token_t t, base::Duration delay,
   its.it_interval.tv_sec = std::get<1>(period.raw());
   its.it_interval.tv_nsec = std::get<2>(period.raw());
 
-  int rc = ::timerfd_settime(rec.n, flags, &its, nullptr);
+  auto pair = src.fd->acquire_fd();
+  int rc = ::timerfd_settime(pair.first, flags, &its, nullptr);
   if (rc != 0) {
     int err_no = errno;
     return base::Result::from_errno(err_no, "timerfd_settime(2)");
@@ -654,28 +674,27 @@ base::Result ManagerImpl::timer_arm(base::token_t t, base::Duration delay,
 
 base::Result ManagerImpl::timer_remove(base::token_t t) {
   auto lock = base::acquire_lock(mu_);
-  auto it = records_.find(t);
-  if (it == records_.end()) return base::Result::not_found();
-  if (it->second.type != Type::timer) return base::Result::wrong_type();
-  auto rec = std::move(it->second);
-  records_.erase(it);
-  timers_.erase(rec.n);
+  auto srcit = sources_.find(t);
+  if (srcit == sources_.end()) return base::Result::not_found();
+  if (srcit->second.type != Type::timer) return base::Result::wrong_type();
+  auto& src = srcit->second;
 
-  int rc = ::close(rec.n);
-  if (rc != 0) {
-    int err_no = errno;
-    return base::Result::from_errno(err_no, "close(2)");
-  }
-  return base::Result();
+  base::Result r = src.fd->close();
+  sources_.erase(srcit);
+  return r;
 }
 
 base::Result ManagerImpl::generic_add(base::token_t* out,
                                       std::shared_ptr<Handler> handler) {
-  *out = base::token_t();
+  *DASSERT_NOTNULL(out) = token_t();
+  DASSERT_NOTNULL(handler);
 
   auto lock = base::acquire_lock(mu_);
-  base::token_t t = base::next_token();
-  records_[t] = Record(Type::generic, -1, Set(), std::move(handler));
+  token_t t = base::next_token();
+  auto& src = sources_[t];
+  src.type = Type::generic;
+  src.gt = t;
+  src.records.emplace_back(t, Set(), std::move(handler));
   *out = t;
   return base::Result();
 }
@@ -686,18 +705,18 @@ base::Result ManagerImpl::generic_fire(base::token_t t, int value) {
   data.int_value = value;
   data.events = Set::event_bit();
   auto lock = base::acquire_lock(mu_);
-  auto it = records_.find(t);
-  if (it == records_.end()) return base::Result::not_found();
-  if (it->second.type != Type::generic) return base::Result::wrong_type();
-  return write_exactly(pipe_.write_fd, &data, sizeof(data), "event pipe");
+  auto srcit = sources_.find(t);
+  if (srcit == sources_.end()) return base::Result::not_found();
+  if (srcit->second.type != Type::generic) return base::Result::wrong_type();
+  return base::write_exactly(pipe_.write, &data, sizeof(data), "event pipe");
 }
 
 base::Result ManagerImpl::generic_remove(base::token_t t) {
   auto lock = base::acquire_lock(mu_);
-  auto it = records_.find(t);
-  if (it == records_.end()) return base::Result::not_found();
-  if (it->second.type != Type::generic) return base::Result::wrong_type();
-  records_.erase(it);
+  auto srcit = sources_.find(t);
+  if (srcit == sources_.end()) return base::Result::not_found();
+  if (srcit->second.type != Type::generic) return base::Result::wrong_type();
+  sources_.erase(srcit);
   return base::Result();
 }
 
@@ -720,13 +739,16 @@ base::Result ManagerImpl::donate_as_poller(base::Lock lock, bool forever) {
     curr_cv_.notify_all();
   });
 
-  EventVec vec;
+  std::shared_ptr<Dispatcher> d = DASSERT_NOTNULL(d_);
+  std::shared_ptr<Poller> p = DASSERT_NOTNULL(p_);
+
+  Poller::EventVec vec;
   CallbackVec cbvec;
-  base::Result result;
+  base::Result r;
   while (running_) {
     lock.unlock();
     auto reacquire0 = base::cleanup([&lock] { lock.lock(); });
-    result = p_->wait(&vec, -1);
+    r = p->wait(&vec, -1);
     reacquire0.run();
 
     for (const auto& ev : vec) {
@@ -737,21 +759,21 @@ base::Result ManagerImpl::donate_as_poller(base::Lock lock, bool forever) {
     lock.unlock();
     auto reacquire1 = base::cleanup([&lock] { lock.lock(); });
     for (auto& cb : cbvec) {
-      d_->dispatch(nullptr, std::move(cb));
+      d->dispatch(nullptr, std::move(cb));
     }
     cbvec.clear();
     reacquire1.run();
 
-    if (!result.ok()) break;
+    if (!r) break;
     if (!forever) break;
   }
-  result.expect_ok();
+  r.expect_ok();
   return base::Result();
 }
 
 base::Result ManagerImpl::donate_as_mixed(base::Lock lock, bool forever) {
-  auto donate_ok = [](const base::Result& result) {
-    return result.ok() || result.code() == base::Result::Code::NOT_IMPLEMENTED;
+  auto donate_ok = [](const base::Result& r) {
+    return r.ok() || r.code() == base::Result::Code::NOT_IMPLEMENTED;
   };
 
   ++current_;
@@ -761,19 +783,22 @@ base::Result ManagerImpl::donate_as_mixed(base::Lock lock, bool forever) {
     curr_cv_.notify_all();
   });
 
-  EventVec vec;
+  std::shared_ptr<Dispatcher> d = DASSERT_NOTNULL(d_);
+  std::shared_ptr<Poller> p = DASSERT_NOTNULL(p_);
+
+  Poller::EventVec vec;
   CallbackVec cbvec;
-  base::Result result;
+  base::Result r;
   while (running_) {
     lock.unlock();
     auto reacquire0 = base::cleanup([&lock] { lock.lock(); });
-    result = d_->donate(false);
+    r = d->donate(false);
     reacquire0.run();
-    if (!donate_ok(result)) break;
+    if (!donate_ok(r)) break;
 
     lock.unlock();
     auto reacquire1 = base::cleanup([&lock] { lock.lock(); });
-    result = p_->wait(&vec, 0);
+    r = p->wait(&vec, 0);
     reacquire1.run();
 
     for (const auto& ev : vec) {
@@ -784,115 +809,126 @@ base::Result ManagerImpl::donate_as_mixed(base::Lock lock, bool forever) {
     lock.unlock();
     auto reacquire2 = base::cleanup([&lock] { lock.lock(); });
     for (auto& cb : cbvec) {
-      d_->dispatch(nullptr, std::move(cb));
+      d->dispatch(nullptr, std::move(cb));
     }
     cbvec.clear();
     reacquire2.run();
 
-    if (!result.ok()) break;
+    if (!r) break;
     if (!forever) break;
   }
-  result.expect_ok();
+  r.expect_ok();
   return base::Result();
 }
 
 base::Result ManagerImpl::donate_as_worker(base::Lock lock, bool forever) {
+  std::shared_ptr<Dispatcher> d = DASSERT_NOTNULL(d_);
   lock.unlock();
-  return d_->donate(forever);
+  return d->donate(forever);
 }
 
-void ManagerImpl::handle_event(CallbackVec* cbvec, int fd, Set set) {
-  if (fd == pipe_.read_fd) {
+void ManagerImpl::handle_event(CallbackVec* cbvec, base::token_t gt, Set set) {
+  DASSERT_NOTNULL(cbvec);
+
+  if (gt == token_t()) {
     handle_pipe_event(cbvec);
-    return;
   }
 
-  auto timerit = timers_.find(fd);
-  if (timerit != timers_.end()) {
-    handle_timer_event(cbvec, fd, timerit->second);
-    return;
-  }
+  auto srcit = sources_.find(gt);
+  if (srcit == sources_.end()) return;
+  const auto& src = srcit->second;
 
-  auto fdit = fds_.find(fd);
-  if (fdit != fds_.end()) {
-    handle_fd_event(cbvec, fd, set, fdit->second);
-    return;
-  }
+  switch (src.type) {
+    case Type::fd:
+      handle_fd_event(cbvec, src, set);
+      break;
 
-  base::Result::internal(
-      "BUG: fell off the end of event::ManagerImpl::handle_event")
-      .expect_ok();
+    case Type::timer:
+      handle_timer_event(cbvec, src);
+      break;
+
+    default:
+      LOG(DFATAL) << "BUG: unexpected event handler type " << uint8_t(src.type);
+  }
 }
 
 void ManagerImpl::handle_pipe_event(CallbackVec* cbvec) {
+  DASSERT_NOTNULL(cbvec);
+
   Data data;
-  base::Result result;
+  base::Result r;
   while (true) {
-    result = read_exactly(pipe_.read_fd, &data, sizeof(data), "event pipe");
-    if (result.errno_value() == EAGAIN || result.errno_value() == EWOULDBLOCK)
-      return;
-    if (!result.ok()) {
-      result.expect_ok();
-      return;
-    }
+    r = base::read_exactly(pipe_.read, &data, sizeof(data), "event pipe");
+    if (r.code() == base::Result::Code::END_OF_FILE) return;
+    if (r.errno_value() == EAGAIN || r.errno_value() == EWOULDBLOCK) return;
+    r.expect_ok();
+    if (!r) return;
 
     if (data.events.signal()) {
-      for (const auto& pair : records_) {
-        const base::token_t t = pair.first;
-        const auto& rec = pair.second;
-        if (rec.type == Type::signal && rec.n == data.signal_number) {
-          data.token = t;
-          cbvec->push_back(handler_callback(rec.h, data));
-        }
+      auto sigit = sigmap_.find(data.signal_number);
+      if (sigit == sigmap_.end()) continue;
+      token_t gt = sigit->second;
+
+      auto srcit = sources_.find(gt);
+      if (srcit == sources_.end()) continue;
+      if (srcit->second.type != Type::signal) continue;
+      if (srcit->second.signo != data.signal_number) continue;
+      const auto& src = srcit->second;
+
+      for (const auto& rec : src.records) {
+        data.token = rec.t;
+        cbvec->push_back(handler_callback(rec.h, data));
       }
     }
 
     if (data.events.event()) {
-      for (const auto& pair : records_) {
-        const base::token_t t = pair.first;
-        const auto& rec = pair.second;
-        if (rec.type == Type::generic && t == data.token) {
-          data.token = t;
-          cbvec->push_back(handler_callback(rec.h, data));
-        }
+      auto srcit = sources_.find(data.token);
+      if (srcit == sources_.end()) continue;
+      if (srcit->second.type != Type::generic) continue;
+      const auto& src = srcit->second;
+
+      for (const auto& rec : src.records) {
+        cbvec->push_back(handler_callback(rec.h, data));
       }
     }
   }
 }
 
-void ManagerImpl::handle_timer_event(CallbackVec* cbvec, int fd,
-                                     base::token_t t) {
+void ManagerImpl::handle_timer_event(CallbackVec* cbvec,
+                                     const ManagerImpl::Source& src) {
   static constexpr uint64_t INTMAX = std::numeric_limits<int>::max();
+  DASSERT_NOTNULL(cbvec);
 
   uint64_t x = 0;
-  auto result = read_exactly(fd, &x, sizeof(x), "timerfd");
-  result.expect_ok();
+  auto r = base::read_exactly(src.fd, &x, sizeof(x), "timerfd");
+  r.expect_ok();
   if (x > INTMAX) x = INTMAX;
 
-  auto it = records_.find(t);
-  if (it == records_.end()) return;
-  const auto& rec = it->second;
-
-  Data data;
-  data.token = t;
-  data.int_value = x;
-  data.events = Set::timer_bit();
-  cbvec->push_back(handler_callback(rec.h, data));
+  for (const auto& rec : src.records) {
+    Data data;
+    data.token = rec.t;
+    data.int_value = x;
+    data.events = Set::timer_bit();
+    cbvec->push_back(handler_callback(rec.h, data));
+  }
 }
 
-void ManagerImpl::handle_fd_event(CallbackVec* cbvec, int fd, Set set,
-                                  const std::vector<base::token_t>& vec) {
-  for (const auto t : vec) {
-    auto it = records_.find(t);
-    if (it != records_.end()) {
-      const auto& rec = it->second;
+void ManagerImpl::handle_fd_event(CallbackVec* cbvec,
+                                  const ManagerImpl::Source& src, Set set) {
+  DASSERT_NOTNULL(cbvec);
+
+  const int fdnum = ([&src] {
+    auto pair = src.fd->acquire_fd();
+    return pair.first;
+  })();
+  for (const auto& rec : src.records) {
+    auto realset = rec.set & set;
+    if (realset) {
       Data data;
-      data.token = t;
-      data.fd = fd;
-      data.events = rec.set & set;
-      if (data.events) {
-        cbvec->push_back(handler_callback(rec.h, data));
-      }
+      data.token = rec.t;
+      data.fd = fdnum;
+      data.events = realset;
+      cbvec->push_back(handler_callback(rec.h, data));
     }
   }
 }
@@ -906,33 +942,27 @@ base::Result ManagerImpl::shutdown() noexcept {
   running_ = false;
 
   // Throw away all handlers and ancilliary data.
-  fds_.clear();
-  signals_.clear();
-  records_.clear();
-  sig_tee_remove_all(pipe_.write_fd);
+  sources_.clear();
+  ltmap_.clear();
+  sigmap_.clear();
+  fdmap_.clear();
+  sig_tee_remove_all(pipe_.write);
+
+  // Close the event pipe write fd.
+  base::Result wr = pipe_.write->close();
 
   // Wait for the pollers to notice.
-  while (current_ > 0) {
-    Data x;
-    write_exactly(pipe_.write_fd, &x, sizeof(x), "event pipe").expect_ok();
-    curr_cv_.wait(lock);
-  }
+  while (current_ > 0) curr_cv_.wait(lock);
 
-  // Close the event pipe fds.
-  int w_fd = -1, r_fd = -1;
-  std::swap(w_fd, pipe_.write_fd);
-  std::swap(r_fd, pipe_.read_fd);
-  int w_rc = ::close(w_fd);
-  int w_errno = errno;
-  int r_rc = ::close(r_fd);
-  int r_errno = errno;
-  d_->shutdown();
-  if (w_rc != 0)
-    return base::Result::from_errno(w_errno, "close(2)");
-  else if (r_rc != 0)
-    return base::Result::from_errno(r_errno, "close(2)");
-  else
-    return base::Result();
+  // Close the event pipe read fd.
+  base::Result rr = pipe_.read->close();
+
+  // Free the dispatcher and poller.
+  d_ = nullptr;
+  p_ = nullptr;
+
+  if (!wr) return wr;
+  return rr;
 }
 
 FileDescriptor& FileDescriptor::operator=(FileDescriptor&& other) noexcept {
@@ -942,23 +972,26 @@ FileDescriptor& FileDescriptor::operator=(FileDescriptor&& other) noexcept {
 }
 
 void FileDescriptor::assert_valid() const {
-  if (!valid()) throw std::logic_error("event::FileDescriptor is empty");
+  if (!valid()) {
+    LOG(FATAL) << "BUG: event::FileDescriptor is empty!";
+  }
 }
 
 base::Result FileDescriptor::get(Set* out) const {
   assert_valid();
-  return ptr_->fd_get(out, fd_, t_);
+  DASSERT_NOTNULL(out);
+  return ptr_->fd_get(out, t_);
 }
 
 base::Result FileDescriptor::modify(Set set) {
   assert_valid();
-  return ptr_->fd_modify(fd_, t_, set);
+  return ptr_->fd_modify(t_, set);
 }
 
 base::Result FileDescriptor::release() {
   std::shared_ptr<ManagerImpl> ptr;
   ptr.swap(ptr_);
-  if (ptr) return ptr->fd_remove(fd_, t_);
+  if (ptr) return ptr->fd_remove(t_);
   return base::Result();
 }
 
@@ -969,13 +1002,15 @@ Signal& Signal::operator=(Signal&& other) noexcept {
 }
 
 void Signal::assert_valid() const {
-  if (!valid()) throw std::logic_error("event::Signal is empty");
+  if (!valid()) {
+    LOG(FATAL) << "BUG: event::Signal is empty!";
+  }
 }
 
 base::Result Signal::release() {
   std::shared_ptr<ManagerImpl> ptr;
   ptr.swap(ptr_);
-  if (ptr) return ptr->signal_remove(sig_, t_);
+  if (ptr) return ptr->signal_remove(t_);
   return base::Result();
 }
 
@@ -986,7 +1021,9 @@ Timer& Timer::operator=(Timer&& other) noexcept {
 }
 
 void Timer::assert_valid() const {
-  if (!valid()) throw std::logic_error("event::Timer is empty");
+  if (!valid()) {
+    LOG(FATAL) << "BUG: event::Timer is empty!";
+  }
 }
 
 base::Result Timer::set_at(base::MonotonicTime at) {
@@ -1014,7 +1051,8 @@ base::Result Timer::set_periodic(base::Duration period) {
   return ptr_->timer_arm(t_, period, period, false);
 }
 
-base::Result Timer::set_periodic_at(base::Duration period, base::MonotonicTime at) {
+base::Result Timer::set_periodic_at(base::Duration period,
+                                    base::MonotonicTime at) {
   assert_valid();
   base::Duration delay = at.since_epoch();
   if (period.is_zero() || period.is_neg())
@@ -1057,7 +1095,9 @@ Generic& Generic::operator=(Generic&& other) noexcept {
 }
 
 void Generic::assert_valid() const {
-  if (!valid()) throw std::logic_error("event::Generic is empty");
+  if (!valid()) {
+    LOG(FATAL) << "BUG: event::Generic is empty!";
+  }
 }
 
 base::Result Generic::fire(int value) const {
@@ -1073,76 +1113,88 @@ base::Result Generic::release() {
 }
 
 void Manager::assert_valid() const {
-  if (!ptr_) throw std::logic_error("event::Manager is empty");
+  if (!ptr_) {
+    LOG(FATAL) << "BUG: event::Manager is empty!";
+  }
 }
 
-Poller& Manager::poller() const {
+std::shared_ptr<Poller> Manager::poller() const {
   assert_valid();
   return ptr_->poller();
 }
 
-Dispatcher& Manager::dispatcher() const {
+std::shared_ptr<Dispatcher> Manager::dispatcher() const {
   assert_valid();
   return ptr_->dispatcher();
 }
 
-base::Result Manager::fd(FileDescriptor* out, int fd, Set set,
+base::Result Manager::fd(FileDescriptor* out, base::FD fd, Set set,
                          std::shared_ptr<Handler> handler) const {
-  base::Result result = out->release();
-  if (result.ok()) {
-    assert_valid();
+  DASSERT_NOTNULL(out);
+  DASSERT_NOTNULL(fd);
+  DASSERT_NOTNULL(handler);
+  assert_valid();
+  base::Result r = out->release();
+  if (r) {
     base::token_t t;
-    result = ptr_->fd_add(&t, fd, set, std::move(handler));
-    if (result.ok()) {
-      *out = FileDescriptor(ptr_, fd, t);
+    r = ptr_->fd_add(&t, fd, set, std::move(handler));
+    if (r) {
+      *out = FileDescriptor(ptr_, std::move(fd), t);
     }
   }
-  return result;
+  return r;
 }
 
 base::Result Manager::signal(Signal* out, int signo,
                              std::shared_ptr<Handler> handler) const {
-  base::Result result = out->release();
-  if (result.ok()) {
-    assert_valid();
+  DASSERT_NOTNULL(out);
+  DASSERT_NOTNULL(handler);
+  assert_valid();
+  base::Result r = out->release();
+  if (r) {
     base::token_t t;
-    result = ptr_->signal_add(&t, signo, std::move(handler));
-    if (result.ok()) {
+    r = ptr_->signal_add(&t, signo, std::move(handler));
+    if (r) {
       *out = Signal(ptr_, signo, t);
     }
   }
-  return result;
+  return r;
 }
 
 base::Result Manager::timer(Timer* out,
                             std::shared_ptr<Handler> handler) const {
-  base::Result result = out->release();
-  if (result.ok()) {
-    assert_valid();
+  DASSERT_NOTNULL(out);
+  DASSERT_NOTNULL(handler);
+  assert_valid();
+  base::Result r = out->release();
+  if (r) {
     base::token_t t;
-    result = ptr_->timer_add(&t, std::move(handler));
-    if (result.ok()) {
+    r = ptr_->timer_add(&t, std::move(handler));
+    if (r) {
       *out = Timer(ptr_, t);
     }
   }
-  return result;
+  return r;
 }
 
 base::Result Manager::generic(Generic* out,
                               std::shared_ptr<Handler> handler) const {
-  base::Result result = out->release();
-  if (result.ok()) {
-    assert_valid();
+  DASSERT_NOTNULL(out);
+  DASSERT_NOTNULL(handler);
+  assert_valid();
+  base::Result r = out->release();
+  if (r) {
     base::token_t t;
-    result = ptr_->generic_add(&t, std::move(handler));
-    if (result.ok()) {
+    r = ptr_->generic_add(&t, std::move(handler));
+    if (r) {
       *out = Generic(ptr_, t);
     }
   }
-  return result;
+  return r;
 }
 
 base::Result Manager::set_deadline(Task* task, base::MonotonicTime at) {
+  DASSERT_NOTNULL(task);
   auto* t = new Timer;
   auto closure0 = [t] {
     delete t;
@@ -1159,6 +1211,7 @@ base::Result Manager::set_deadline(Task* task, base::MonotonicTime at) {
 }
 
 base::Result Manager::set_timeout(Task* task, base::Duration delay) {
+  DASSERT_NOTNULL(task);
   auto* t = new Timer;
   auto closure0 = [t] {
     delete t;
@@ -1195,10 +1248,12 @@ struct WaitData {
 }  // anonymous namespace
 
 void wait_n(std::vector<Manager> mv, std::vector<Task*> tv, std::size_t n) {
-  if (n > tv.size())
-    throw std::logic_error(
-        "event::wait_n asked to wait for more task "
-        "completions than there are provided tasks");
+  if (n > tv.size()) {
+    LOG(DFATAL) << "BUG: event::wait_n asked to wait for " << n
+                << " task completions, but only " << tv.size()
+                << " tasks were provided!";
+    n = tv.size();
+  }
 
   auto closure = [](std::shared_ptr<WaitData> data) {
     auto lock = base::acquire_lock(data->mu);
@@ -1209,13 +1264,14 @@ void wait_n(std::vector<Manager> mv, std::vector<Task*> tv, std::size_t n) {
 
   auto data = std::make_shared<WaitData>();
   for (Task* task : tv) {
+    DASSERT_NOTNULL(task);
     task->on_finished(callback(closure, data));
   }
 
-  bool any_threaded = false;
+  bool all_threaded = true;
   for (const Manager& m : mv) {
-    if (m.dispatcher().type() == DispatcherType::threaded_dispatcher) {
-      any_threaded = true;
+    if (m.dispatcher()->type() != DispatcherType::threaded_dispatcher) {
+      all_threaded = false;
       break;
     }
   }
@@ -1225,7 +1281,7 @@ void wait_n(std::vector<Manager> mv, std::vector<Task*> tv, std::size_t n) {
     // Inline? Maybe it's blocked on I/O. Try donating.
     // Async? Just donate.
     // Threaded? Don't be so eager to join the fray.
-    if (any_threaded) {
+    if (all_threaded) {
       using MS = std::chrono::milliseconds;
       data->cv.wait_for(lock, MS(1));
       if (data->done >= n) return;
@@ -1240,58 +1296,44 @@ void wait_n(std::vector<Manager> mv, std::vector<Task*> tv, std::size_t n) {
 
 static base::Result make_manager(std::shared_ptr<ManagerImpl>* out,
                                  const ManagerOptions& o) {
-  auto min = o.min_pollers();
-  auto max = o.max_pollers();
-  if (!min.first) min.second = 1;
-  if (!max.first) max.second = min.second;
-  if (min.second > max.second)
+  DASSERT_NOTNULL(out);
+
+  std::size_t min, max;
+  bool has_min, has_max;
+  std::tie(has_min, min) = o.min_pollers();
+  std::tie(has_max, max) = o.max_pollers();
+  if (!has_min) min = 1;
+  if (!has_max) max = min;
+  if (min > max)
     return base::Result::invalid_argument("min_pollers > max_pollers");
-  if (max.second < 1) return base::Result::invalid_argument("max_pollers < 1");
+  if (max < 1) return base::Result::invalid_argument("max_pollers < 1");
 
-  Pipe pipe;
-  base::Result result = make_pipe(&pipe);
-  if (!result.ok()) return result;
-  auto cleanup = base::cleanup([pipe] {
-    ::close(pipe.write_fd);
-    ::close(pipe.read_fd);
-  });
+  base::Pipe pipe;
+  base::Result r = base::make_pipe(&pipe);
+  if (!r) return r;
 
-  int flags = ::fcntl(pipe.read_fd, F_GETFL);
-  if (flags == -1) {
-    int err_no = errno;
-    result = base::Result::from_errno(err_no, "fcntl(2)");
-    return result;
-  }
-  flags = ::fcntl(pipe.read_fd, F_SETFL, flags | O_NONBLOCK);
-  if (flags == -1) {
-    int err_no = errno;
-    result = base::Result::from_errno(err_no, "fcntl(2)");
-    return result;
-  }
+  std::shared_ptr<Poller> p;
+  r = new_poller(&p, o.poller());
+  if (!r) return r;
 
-  std::unique_ptr<Poller> p;
-  result = new_poller(&p, o.poller());
-  if (!result.ok()) return result;
-
-  result = p->add(pipe.read_fd, Set::readable_bit());
-  if (!result.ok()) return result;
+  r = p->add(pipe.read, token_t(), Set::readable_bit());
+  if (!r) return r;
 
   std::shared_ptr<Dispatcher> d;
-  result = new_dispatcher(&d, o.dispatcher());
-  if (!result.ok()) return result;
+  r = new_dispatcher(&d, o.dispatcher());
+  if (!r) return r;
 
-  *out = std::make_shared<ManagerImpl>(std::move(p), std::move(d), pipe,
-                                       min.second, max.second);
-  cleanup.cancel();
-  return result;
+  *out =
+      std::make_shared<ManagerImpl>(std::move(p), std::move(d), pipe, min, max);
+  return r;
 }
 
 base::Result new_manager(Manager* out, const ManagerOptions& o) {
-  out->reset();
+  DASSERT_NOTNULL(out)->reset();
   std::shared_ptr<ManagerImpl> ptr;
-  auto result = make_manager(&ptr, o);
-  if (result.ok()) *out = Manager(std::move(ptr));
-  return result;
+  auto r = make_manager(&ptr, o);
+  if (r) *out = Manager(std::move(ptr));
+  return r;
 }
 
 static std::mutex g_sysmgr_mu;

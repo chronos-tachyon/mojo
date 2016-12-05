@@ -17,6 +17,7 @@
 
 #include "base/cleanup.h"
 #include "base/clock.h"
+#include "base/fd.h"
 #include "base/logging.h"
 #include "base/result_testing.h"
 #include "base/util.h"
@@ -26,10 +27,11 @@
 static constexpr char kHelloWorld[] = "Hello, world!\n";
 static constexpr std::size_t kHelloLen = sizeof(kHelloWorld) - 1;
 
-static void write_some_data(int fd, const void* ptr, std::size_t len) {
+static void write_some_data(base::FD fd, const void* ptr, std::size_t len) {
+  auto pair = fd->acquire_fd();
   int n;
 redo:
-  n = ::write(fd, ptr, len);
+  n = ::write(pair.first, ptr, len);
   if (n < 0) {
     int err_no = errno;
     if (err_no == EINTR) goto redo;
@@ -38,12 +40,13 @@ redo:
   if (std::size_t(n) != len) throw std::runtime_error("partial write");
 }
 
-static void read_some_data(int fd, const void* ptr, std::size_t len) {
+static void read_some_data(base::FD fd, const void* ptr, std::size_t len) {
+  auto pair = fd->acquire_fd();
   char buf[16];
   int n;
 redo:
   ::bzero(buf, sizeof(buf));
-  n = ::read(fd, buf, sizeof(buf));
+  n = ::read(pair.first, buf, sizeof(buf));
   if (n < 0) {
     int err_no = errno;
     if (err_no == EINTR) goto redo;
@@ -55,42 +58,38 @@ redo:
 
 using IntPredicate = std::function<bool(int)>;
 
-static void TestManagerImplementation_FDs(event::Manager& m) {
+static void TestManagerImplementation_FDs(event::Manager m) {
+  base::SocketPair s;
+  base::Result r = base::make_socketpair(&s, AF_UNIX, SOCK_STREAM, 0);
+  EXPECT_OK(r);
+
+  {
+    auto pair = s.left->acquire_fd();
+    EXPECT_EQ(0, ::shutdown(pair.first, SHUT_RD));
+  }
+  {
+    auto pair = s.right->acquire_fd();
+    EXPECT_EQ(0, ::shutdown(pair.first, SHUT_WR));
+  }
+
   event::Task task;
-
-  int fds[2] = {-1, -1};
-  int rc =
-      ::socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0, fds);
-  EXPECT_EQ(0, rc);
-  if (rc != 0) return;
-
-  const int fd0 = fds[0];
-  const int fd1 = fds[1];
-  auto cleanup = base::cleanup([fd0, fd1] {
-    ::close(fd0);
-    ::close(fd1);
-  });
-
-  EXPECT_EQ(0, ::shutdown(fd0, SHUT_RD));
-  EXPECT_EQ(0, ::shutdown(fd1, SHUT_WR));
-
-  auto fd_closure = [&task, fd1](event::Data data) {
-    VLOG(0) << "hello from fd_closure";
-    read_some_data(fd1, kHelloWorld, kHelloLen);
+  auto closure = [&s, &task](event::Data data) {
+    VLOG(0) << "hello from closure";
+    read_some_data(s.right, kHelloWorld, kHelloLen);
     task.finish_ok();
     VLOG(0) << "task: finished";
     return base::Result();
   };
 
-  ASSERT_TRUE(task.start());
+  EXPECT_TRUE(task.start());
 
   VLOG(0) << "registering fd";
   event::FileDescriptor fd;
-  ASSERT_OK(
-      m.fd(&fd, fd1, event::Set::readable_bit(), event::handler(fd_closure)));
+  EXPECT_OK(
+      m.fd(&fd, s.right, event::Set::readable_bit(), event::handler(closure)));
 
   VLOG(0) << "writing data";
-  write_some_data(fd0, kHelloWorld, kHelloLen);
+  write_some_data(s.left, kHelloWorld, kHelloLen);
 
   VLOG(0) << "task: waiting for finish";
   event::wait(m, &task);
@@ -100,9 +99,12 @@ static void TestManagerImplementation_FDs(event::Manager& m) {
   VLOG(0) << "before release";
   EXPECT_OK(fd.release());
   VLOG(0) << "after release";
+  EXPECT_OK(s.left->close());
+  EXPECT_OK(s.right->close());
+  VLOG(0) << "after close";
 }
 
-static void TestManagerImplementation_Signals(event::Manager& m) {
+static void TestManagerImplementation_Signals(event::Manager m) {
   event::Task task;
   std::mutex mu;
   int flags = 0;
@@ -122,13 +124,13 @@ static void TestManagerImplementation_Signals(event::Manager& m) {
     return base::Result();
   };
 
-  ASSERT_TRUE(task.start());
+  EXPECT_TRUE(task.start());
 
   VLOG(0) << "registering signals";
   event::Signal hup, usr1, usr2;
-  ASSERT_OK(m.signal(&hup, SIGHUP, event::handler(handler, 1)));
-  ASSERT_OK(m.signal(&usr1, SIGUSR1, event::handler(handler, 2)));
-  ASSERT_OK(m.signal(&usr2, SIGUSR2, event::handler(handler, 4)));
+  EXPECT_OK(m.signal(&hup, SIGHUP, event::handler(handler, 1)));
+  EXPECT_OK(m.signal(&usr1, SIGUSR1, event::handler(handler, 2)));
+  EXPECT_OK(m.signal(&usr2, SIGUSR2, event::handler(handler, 4)));
 
   VLOG(0) << "sending signals";
   ::kill(::getpid(), SIGHUP);
@@ -150,7 +152,7 @@ static void TestManagerImplementation_Signals(event::Manager& m) {
   VLOG(0) << "after release";
 }
 
-static void TestManagerImplementation_Timers(event::Manager& m) {
+static void TestManagerImplementation_Timers(event::Manager m) {
   event::Task task;
   std::mutex mu;
   int counter = 0;
@@ -169,15 +171,15 @@ static void TestManagerImplementation_Timers(event::Manager& m) {
     return base::Result();
   };
 
-  ASSERT_TRUE(task.start());
+  EXPECT_TRUE(task.start());
   auto lock = base::acquire_lock(mu);
 
   VLOG(0) << "registering timer";
   event::Timer t;
-  ASSERT_OK(m.timer(&t, event::handler(timer_closure)));
+  EXPECT_OK(m.timer(&t, event::handler(timer_closure)));
 
   VLOG(0) << "setting timer to period 1ms";
-  ASSERT_OK(t.set_periodic(base::milliseconds(1)));
+  EXPECT_OK(t.set_periodic(base::milliseconds(1)));
 
   lock.unlock();
   VLOG(0) << "task: waiting for finish";
@@ -189,7 +191,7 @@ static void TestManagerImplementation_Timers(event::Manager& m) {
   EXPECT_OK(t.cancel());
 
   task.reset();
-  ASSERT_TRUE(task.start());
+  EXPECT_TRUE(task.start());
   counter = 0;
   predicate = [](int counter) { return counter != 0; };
 
@@ -209,7 +211,7 @@ static void TestManagerImplementation_Timers(event::Manager& m) {
   VLOG(0) << "after release";
 }
 
-static void TestManagerImplementation_Events(event::Manager& m) {
+static void TestManagerImplementation_Events(event::Manager m) {
   event::Task task;
   std::mutex mu;
   std::condition_variable cv;
@@ -225,11 +227,11 @@ static void TestManagerImplementation_Events(event::Manager& m) {
     return base::Result();
   };
 
-  ASSERT_TRUE(task.start());
+  EXPECT_TRUE(task.start());
 
   VLOG(0) << "registering event";
   event::Generic e;
-  ASSERT_OK(m.generic(&e, event::handler(handler)));
+  EXPECT_OK(m.generic(&e, event::handler(handler)));
 
   VLOG(0) << "spawning thread";
   std::thread thd([&mu, &cv, &ready, &e] {
@@ -266,7 +268,7 @@ static void TestManagerImplementation_TaskTimeouts(event::Manager m) {
   event::Task task;
   event::Timer t;
 
-  auto closure = [&mu, &a, &b, &task, &t] (event::Data data) {
+  auto closure = [&mu, &a, &b, &task, &t](event::Data data) {
     if (task.is_running()) {
       auto lock = base::acquire_lock(mu);
       auto i = data.int_value;
@@ -316,7 +318,7 @@ TEST(Manager, DefaultDefault) {
   event::Manager m;
   event::ManagerOptions o;
   EXPECT_OK(event::new_manager(&m, o));
-  TestManagerImplementation(std::move(m), "default/default");
+  TestManagerImplementation(m, "default/default");
 }
 
 TEST(Manager, DefaultAsync) {
@@ -324,7 +326,7 @@ TEST(Manager, DefaultAsync) {
   event::ManagerOptions o;
   o.dispatcher().set_type(event::DispatcherType::async_dispatcher);
   EXPECT_OK(event::new_manager(&m, o));
-  TestManagerImplementation(std::move(m), "default/async");
+  TestManagerImplementation(m, "default/async");
 }
 
 TEST(Manager, AsyncAsync) {
@@ -333,7 +335,7 @@ TEST(Manager, AsyncAsync) {
   o.set_num_pollers(0, 1);
   o.dispatcher().set_type(event::DispatcherType::async_dispatcher);
   EXPECT_OK(event::new_manager(&m, o));
-  TestManagerImplementation(std::move(m), "async/async");
+  TestManagerImplementation(m, "async/async");
 }
 
 TEST(Manager, AsyncInline) {
@@ -342,7 +344,7 @@ TEST(Manager, AsyncInline) {
   o.set_num_pollers(0, 1);
   o.dispatcher().set_type(event::DispatcherType::inline_dispatcher);
   EXPECT_OK(event::new_manager(&m, o));
-  TestManagerImplementation(std::move(m), "async/inline");
+  TestManagerImplementation(m, "async/inline");
 }
 
 static void init() __attribute__((constructor));

@@ -5,6 +5,7 @@
 
 #include <stdexcept>
 
+#include "base/logging.h"
 #include "event/dispatcher.h"
 
 namespace event {
@@ -32,18 +33,13 @@ void Task::reset() {
       break;
 
     default:
-      throw std::runtime_error(
-          "attempt to reset an event::Task that is currently live!");
+      LOG(DFATAL) << "BUG: event::Task: reset() on running task!";
   }
 }
 
 static void assert_finished(Task::State state) {
-  switch (state) {
-    case Task::State::done:
-      break;
-
-    default:
-      throw std::logic_error("event::Task is not yet finished");
+  if (state < Task::State::done) {
+    LOG(DFATAL) << "BUG: event::Task is not yet finished!";
   }
 }
 
@@ -56,7 +52,7 @@ base::Result Task::result() const {
 
 bool Task::result_will_throw() const noexcept {
   auto lock = base::acquire_lock(mu_);
-  if (state_ < Task::State::done) return true;
+  assert_finished(state_);
   if (eptr_) return true;
   return false;
 }
@@ -117,40 +113,51 @@ bool Task::start() {
     state_ = State::running;
     return true;
   }
-  if (state_ >= State::done) return false;
-  throw std::logic_error("event::Task: start() on running task");
+  if (state_ < State::done) {
+    LOG(DFATAL) << "BUG: event::Task: start() on running task!";
+  }
+  return false;
 }
 
 bool Task::finish(base::Result result) {
   auto lock = base::acquire_lock(mu_);
-  if (state_ >= State::done) return false;
-  if (state_ >= State::running) {
+  if (state_ < State::running) {
+    LOG(DFATAL) << "BUG: event::Task: finish() without start()!";
+    state_ = State::running;
+  }
+  if (state_ < State::done) {
     finish_impl(std::move(lock), std::move(result), nullptr);
     return true;
   }
-  throw std::logic_error("event::Task: finish() without start()");
+  return false;
 }
 
 bool Task::finish_cancel() {
   auto lock = base::acquire_lock(mu_);
-  if (state_ >= State::done) return false;
-  if (state_ >= State::running) {
+  if (state_ < State::running) {
+    LOG(DFATAL) << "BUG: event::Task: finish_cancel() without start()";
+    state_ = State::running;
+  }
+  if (state_ < State::done) {
     auto r = base::Result::cancelled();
     if (state_ == State::expiring) r = base::Result::deadline_exceeded();
     finish_impl(std::move(lock), std::move(r), nullptr);
     return true;
   }
-  throw std::logic_error("event::Task: finish_cancel() without start()");
+  return false;
 }
 
 bool Task::finish_exception(std::exception_ptr eptr) {
   auto lock = base::acquire_lock(mu_);
-  if (state_ >= State::done) return false;
-  if (state_ >= State::running) {
+  if (state_ < State::running) {
+    LOG(DFATAL) << "BUG: event::Task: finish_exception() without start()";
+    state_ = State::running;
+  }
+  if (state_ < State::done) {
     finish_impl(std::move(lock), exception_result(), eptr);
     return true;
   }
-  throw std::logic_error("event::Task: finish() without start()");
+  return false;
 }
 
 void Task::finish_impl(std::unique_lock<std::mutex> lock, base::Result result,

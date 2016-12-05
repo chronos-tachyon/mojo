@@ -11,6 +11,7 @@
 
 #include "base/clock.h"
 #include "base/duration.h"
+#include "base/fd.h"
 #include "base/result.h"
 #include "base/time.h"
 #include "base/token.h"
@@ -26,27 +27,22 @@ namespace event {
 class ManagerImpl;  // forward declaration
 
 // An event::FileDescriptor binds a file descriptor to an event::Manager.
-//
-// THREAD SAFETY: This class is thread-safe.
-//
 class FileDescriptor {
  private:
   friend class Manager;
 
-  FileDescriptor(std::shared_ptr<ManagerImpl> ptr, int fd,
+  FileDescriptor(std::shared_ptr<ManagerImpl> ptr, base::FD fd,
                  base::token_t t) noexcept : ptr_(std::move(ptr)),
-                                             fd_(fd),
+                                             fd_(std::move(fd)),
                                              t_(t) {}
 
  public:
   // The default constructor produces an invalid (unbound) FileDescriptor.
-  FileDescriptor() noexcept : FileDescriptor(nullptr, -1, base::token_t()) {}
+  FileDescriptor() : ptr_(), fd_(), t_() {}
 
   // FileDescriptors are move-only objects.
   FileDescriptor(const FileDescriptor&) = delete;
-  FileDescriptor(FileDescriptor&& x) noexcept : ptr_(std::move(x.ptr_)),
-                                                fd_(x.fd_),
-                                                t_(x.t_) {}
+  FileDescriptor(FileDescriptor&& x) noexcept = default;
   FileDescriptor& operator=(const FileDescriptor&) = delete;
   FileDescriptor& operator=(FileDescriptor&&) noexcept;
 
@@ -77,16 +73,13 @@ class FileDescriptor {
 
  private:
   std::shared_ptr<ManagerImpl> ptr_;
-  int fd_;
+  base::FD fd_;
   base::token_t t_;
 };
 
 inline void swap(FileDescriptor& a, FileDescriptor& b) noexcept { a.swap(b); }
 
 // An event::Signal binds a Unix signal to an event::Manager.
-//
-// THREAD SAFETY: This class is thread-safe.
-//
 class Signal {
  private:
   friend class Manager;
@@ -139,9 +132,6 @@ inline void swap(Signal& a, Signal& b) noexcept { a.swap(b); }
 
 // An event::Timer binds a timer of some kind to an event::Manager.
 // The timer is initially unarmed; use the Timer::set_* methods to arm.
-//
-// THREAD SAFETY: This class is thread-safe.
-//
 class Timer {
  private:
   friend class Manager;
@@ -213,9 +203,6 @@ class Timer {
 inline void swap(Timer& a, Timer& b) noexcept { a.swap(b); }
 
 // An event::Generic binds an arbitrary event to an event::Manager.
-//
-// THREAD SAFETY: This class is thread-safe.
-//
 class Generic {
  private:
   friend class Manager;
@@ -394,21 +381,21 @@ class Manager {
   const Manager& or_system_manager() const;
 
   // Returns this Manager's Poller implementation.
-  Poller& poller() const;
+  std::shared_ptr<Poller> poller() const;
 
   // Returns this Manager's Dispatcher implementation.
-  Dispatcher& dispatcher() const;
+  std::shared_ptr<Dispatcher> dispatcher() const;
 
   // Forwards the given <Task, Callback> to this Manager's Dispatcher.
   void dispatch(Task* task, std::unique_ptr<Callback> callback) const {
-    dispatcher().dispatch(task, std::move(callback));
+    dispatcher()->dispatch(task, std::move(callback));
   }
   void dispatch(std::unique_ptr<Callback> callback) const {
-    dispatcher().dispatch(std::move(callback));
+    dispatcher()->dispatch(std::move(callback));
   }
 
   // Registers an event handler for a file descriptor.
-  base::Result fd(FileDescriptor* out, int fd, Set set,
+  base::Result fd(FileDescriptor* out, base::FD fd, Set set,
                   std::shared_ptr<Handler> handler) const;
 
   // Registers an event handler for a Unix signal.

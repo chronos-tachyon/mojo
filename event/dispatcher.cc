@@ -216,7 +216,10 @@ class ThreadPoolDispatcher : public Dispatcher {
         done_(0),
         caught_(0),
         corked_(false) {
-    if (min > max) throw std::logic_error("min > max");
+    if (min > max) {
+      LOG(DFATAL) << "BUG: min > max";
+      max = min;
+    }
     auto lock = base::acquire_lock(mu_);
     ensure();
     while (current_ < min_) curr_cv_.wait(lock);
@@ -439,7 +442,7 @@ std::shared_ptr<Dispatcher> system_inline_dispatcher() {
 std::shared_ptr<Dispatcher> system_dispatcher() {
   auto lock = base::acquire_lock(g_sys_mu);
   if (g_sys_d == nullptr) g_sys_d = new std::shared_ptr<Dispatcher>;
-  if (!*g_sys_d) 
+  if (!*g_sys_d)
     *g_sys_d = std::make_shared<ThreadPoolDispatcher>(nullptr, 1, num_cores());
   return *g_sys_d;
 }

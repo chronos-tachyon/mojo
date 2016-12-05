@@ -28,6 +28,7 @@ namespace event {
 class Handler {
  protected:
   Handler() noexcept = default;
+
  public:
   // Handlers are neither copyable nor moveable.
   Handler(const Handler&) = delete;
