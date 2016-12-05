@@ -11,8 +11,7 @@ namespace base {
 
 std::pair<Duration, Duration> Stopwatch::durations() const {
   MonotonicTime end = stop_;
-  if (running_)
-    end = clock_.now();
+  if (running_) end = clock_.now();
   Duration d = end - start_;
   return std::make_pair(d, cumulative_ + d);
 }

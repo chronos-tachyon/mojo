@@ -123,7 +123,9 @@ class MonotonicTime {
   MonotonicTime& operator=(MonotonicTime&&) noexcept = default;
 
   // Constructs a MonotonicTime in terms of the Duration since the epoch.
-  static constexpr MonotonicTime from_epoch(Duration d) noexcept { return MonotonicTime(d); }
+  static constexpr MonotonicTime from_epoch(Duration d) noexcept {
+    return MonotonicTime(d);
+  }
 
   // Returns the MonotonicTime as a Duration since the epoch.
   constexpr Duration since_epoch() const noexcept { return d_; }
@@ -158,13 +160,21 @@ inline void swap(MonotonicTime& a, MonotonicTime& b) noexcept { a.swap(b); }
 inline constexpr bool operator==(MonotonicTime a, MonotonicTime b) noexcept {
   return a.since_epoch() == b.since_epoch();
 }
-inline constexpr bool operator!=(MonotonicTime a, MonotonicTime b) noexcept { return !(a == b); }
+inline constexpr bool operator!=(MonotonicTime a, MonotonicTime b) noexcept {
+  return !(a == b);
+}
 inline constexpr bool operator<(MonotonicTime a, MonotonicTime b) noexcept {
   return a.since_epoch() < b.since_epoch();
 }
-inline constexpr bool operator>(MonotonicTime a, MonotonicTime b) noexcept { return (b < a); }
-inline constexpr bool operator<=(MonotonicTime a, MonotonicTime b) noexcept { return !(b < a); }
-inline constexpr bool operator>=(MonotonicTime a, MonotonicTime b) noexcept { return !(a < b); }
+inline constexpr bool operator>(MonotonicTime a, MonotonicTime b) noexcept {
+  return (b < a);
+}
+inline constexpr bool operator<=(MonotonicTime a, MonotonicTime b) noexcept {
+  return !(b < a);
+}
+inline constexpr bool operator>=(MonotonicTime a, MonotonicTime b) noexcept {
+  return !(a < b);
+}
 
 // }}}
 // Arithmetic operators, part 2 {{{
@@ -175,13 +185,19 @@ inline constexpr MonotonicTime operator+(MonotonicTime a, Duration b) {
 inline constexpr MonotonicTime operator+(Duration a, MonotonicTime b) {
   return MonotonicTime::from_epoch(a + b.since_epoch());
 }
-inline constexpr MonotonicTime operator-(MonotonicTime a, Duration b) { return a + (-b); }
+inline constexpr MonotonicTime operator-(MonotonicTime a, Duration b) {
+  return a + (-b);
+}
 inline constexpr Duration operator-(MonotonicTime a, MonotonicTime b) {
   return a.since_epoch() - b.since_epoch();
 }
 
-inline MonotonicTime& MonotonicTime::operator+=(Duration b) { return (*this = (*this + b)); }
-inline MonotonicTime& MonotonicTime::operator-=(Duration b) { return (*this = (*this - b)); }
+inline MonotonicTime& MonotonicTime::operator+=(Duration b) {
+  return (*this = (*this + b));
+}
+inline MonotonicTime& MonotonicTime::operator-=(Duration b) {
+  return (*this = (*this - b));
+}
 
 // }}}
 

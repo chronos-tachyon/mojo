@@ -58,9 +58,7 @@ token_t next_token() noexcept;
 namespace std {
 template <>
 struct hash<base::token_t> {
-  std::size_t operator()(base::token_t t) const noexcept {
-    return uint64_t(t);
-  }
+  std::size_t operator()(base::token_t t) const noexcept { return uint64_t(t); }
 };
 }  // namespace std
 

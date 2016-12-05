@@ -9,11 +9,11 @@ namespace base {
 
 static constexpr bool debug =
 #ifdef NDEBUG
-  false
+    false
 #else
-  true
+    true
 #endif
-  ;
+    ;
 
 }  // namespace base
 

@@ -8,7 +8,8 @@ namespace event {
 namespace internal {
 class FunctionCallback : public Callback {
  public:
-  FunctionCallback(std::function<base::Result()> f) noexcept : f_(std::move(f)) {}
+  FunctionCallback(std::function<base::Result()> f) noexcept
+      : f_(std::move(f)) {}
   base::Result run() override;
 
  private:

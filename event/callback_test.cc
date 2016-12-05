@@ -20,7 +20,7 @@ TEST(Callback, Basics) {
   EXPECT_OK(c->run());
   EXPECT_EQ(1, a);
 
-  auto closure0 = [&a] (int* ptr) {
+  auto closure0 = [&a](int* ptr) {
     ++a;
     *ptr /= 2;
     return base::Result::out_of_range("my spoon is too big");
@@ -34,7 +34,7 @@ TEST(Callback, Basics) {
   EXPECT_EQ(2, a);
   EXPECT_EQ(4, b);
 
-  auto closure1 = [&a] (std::unique_ptr<int> ptr) {
+  auto closure1 = [&a](std::unique_ptr<int> ptr) {
     if (!ptr) return base::Result::internal("null pointer");
     a += *ptr;
     return base::Result();

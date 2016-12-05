@@ -10,9 +10,7 @@
 
 #include "base/logging.h"
 
-static pid_t my_gettid() {
-  return 42;
-}
+static pid_t my_gettid() { return 42; }
 
 static int my_gettimeofday(struct timeval* tv, struct timezone* unused) {
   // Mon 2006 Jan 02 15:04:05.123456 -0700

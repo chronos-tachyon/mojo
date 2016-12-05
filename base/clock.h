@@ -102,7 +102,8 @@ class MonotonicClockImpl {
 class MonotonicClock {
  public:
   // MonotonicClocks are normally constructed from an implementation.
-  MonotonicClock(std::shared_ptr<MonotonicClockImpl> ptr) noexcept : ptr_(std::move(ptr)) {}
+  MonotonicClock(std::shared_ptr<MonotonicClockImpl> ptr) noexcept
+      : ptr_(std::move(ptr)) {}
 
   // MonotonicClocks are default constructible, copyable, and moveable.
   MonotonicClock() noexcept = default;

@@ -114,9 +114,7 @@ const Result::MemoMap* Result::s_memo_map = nullptr;
 
 Result::NameMap* Result::build_name_map() {
   std::unique_ptr<NameMap> map(new NameMap);
-  auto f = [&map](Code x, std::string n) {
-    (*map)[x] = n;
-  };
+  auto f = [&map](Code x, std::string n) { (*map)[x] = n; };
   f(Code::OK, "OK");
 #define MAP(x) f(Code::x, #x)
   MAP(UNKNOWN);

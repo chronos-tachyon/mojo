@@ -9,7 +9,8 @@ namespace base {
 
 void Duration::append_to(std::string& out) const {
   std::ostringstream os;
-  os << std::boolalpha << "Duration(" << neg_ << ", " << s_ << ", " << ns_ << ")";
+  os << std::boolalpha << "Duration(" << neg_ << ", " << s_ << ", " << ns_
+     << ")";
   out.append(os.str());
 }
 
