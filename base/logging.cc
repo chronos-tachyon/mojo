@@ -27,6 +27,8 @@ static std::size_t uintlen(unsigned long value) {
   if (value < 10) return 1;
   if (value < 100) return 2;
   if (value < 1000) return 3;
+  if (value < 10000) return 4;
+  if (value < 100000) return 5;
   double x = log10(value);
   return static_cast<std::size_t>(round(x));
 }
@@ -194,13 +196,15 @@ Logger::~Logger() noexcept(false) {
     const std::size_t n_file = ::strlen(file_);
     const std::size_t n_line = uintlen(line_);
     const std::size_t n_message = message.size();
-    buf.resize(28 + n_tid + n_file + n_line + n_message);
+    buf.resize(64 + n_tid + n_file + n_line + n_message);
 
     ::snprintf(buf.data(), buf.size(),
                "%c%02u%02u %02u:%02u:%02u.%06lu  %d %s:%u] %s", ch,
                tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec,
                tv.tv_usec, tid, file_, line_, message.c_str());
-    buf.back() = '\n';
+    std::size_t n = ::strlen(buf.data());
+    buf.resize(n + 2);
+    buf[n + 1] = '\n';
 
     auto& vec = vec_get(lock);
     for (auto target : vec) {
