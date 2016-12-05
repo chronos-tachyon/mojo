@@ -19,9 +19,6 @@
 #include "base/debug.h"
 #include "base/util.h"
 
-static constexpr signed char kFatalLevel =
-    base::debug ? LOG_LEVEL_DFATAL : LOG_LEVEL_FATAL;
-
 static pid_t gettid() { return syscall(SYS_gettid); }
 
 static std::size_t uintlen(unsigned long value) {
@@ -214,8 +211,10 @@ Logger::~Logger() noexcept(false) {
       }
     }
 
-    if (level_ >= kFatalLevel) {
-      throw fatal_error();
+    if (level_ >= LOG_LEVEL_DFATAL) {
+      if (level_ >= LOG_LEVEL_FATAL || debug()) {
+        throw fatal_error();
+      }
     }
   }
 }
@@ -265,6 +264,8 @@ void log_exception(const char* file, unsigned int line, std::exception_ptr e) {
   Logger logger(file, line, 1, LOG_LEVEL_ERROR);
   try {
     std::rethrow_exception(e);
+  } catch (const fatal_error& e) {
+    logger << "caught base::fatal_error";
   } catch (const null_pointer& e) {
     logger << "caught base::null_pointer\n"
            << "\t" << e.what();
@@ -278,8 +279,16 @@ void log_exception(const char* file, unsigned int line, std::exception_ptr e) {
            << "\t[" << typeid(e).name() << "]\n"
            << "\t" << e.what();
   } catch (...) {
-    logger << "ERROR: caught unclassifiable exception!";
+    logger << "caught unclassifiable exception!";
   }
+}
+
+Logger log_check(const char* file, unsigned int line, const char* expr,
+                        bool cond) {
+  if (cond) return Logger(nullptr);
+  Logger logger(file, line, 1, LOG_LEVEL_DFATAL);
+  logger << "CHECK FAILED: " << expr;
+  return logger;
 }
 
 }  // namespace base

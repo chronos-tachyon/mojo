@@ -1,4 +1,4 @@
-// base/debug.h - Provides a C++11-friendly way to access the NDEBUG macro
+// base/debug.h - Provides a friendly way to check the glboal debugging mode
 // Copyright © 2016 by Donald King <chronos@chronos-tachyon.net>
 // Available under the MIT License. See LICENSE for details.
 
@@ -7,13 +7,8 @@
 
 namespace base {
 
-static constexpr bool debug =
-#ifdef NDEBUG
-    false
-#else
-    true
-#endif
-    ;
+bool debug() noexcept;
+void set_debug(bool value);
 
 }  // namespace base
 

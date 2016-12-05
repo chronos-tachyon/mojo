@@ -121,7 +121,79 @@ void log_set_gettimeofday(GetTimeOfDayFunc func);
 #endif
 
 void log_exception(const char* file, unsigned int line, std::exception_ptr e);
-#define LOG_EXCEPTION(x) ::base::log_exception(__FILE__, __LINE__, (x))
+#define LOG_EXCEPTION(e) ::base::log_exception(__FILE__, __LINE__, (e))
+
+Logger log_check(const char* file, unsigned int line, const char* expr,
+                 bool cond);
+
+template <typename T, typename U, typename Predicate>
+Logger log_check_op(const char* file, unsigned int line, Predicate pred,
+                    const char* lhsexpr, const T& lhs, const char* rhsexpr,
+                    const U& rhs) {
+  if (pred(lhs, rhs)) return Logger(nullptr);
+  const char* op = pred.name();
+  Logger logger(file, line, 1, LOG_LEVEL_DFATAL);
+  logger << "CHECK FAILED: " << lhsexpr << " " << op << " " << rhsexpr << " "
+         << "[" << lhs << " " << op << " " << rhs << "]";
+  return logger;
+}
+
+struct OpEQ {
+  template <typename T, typename U>
+  bool operator()(const T& lhs, const U& rhs) const {
+    return (lhs == rhs);
+  }
+  const char* name() const { return "=="; }
+};
+struct OpNE {
+  template <typename T, typename U>
+  bool operator()(const T& lhs, const U& rhs) const {
+    return !(lhs == rhs);
+  }
+  const char* name() const { return "!="; }
+};
+struct OpLT {
+  template <typename T, typename U>
+  bool operator()(const T& lhs, const U& rhs) const {
+    return (lhs < rhs);
+  }
+  const char* name() const { return "<"; }
+};
+struct OpGT {
+  template <typename T, typename U>
+  bool operator()(const T& lhs, const U& rhs) const {
+    return (rhs < lhs);
+  }
+  const char* name() const { return ">"; }
+};
+struct OpLE {
+  template <typename T, typename U>
+  bool operator()(const T& lhs, const U& rhs) const {
+    return !(rhs < lhs);
+  }
+  const char* name() const { return "<="; }
+};
+struct OpGE {
+  template <typename T, typename U>
+  bool operator()(const T& lhs, const U& rhs) const {
+    return !(lhs < rhs);
+  }
+  const char* name() const { return ">="; }
+};
+
+#define CHECK(x) ::base::log_check(__FILE__, __LINE__, #x, (x))
+#define CHECK_EQ(x, y) \
+  ::base::log_check_op(__FILE__, __LINE__, ::base::OpEQ(), #x, (x), #y, (y))
+#define CHECK_NE(x, y) \
+  ::base::log_check_op(__FILE__, __LINE__, ::base::OpNE(), #x, (x), #y, (y))
+#define CHECK_LT(x, y) \
+  ::base::log_check_op(__FILE__, __LINE__, ::base::OpLT(), #x, (x), #y, (y))
+#define CHECK_LE(x, y) \
+  ::base::log_check_op(__FILE__, __LINE__, ::base::OpLE(), #x, (x), #y, (y))
+#define CHECK_GT(x, y) \
+  ::base::log_check_op(__FILE__, __LINE__, ::base::OpGT(), #x, (x), #y, (y))
+#define CHECK_GE(x, y) \
+  ::base::log_check_op(__FILE__, __LINE__, ::base::OpGE(), #x, (x), #y, (y))
 
 }  // namespace base
 

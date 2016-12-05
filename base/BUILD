@@ -79,6 +79,7 @@ cc_test(
   srcs = ["logging_test.cc"],
   deps = [
     ":base",
+    ":result_testing",
     "//external:gtest",
     "//external:re2",
   ],
