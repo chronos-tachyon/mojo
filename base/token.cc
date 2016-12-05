@@ -3,16 +3,15 @@
 
 #include "base/token.h"
 
-#include <mutex>
+#include <atomic>
+#include <cstdint>
 
 namespace base {
 
-static std::mutex g_tok_mu;
-static uint64_t g_tok_last = 0;
+static std::atomic<uint64_t> g_last;
 
 token_t next_token() noexcept {
-  std::lock_guard<std::mutex> lock(g_tok_mu);
-  return token_t(++g_tok_last);
+  return token_t(1 + g_last.fetch_add(1));
 }
 
 }  // namespace base
