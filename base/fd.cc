@@ -60,7 +60,7 @@ Result FDHolder::close() {
 }
 
 Result make_pipe(Pipe* out) {
-  *DASSERT_NOTNULL(out) = Pipe();
+  *DCHECK_NOTNULL(out) = Pipe();
   int fds[2] = {-1, -1};
   int rc = ::pipe2(fds, O_NONBLOCK | O_CLOEXEC);
   if (rc != 0) {
@@ -72,7 +72,7 @@ Result make_pipe(Pipe* out) {
 }
 
 Result make_socketpair(SocketPair* out, int domain, int type, int protocol) {
-  *DASSERT_NOTNULL(out) = SocketPair();
+  *DCHECK_NOTNULL(out) = SocketPair();
   type |= SOCK_NONBLOCK;
   type |= SOCK_CLOEXEC;
   int fds[2] = {-1, -1};
@@ -86,7 +86,7 @@ Result make_socketpair(SocketPair* out, int domain, int type, int protocol) {
 }
 
 Result set_blocking(FD fd, bool value) {
-  auto pair = DASSERT_NOTNULL(fd)->acquire_fd();
+  auto pair = DCHECK_NOTNULL(fd)->acquire_fd();
   int flags = ::fcntl(pair.first, F_GETFL);
   if (flags == -1) {
     int err_no = errno;
@@ -105,7 +105,7 @@ Result set_blocking(FD fd, bool value) {
 }
 
 Result read_exactly(FD fd, void* ptr, std::size_t len, const char* what) {
-  auto pair = DASSERT_NOTNULL(fd)->acquire_fd();
+  auto pair = DCHECK_NOTNULL(fd)->acquire_fd();
   int n;
 redo:
   ::bzero(ptr, len);
@@ -124,7 +124,7 @@ redo:
 
 Result write_exactly(FD fd, const void* ptr, std::size_t len,
                      const char* what) {
-  auto pair = DASSERT_NOTNULL(fd)->acquire_fd();
+  auto pair = DCHECK_NOTNULL(fd)->acquire_fd();
   int n;
 redo:
   n = ::write(pair.first, ptr, len);

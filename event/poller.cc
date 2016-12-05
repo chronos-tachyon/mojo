@@ -6,6 +6,7 @@
 #include <sys/epoll.h>
 #include <unistd.h>
 
+#include "base/logging.h"
 #include "base/util.h"
 
 static uint32_t epoll_mask(event::Set set) noexcept {
@@ -42,7 +43,7 @@ class EPollPoller : public Poller {
     ::bzero(&ev, sizeof(ev));
     ev.events = epoll_mask(set);
     ev.data.u64 = uint64_t(t);
-    auto pair = DASSERT_NOTNULL(fd)->acquire_fd();
+    auto pair = DCHECK_NOTNULL(fd)->acquire_fd();
     int rc = ::epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, pair.first, &ev);
     if (rc != 0) {
       int err_no = errno;
@@ -56,7 +57,7 @@ class EPollPoller : public Poller {
     ::bzero(&ev, sizeof(ev));
     ev.events = epoll_mask(set);
     ev.data.u64 = uint64_t(t);
-    auto pair = DASSERT_NOTNULL(fd)->acquire_fd();
+    auto pair = DCHECK_NOTNULL(fd)->acquire_fd();
     int rc = ::epoll_ctl(epoll_fd_, EPOLL_CTL_MOD, pair.first, &ev);
     if (rc != 0) {
       int err_no = errno;
@@ -67,7 +68,7 @@ class EPollPoller : public Poller {
 
   base::Result remove(base::FD fd) override {
     epoll_event dummy;
-    auto pair = DASSERT_NOTNULL(fd)->acquire_fd();
+    auto pair = DCHECK_NOTNULL(fd)->acquire_fd();
     int rc = ::epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, pair.first, &dummy);
     if (rc != 0) {
       int err_no = errno;
@@ -120,7 +121,7 @@ base::Result new_epoll_poller(std::shared_ptr<Poller>* out,
 
 base::Result new_poller(std::shared_ptr<Poller>* out,
                         const PollerOptions& opts) {
-  DASSERT_NOTNULL(out)->reset();
+  DCHECK_NOTNULL(out)->reset();
   auto type = opts.type();
   switch (type) {
     case PollerType::unspecified:

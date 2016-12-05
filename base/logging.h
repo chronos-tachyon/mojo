@@ -16,6 +16,13 @@
 
 namespace base {
 
+#define LOG_LEVEL_INFO 1
+#define LOG_LEVEL_WARN 2
+#define LOG_LEVEL_ERROR 3
+#define LOG_LEVEL_DFATAL 4
+#define LOG_LEVEL_FATAL 5
+#define LOG_LEVEL(name) LOG_LEVEL_##name
+
 // Logger collects a single log message to be output.
 class Logger {
  private:
@@ -66,7 +73,7 @@ class Logger {
   std::unique_ptr<std::ostringstream> ss_;
 };
 
-// Exception class thrown by FATAL errors.
+// Exception class thrown by LOG(FATAL) errors.
 class fatal_error {
  public:
   constexpr fatal_error() noexcept = default;
@@ -74,6 +81,21 @@ class fatal_error {
   constexpr fatal_error(fatal_error&&) noexcept = default;
   fatal_error& operator=(const fatal_error&) noexcept = default;
   fatal_error& operator=(fatal_error&&) noexcept = default;
+};
+
+// Exception class thrown by CHECK_NOTNULL errors.
+class null_pointer {
+ public:
+  constexpr null_pointer() noexcept : what_("") {}
+  constexpr null_pointer(const char* what) noexcept : what_(what ? what : "") {}
+  constexpr null_pointer(const null_pointer&) noexcept = default;
+  constexpr null_pointer(null_pointer&&) noexcept = default;
+  null_pointer& operator=(const null_pointer&) noexcept = default;
+  null_pointer& operator=(null_pointer&&) noexcept = default;
+  constexpr const char* what() const noexcept { return what_; }
+
+ private:
+  const char* what_;
 };
 
 // Low-level functions for routing logs {{{
@@ -93,35 +115,7 @@ void log_set_gettimeofday(GetTimeOfDayFunc func);
 
 // }}}
 
-#define LOG_LEVEL_INFO 1
-#define LOG_LEVEL_WARN 2
-#define LOG_LEVEL_ERROR 3
-#define LOG_LEVEL_DFATAL 4
-#define LOG_LEVEL_FATAL 5
-#define LOG_LEVEL(name) LOG_LEVEL_##name
-
-#define LOG(name) ::base::Logger(__FILE__, __LINE__, 1, LOG_LEVEL(name))
-#define VLOG(vlevel) ::base::Logger(__FILE__, __LINE__, 1, -(vlevel))
-
-#define LOG_EVERY_N(name, n) \
-  ::base::Logger(__FILE__, __LINE__, (n), LOG_LEVEL(name))
-#define VLOG_EVERY_N(vlevel, n) \
-  ::base::Logger(__FILE__, __LINE__, (n), -(vlevel))
-
-#ifdef NDEBUG
-#define DLOG(name) ::base::Logger(nullptr)
-#define DVLOG(vlevel) ::base::Logger(nullptr)
-#define DLOG_EVERY_N(name, n) ::base::Logger(nullptr)
-#define DVLOG_EVERY_N(vlevel, n) ::base::Logger(nullptr)
-#else
-#define DLOG(name) LOG(name)
-#define DVLOG(vlevel) VLOG(vlevel)
-#define DLOG_EVERY_N(name, n) LOG_EVERY_N(name, (n))
-#define DVLOG_EVERY_N(vlevel, n) VLOG_EVERY_N((vlevel), (n))
-#endif
-
 void log_exception(const char* file, unsigned int line, std::exception_ptr e);
-#define LOG_EXCEPTION(e) ::base::log_exception(__FILE__, __LINE__, (e))
 
 Logger log_check(const char* file, unsigned int line, const char* expr,
                  bool cond);
@@ -181,7 +175,59 @@ struct OpGE {
   const char* name() const { return ">="; }
 };
 
+template <typename T>
+T* log_check_notnull(const char* file, unsigned int line, const char* expr,
+                     T* ptr) {
+  if (ptr) return ptr;
+  try {
+    Logger logger(file, line, 1, LOG_LEVEL_FATAL);
+    logger << "CHECK FAILED: " << expr << " != nullptr";
+  } catch (const fatal_error& e) {
+    // pass
+  }
+  throw null_pointer(expr);
+}
+
+template <typename T>
+std::unique_ptr<T> log_check_notnull(const char* file, unsigned int line,
+                                     const char* expr, std::unique_ptr<T> ptr) {
+  if (ptr) return std::move(ptr);
+  try {
+    Logger logger(file, line, 1, LOG_LEVEL_FATAL);
+    logger << "CHECK FAILED: " << expr << " != nullptr";
+  } catch (const fatal_error& e) {
+    // pass
+  }
+  throw null_pointer(expr);
+}
+
+template <typename T>
+std::shared_ptr<T> log_check_notnull(const char* file, unsigned int line,
+                                     const char* expr, std::shared_ptr<T> ptr) {
+  if (ptr) return std::move(ptr);
+  try {
+    Logger logger(file, line, 1, LOG_LEVEL_FATAL);
+    logger << "CHECK FAILED: " << expr << " != nullptr";
+  } catch (const fatal_error& e) {
+    // pass
+  }
+  throw null_pointer(expr);
+}
+
+Logger force_eval(bool);
+
+#define LOG(name) ::base::Logger(__FILE__, __LINE__, 1, LOG_LEVEL(name))
+#define VLOG(vlevel) ::base::Logger(__FILE__, __LINE__, 1, -(vlevel))
+
+#define LOG_EVERY_N(name, n) \
+  ::base::Logger(__FILE__, __LINE__, (n), LOG_LEVEL(name))
+#define VLOG_EVERY_N(vlevel, n) \
+  ::base::Logger(__FILE__, __LINE__, (n), -(vlevel))
+
+#define LOG_EXCEPTION(e) ::base::log_exception(__FILE__, __LINE__, (e))
+
 #define CHECK(x) ::base::log_check(__FILE__, __LINE__, #x, (x))
+
 #define CHECK_EQ(x, y) \
   ::base::log_check_op(__FILE__, __LINE__, ::base::OpEQ(), #x, (x), #y, (y))
 #define CHECK_NE(x, y) \
@@ -194,6 +240,47 @@ struct OpGE {
   ::base::log_check_op(__FILE__, __LINE__, ::base::OpGT(), #x, (x), #y, (y))
 #define CHECK_GE(x, y) \
   ::base::log_check_op(__FILE__, __LINE__, ::base::OpGE(), #x, (x), #y, (y))
+
+#define CHECK_NOTNULL(ptr) \
+  ::base::log_check_notnull(__FILE__, __LINE__, #ptr, (ptr))
+
+#ifdef NDEBUG
+
+#define DLOG(name) ::base::Logger(nullptr)
+#define DVLOG(vlevel) ::base::Logger(nullptr)
+#define DLOG_EVERY_N(name, n) ::base::Logger(nullptr)
+#define DVLOG_EVERY_N(vlevel, n) ::base::Logger(nullptr)
+
+#define DCHECK(x) ::base::force_eval(x)
+
+#define DCHECK_EQ(x, y) ::base::force_eval((x) == (y))
+#define DCHECK_NE(x, y) ::base::force_eval(!((x) == (y)))
+#define DCHECK_LT(x, y) ::base::force_eval((x) < (y))
+#define DCHECK_GT(x, y) ::base::force_eval((y) < (x))
+#define DCHECK_LE(x, y) ::base::force_eval(!((y) < (x)))
+#define DCHECK_GE(x, y) ::base::force_eval(!((x) < (y)))
+
+#define DCHECK_NOTNULL(ptr) (ptr)
+
+#else
+
+#define DLOG(name) LOG(name)
+#define DVLOG(vlevel) VLOG(vlevel)
+#define DLOG_EVERY_N(name, n) LOG_EVERY_N(name, (n))
+#define DVLOG_EVERY_N(vlevel, n) VLOG_EVERY_N((vlevel), (n))
+
+#define DCHECK(x) CHECK(x)
+
+#define DCHECK_EQ(x, y) CHECK_EQ((x), (y))
+#define DCHECK_NE(x, y) CHECK_NE((x), (y))
+#define DCHECK_LT(x, y) CHECK_LT((x), (y))
+#define DCHECK_GT(x, y) CHECK_GT((x), (y))
+#define DCHECK_LE(x, y) CHECK_LE((x), (y))
+#define DCHECK_GE(x, y) CHECK_GE((x), (y))
+
+#define DCHECK_NOTNULL(ptr) CHECK_NOTNULL(ptr)
+
+#endif
 
 }  // namespace base
 

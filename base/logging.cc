@@ -291,4 +291,8 @@ Logger log_check(const char* file, unsigned int line, const char* expr,
   return logger;
 }
 
+Logger force_eval(bool) {
+  return Logger(nullptr);
+}
+
 }  // namespace base

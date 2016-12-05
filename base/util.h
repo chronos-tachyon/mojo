@@ -7,7 +7,6 @@
 
 #include <condition_variable>
 #include <cstdint>
-#include <exception>
 #include <mutex>
 
 namespace base {
@@ -123,47 +122,6 @@ class RLock {
 inline Lock acquire_lock(std::mutex& mu) { return Lock(mu); }
 inline WLock acquire_write(RWMutex& rwmu) { return WLock(rwmu); }
 inline RLock acquire_read(RWMutex& rwmu) { return RLock(rwmu); }
-
-class null_pointer {
- public:
-  constexpr null_pointer() noexcept : what_("") {}
-  constexpr null_pointer(const char* what) noexcept : what_(what ? what : "") {}
-  constexpr const char* what() const noexcept { return what_; }
-
- private:
-  const char* what_;
-};
-
-template <typename T>
-T* assert_notnull(T* ptr, const char* what) noexcept {
-  if (ptr)
-    return ptr;
-  else
-    throw null_pointer(what);
-}
-
-template <typename T>
-std::unique_ptr<T> assert_notnull(std::unique_ptr<T> ptr, const char* what) noexcept {
-  if (ptr)
-    return std::move(ptr);
-  else
-    throw null_pointer(what);
-}
-
-template <typename T>
-std::shared_ptr<T> assert_notnull(std::shared_ptr<T> ptr, const char* what) noexcept {
-  if (ptr)
-    return std::move(ptr);
-  else
-    throw null_pointer(what);
-}
-
-#define ASSERT_NOTNULL(x) ::base::assert_notnull((x), #x " == nullptr")
-#ifdef NDEBUG
-#define DASSERT_NOTNULL(x) (x)
-#else
-#define DASSERT_NOTNULL(x) ASSERT_NOTNULL(x)
-#endif
 
 }  // namespace base
 
