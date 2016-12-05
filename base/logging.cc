@@ -203,8 +203,8 @@ Logger::~Logger() noexcept(false) {
                tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec,
                tv.tv_usec, tid, file_, line_, message.c_str());
     std::size_t n = ::strlen(buf.data());
-    buf.resize(n + 2);
-    buf[n + 1] = '\n';
+    buf.resize(n + 1);
+    buf[n] = '\n';
 
     auto& vec = vec_get(lock);
     for (auto target : vec) {

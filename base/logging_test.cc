@@ -9,6 +9,7 @@
 #include <atomic>
 
 #include "base/logging.h"
+#include "external/com_googlesource_code_re2/re2/re2.h"
 
 static pid_t my_gettid() { return 42; }
 
@@ -49,11 +50,14 @@ TEST(Logger, EndToEnd) {
   }
   ::close(rfd);
 
+  re2::RE2 pattern(":[0-9]+\\] ");
+  re2::RE2::GlobalReplace(&data, pattern, ":XX] ");
+
   std::string expected(
-      "I0102 22:04:05.123456  42 base/logging_test.cc:37] hello\n"
-      "W0102 22:04:05.123456  42 base/logging_test.cc:38] uh oh\n"
-      "E0102 22:04:05.123456  42 base/logging_test.cc:39] oh no!\n"
-      "F0102 22:04:05.123456  42 base/logging_test.cc:40] aaaah!\n");
+      "I0102 22:04:05.123456  42 base/logging_test.cc:XX] hello\n"
+      "W0102 22:04:05.123456  42 base/logging_test.cc:XX] uh oh\n"
+      "E0102 22:04:05.123456  42 base/logging_test.cc:XX] oh no!\n"
+      "F0102 22:04:05.123456  42 base/logging_test.cc:XX] aaaah!\n");
   EXPECT_EQ(expected, data);
 }
 
@@ -85,10 +89,13 @@ TEST(Logger, LogEveryN) {
   }
   ::close(rfd);
 
+  re2::RE2 pattern(":[0-9]+\\] ");
+  re2::RE2::GlobalReplace(&data, pattern, ":XX] ");
+
   std::string expected(
-      "I0102 22:04:05.123456  42 base/logging_test.cc:75] hi #0\n"
-      "I0102 22:04:05.123456  42 base/logging_test.cc:75] hi #3\n"
-      "I0102 22:04:05.123456  42 base/logging_test.cc:75] hi #6\n"
-      "I0102 22:04:05.123456  42 base/logging_test.cc:75] hi #9\n");
+      "I0102 22:04:05.123456  42 base/logging_test.cc:XX] hi #0\n"
+      "I0102 22:04:05.123456  42 base/logging_test.cc:XX] hi #3\n"
+      "I0102 22:04:05.123456  42 base/logging_test.cc:XX] hi #6\n"
+      "I0102 22:04:05.123456  42 base/logging_test.cc:XX] hi #9\n");
   EXPECT_EQ(expected, data);
 }
