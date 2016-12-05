@@ -16,15 +16,33 @@
 
 namespace base {
 
+static void invoke(FDHolder::HookFn hook) noexcept {
+  try {
+    hook();
+  } catch (...) {
+    LOG_EXCEPTION(std::current_exception());
+  }
+}
+
 FDHolder::FDHolder(int fd) noexcept : fd_(fd) {
   VLOG(0) << "FDHolder: obtained ownership of fd " << fd;
 }
 
 FDHolder::~FDHolder() noexcept {
+  int fd = release_internal(true);
+  if (fd != -1) {
+    VLOG(0) << "FDHolder::~FDHolder performing close of fd " << fd;
+    ::close(fd);
+  }
+}
+
+void FDHolder::on_close(HookFn hook) {
   auto lock = acquire_write(rwmu_);
-  if (fd_ != -1) {
-    VLOG(0) << "FDHolder::~FDHolder for fd " << fd_;
-    ::close(fd_);
+  if (fd_ == -1) {
+    lock.unlock();
+    invoke(std::move(hook));
+  } else {
+    hooks_.push_back(std::move(hook));
   }
 }
 
@@ -37,11 +55,7 @@ int FDHolder::release_internal(bool for_close) noexcept {
   VLOG(0) << "FDHolder: relinquished ownership of fd " << fd << ", "
           << "for_close=" << std::boolalpha << for_close;
   for (auto& hook : hooks) {
-    try {
-      hook();
-    } catch (...) {
-      LOG_EXCEPTION(std::current_exception());
-    }
+    invoke(std::move(hook));
   }
   return fd;
 }

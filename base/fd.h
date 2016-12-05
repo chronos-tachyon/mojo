@@ -47,10 +47,7 @@ class FDHolder {
   ~FDHolder() noexcept;
 
   // Asks to be notified when this FDHolder is closed or released.
-  void on_close(HookFn hook) {
-    auto lock = acquire_write(rwmu_);
-    hooks_.push_back(std::move(hook));
-  }
+  void on_close(HookFn hook);
 
   // Acquires a lock and returns <file descriptor, lock>.
   // - If the fd was closed, returns <-1, lock>
