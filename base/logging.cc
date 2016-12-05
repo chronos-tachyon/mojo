@@ -1,9 +1,7 @@
 // Copyright © 2016 by Donald King <chronos@chronos-tachyon.net>
 // Available under the MIT License. See LICENSE for details.
 
-#include "base/debug.h"
 #include "base/logging.h"
-#include "base/util.h"
 
 #include <sys/syscall.h>
 #include <sys/time.h>
@@ -17,6 +15,9 @@
 #include <map>
 #include <mutex>
 #include <vector>
+
+#include "base/debug.h"
+#include "base/util.h"
 
 static constexpr signed char kFatalLevel =
     base::debug ? LOG_LEVEL_DFATAL : LOG_LEVEL_FATAL;
@@ -257,6 +258,27 @@ void log_fd_remove(int fd) {
     } else {
       ++it;
     }
+  }
+}
+
+void log_exception(const char* file, unsigned int line, std::exception_ptr e) {
+  Logger logger(file, line, 1, LOG_LEVEL_ERROR);
+  try {
+    std::rethrow_exception(e);
+  } catch (const null_pointer& e) {
+    logger << "caught base::null_pointer\n"
+           << "\t" << e.what();
+  } catch (const std::system_error& e) {
+    const auto& ecode = e.code();
+    logger << "caught std::system_error\n"
+           << "\t" << ecode.category().name() << "(" << ecode.value()
+           << "): " << e.what();
+  } catch (const std::exception& e) {
+    logger << "caught std::exception\n"
+           << "\t[" << typeid(e).name() << "]\n"
+           << "\t" << e.what();
+  } catch (...) {
+    logger << "ERROR: caught unclassifiable exception!";
   }
 }
 

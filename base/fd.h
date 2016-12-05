@@ -8,8 +8,10 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <functional>
 #include <memory>
 #include <utility>
+#include <vector>
 
 #include "base/result.h"
 #include "base/util.h"
@@ -25,6 +27,8 @@ namespace base {
 //
 class FDHolder {
  public:
+  using HookFn = std::function<void()>;
+
   // Embeds the given file descriptor into a new FDHolder.
   static std::shared_ptr<FDHolder> make(int fd) {
     return std::make_shared<FDHolder>(fd);
@@ -42,6 +46,12 @@ class FDHolder {
   // Destroying an FDHolder closes the owned file descriptor.
   ~FDHolder() noexcept;
 
+  // Asks to be notified when this FDHolder is closed or released.
+  void on_close(HookFn hook) {
+    auto lock = acquire_write(rwmu_);
+    hooks_.push_back(std::move(hook));
+  }
+
   // Acquires a lock and returns <file descriptor, lock>.
   // - If the fd was closed, returns <-1, lock>
   std::pair<int, RLock> acquire_fd() const noexcept {
@@ -51,10 +61,12 @@ class FDHolder {
 
   // Relinquishes ownership of the file descriptor.
   // - This FDHolder moves to the already-closed state
+  // - Calls any on_close hooks(!)
   int release_fd() noexcept;
 
   // Acquires a lock and closes the file descriptor.
   // - If the fd was closed, fails (probably with EBADF)
+  // - Calls any on_close hooks
   base::Result close();
 
   explicit operator bool() const noexcept {
@@ -63,8 +75,11 @@ class FDHolder {
   }
 
  private:
+  int release_internal(bool for_close) noexcept;
+
   mutable RWMutex rwmu_;
   int fd_;
+  std::vector<HookFn> hooks_;
 };
 
 // FDHolder is normally used through a shared_ptr. Save some typing.

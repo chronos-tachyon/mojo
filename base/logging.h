@@ -8,6 +8,7 @@
 #include <sys/time.h>
 #include <sys/types.h>
 
+#include <exception>
 #include <memory>
 #include <ostream>
 #include <sstream>
@@ -118,6 +119,9 @@ void log_set_gettimeofday(GetTimeOfDayFunc func);
 #define DLOG_EVERY_N(name, n) LOG_EVERY_N(name, (n))
 #define DVLOG_EVERY_N(vlevel, n) VLOG_EVERY_N((vlevel), (n))
 #endif
+
+void log_exception(const char* file, unsigned int line, std::exception_ptr e);
+#define LOG_EXCEPTION(x) ::base::log_exception(__FILE__, __LINE__, (x))
 
 }  // namespace base
 

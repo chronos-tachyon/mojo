@@ -28,25 +28,34 @@ FDHolder::~FDHolder() noexcept {
   }
 }
 
-int FDHolder::release_fd() noexcept {
+int FDHolder::release_internal(bool for_close) noexcept {
   auto lock = acquire_write(rwmu_);
   int fd = -1;
   std::swap(fd, fd_);
-  VLOG(0) << "FDHolder: relinquished ownership of fd " << fd;
+  std::vector<HookFn> hooks = std::move(hooks_);
+  lock.unlock();
+  VLOG(0) << "FDHolder: relinquished ownership of fd " << fd << ", "
+          << "for_close=" << std::boolalpha << for_close;
+  for (auto& hook : hooks) {
+    try {
+      hook();
+    } catch (...) {
+      LOG_EXCEPTION(std::current_exception());
+    }
+  }
   return fd;
 }
 
+int FDHolder::release_fd() noexcept { return release_internal(false); }
+
 Result FDHolder::close() {
-  auto lock = acquire_write(rwmu_);
-  int fd = -1;
-  std::swap(fd, fd_);
+  int fd = release_internal(true);
   Result r;
   int rc = ::close(fd);
   if (rc != 0) {
     int err_no = errno;
     r = Result::from_errno(err_no, "close(2)");
   }
-  VLOG(0) << "FDHolder: closed fd " << fd << ": " << r;
   return r;
 }
 

@@ -26,26 +26,6 @@ static std::size_t num_cores() {
   return 4;  // TODO: actually look up the core count
 }
 
-static void log_exception(std::exception_ptr eptr) {
-  static std::mutex mu;
-  auto lock = base::acquire_lock(mu);
-  try {
-    std::rethrow_exception(eptr);
-  } catch (const std::system_error& e) {
-    const auto& ecode = e.code();
-    LOG(ERROR) << "caught std::system_error from event::Dispatcher thread\n"
-               << "\t" << ecode.category().name() << "(" << ecode.value()
-               << "): " << e.what();
-  } catch (const std::exception& e) {
-    LOG(ERROR) << "caught std::exception from event::Dispatcher thread\n"
-               << "\t[" << typeid(e).name() << "]\n"
-               << "\t" << e.what();
-  } catch (...) {
-    LOG(ERROR) << "ERROR: caught unclassifiable exception object from "
-                  "event::Dispatcher thread!";
-  }
-}
-
 struct Work {
   event::Task* task;
   std::unique_ptr<event::Callback> callback;
@@ -80,7 +60,7 @@ static void invoke(std::unique_lock<std::mutex>& lock, std::size_t& busy,
       if (item.task != nullptr)
         item.task->finish_exception(eptr);
       else
-        log_exception(eptr);
+        LOG_EXCEPTION(eptr);
     }
   }
   item.callback.reset();
@@ -94,7 +74,7 @@ static void invoke(std::unique_lock<std::mutex>& lock,
   try {
     idle();
   } catch (...) {
-    log_exception(std::current_exception());
+    LOG_EXCEPTION(std::current_exception());
   }
 }
 
