@@ -80,6 +80,7 @@ cc_test(
   deps = [
     ":base",
     "//external:gtest",
+    "//external:re2",
   ],
 )
 
