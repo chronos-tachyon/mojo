@@ -5,9 +5,8 @@
 #ifndef BASE_FD_H
 #define BASE_FD_H
 
-#include <unistd.h>
+#include <sys/types.h>
 
-#include <cerrno>
 #include <functional>
 #include <memory>
 #include <utility>
@@ -101,6 +100,8 @@ struct SocketPair {
 Result make_pipe(Pipe* out);
 Result make_socketpair(SocketPair* out, int domain, int type, int protocol);
 Result set_blocking(FD fd, bool value);
+Result shutdown(FD fd, int how);
+Result seek(off_t* out, FD fd, off_t offset, int whence);
 
 Result read_exactly(FD fd, void* ptr, std::size_t len, const char* what);
 Result write_exactly(FD fd, const void* ptr, std::size_t len, const char* what);

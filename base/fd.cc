@@ -118,39 +118,90 @@ Result set_blocking(FD fd, bool value) {
   return Result();
 }
 
-Result read_exactly(FD fd, void* ptr, std::size_t len, const char* what) {
+Result shutdown(FD fd, int how) {
   auto pair = DCHECK_NOTNULL(fd)->acquire_fd();
-  int n;
-redo:
-  ::bzero(ptr, len);
-  n = ::read(pair.first, ptr, len);
-  if (n < 0) {
+  int rc = ::shutdown(pair.first, how);
+  if (rc != 0) {
     int err_no = errno;
-    if (err_no == EINTR) goto redo;
-    return Result::from_errno(err_no, "read(2) from ", what);
-  }
-  if (n == 0) return Result::eof();
-  if (std::size_t(n) != len) {
-    return Result::internal("short read(2) from ", what);
+    return Result::from_errno(err_no, "shutdown(2)");
   }
   return Result();
 }
 
+Result seek(off_t* out, FD fd, off_t offset, int whence) {
+  auto pair = DCHECK_NOTNULL(fd)->acquire_fd();
+  off_t n = ::lseek(pair.first, offset, whence);
+  if (n == static_cast<off_t>(-1)) {
+    int err_no = errno;
+    return Result::from_errno(err_no, "lseek(2)");
+  }
+  if (out) *out = n;
+  return Result();
+}
+
+Result read_exactly(FD fd, void* ptr, std::size_t len, const char* what) {
+  Result r;
+  ssize_t n;
+  auto pair = DCHECK_NOTNULL(fd)->acquire_fd();
+  while (true) {
+    ::bzero(ptr, len);
+    VLOG(4) << "base::read_exactly: "
+            << "fd=" << pair.first << ", "
+            << "len=" << len << ", "
+            << "what=\"" << what << "\"";
+    n = ::read(pair.first, ptr, len);
+    int err_no = errno;
+    VLOG(5) << "result=" << n;
+    if (n < 0) {
+      if (err_no == EINTR) {
+        VLOG(4) << "EINTR";
+        continue;
+      }
+      r = Result::from_errno(err_no, "read(2) from ", what);
+      break;
+    }
+    if (n == 0) {
+      r = Result::eof();
+      break;
+    }
+    if (std::size_t(n) != len) {
+      r = Result::internal("short read(2) from ", what);
+      break;
+    }
+    break;
+  }
+  VLOG(4) << r.as_string();
+  return r;
+}
+
 Result write_exactly(FD fd, const void* ptr, std::size_t len,
                      const char* what) {
+  Result r;
+  ssize_t n;
   auto pair = DCHECK_NOTNULL(fd)->acquire_fd();
-  int n;
-redo:
-  n = ::write(pair.first, ptr, len);
-  if (n < 0) {
-    int err_no = errno;
-    if (err_no == EINTR) goto redo;
-    return Result::from_errno(err_no, "write(2) from ", what);
+  while (true) {
+    VLOG(4) << "base::write_exactly: "
+            << "fd=" << pair.first << ", "
+            << "len=" << len << ", "
+            << "what=\"" << what << "\"";
+    n = ::write(pair.first, ptr, len);
+    if (n < 0) {
+      int err_no = errno;
+      if (err_no == EINTR) {
+        VLOG(4) << "EINTR";
+        continue;
+      }
+      r = Result::from_errno(err_no, "write(2) from ", what);
+      break;
+    }
+    if (std::size_t(n) != len) {
+      r = Result::internal("short write(2) from ", what);
+      break;
+    }
+    break;
   }
-  if (std::size_t(n) != len) {
-    return Result::internal("short write(2) from ", what);
-  }
-  return Result();
+  VLOG(4) << r.as_string();
+  return r;
 }
 
 }  // namespace base
