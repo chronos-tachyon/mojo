@@ -25,133 +25,133 @@ TEST(Task, Inline) {
     return base::Result();
   };
 
-  VLOG(0) << "1. create task";
+  LOG(INFO) << "1. create task";
   event::Task task;
   task.on_finished(event::callback(inc));
   EXPECT_EQ(event::Task::State::ready, task.state());
   EXPECT_FALSE(task.is_finished());
   EXPECT_EQ(0, n);
 
-  VLOG(0) << "1. start task";
+  LOG(INFO) << "1. start task";
   EXPECT_TRUE(task.start());
   EXPECT_EQ(event::Task::State::running, task.state());
   EXPECT_FALSE(task.is_finished());
   EXPECT_EQ(0, n);
 
-  VLOG(0) << "1. finish task [OK]";
+  LOG(INFO) << "1. finish task [OK]";
   EXPECT_TRUE(task.finish_ok());
   EXPECT_EQ(event::Task::State::done, task.state());
   EXPECT_TRUE(task.is_finished());
   EXPECT_OK(task.result());
   EXPECT_EQ(1, n);
 
-  VLOG(0) << "1. on_finished after finish";
+  LOG(INFO) << "1. on_finished after finish";
   task.on_finished(event::callback(inc));
   EXPECT_EQ(2, n);
 
-  VLOG(0) << "2. reset task";
+  LOG(INFO) << "2. reset task";
   n = 0;
   task.reset();
   task.on_finished(event::callback(inc));
   EXPECT_EQ(event::Task::State::ready, task.state());
   EXPECT_EQ(0, n);
 
-  VLOG(0) << "2. cancel task";
+  LOG(INFO) << "2. cancel task";
   EXPECT_TRUE(task.cancel());
   EXPECT_EQ(event::Task::State::done, task.state());
   EXPECT_TRUE(task.is_finished());
   EXPECT_CANCELLED(task.result());
   EXPECT_EQ(1, n);
 
-  VLOG(0) << "3. reset task";
+  LOG(INFO) << "3. reset task";
   n = 0;
   task.reset();
   task.on_finished(event::callback(inc));
   EXPECT_EQ(event::Task::State::ready, task.state());
   EXPECT_EQ(0, n);
 
-  VLOG(0) << "3. start task";
+  LOG(INFO) << "3. start task";
   EXPECT_TRUE(task.start());
 
-  VLOG(0) << "3. cancel task";
+  LOG(INFO) << "3. cancel task";
   EXPECT_FALSE(task.cancel());
   EXPECT_EQ(event::Task::State::cancelling, task.state());
   EXPECT_FALSE(task.is_finished());
   EXPECT_EQ(0, n);
 
-  VLOG(0) << "3. finish task [CANCELLED]";
+  LOG(INFO) << "3. finish task [CANCELLED]";
   EXPECT_TRUE(task.finish_cancel());
   EXPECT_EQ(event::Task::State::done, task.state());
   EXPECT_TRUE(task.is_finished());
   EXPECT_CANCELLED(task.result());
   EXPECT_EQ(1, n);
 
-  VLOG(0) << "4. reset task";
+  LOG(INFO) << "4. reset task";
   n = 0;
   task.reset();
   task.on_finished(event::callback(inc));
   EXPECT_EQ(event::Task::State::ready, task.state());
   EXPECT_EQ(0, n);
 
-  VLOG(0) << "4. expire task";
+  LOG(INFO) << "4. expire task";
   EXPECT_TRUE(task.expire());
   EXPECT_EQ(event::Task::State::done, task.state());
   EXPECT_TRUE(task.is_finished());
   EXPECT_DEADLINE_EXCEEDED(task.result());
   EXPECT_EQ(1, n);
 
-  VLOG(0) << "5. reset task";
+  LOG(INFO) << "5. reset task";
   n = 0;
   task.reset();
   task.on_finished(event::callback(inc));
   EXPECT_EQ(event::Task::State::ready, task.state());
   EXPECT_EQ(0, n);
 
-  VLOG(0) << "5. start task";
+  LOG(INFO) << "5. start task";
   EXPECT_TRUE(task.start());
 
-  VLOG(0) << "5. expire task";
+  LOG(INFO) << "5. expire task";
   EXPECT_FALSE(task.expire());
   EXPECT_EQ(event::Task::State::expiring, task.state());
   EXPECT_FALSE(task.is_finished());
   EXPECT_EQ(0, n);
 
-  VLOG(0) << "5. finish task [DEADLINE_EXCEEDED]";
+  LOG(INFO) << "5. finish task [DEADLINE_EXCEEDED]";
   EXPECT_TRUE(task.finish_cancel());
   EXPECT_EQ(event::Task::State::done, task.state());
   EXPECT_TRUE(task.is_finished());
   EXPECT_DEADLINE_EXCEEDED(task.result());
   EXPECT_EQ(1, n);
 
-  VLOG(0) << "6. reset task";
+  LOG(INFO) << "6. reset task";
   n = 0;
   task.reset();
   task.on_finished(event::callback(inc));
   EXPECT_EQ(event::Task::State::ready, task.state());
   EXPECT_EQ(0, n);
 
-  VLOG(0) << "6. start task";
+  LOG(INFO) << "6. start task";
   EXPECT_TRUE(task.start());
 
-  VLOG(0) << "6. expire task";
+  LOG(INFO) << "6. expire task";
   EXPECT_FALSE(task.expire());
   EXPECT_EQ(event::Task::State::expiring, task.state());
   EXPECT_FALSE(task.is_finished());
   EXPECT_EQ(0, n);
 
-  VLOG(0) << "6. cancel task";
+  LOG(INFO) << "6. cancel task";
   EXPECT_FALSE(task.cancel());
   EXPECT_EQ(event::Task::State::cancelling, task.state());
   EXPECT_FALSE(task.is_finished());
   EXPECT_EQ(0, n);
 
-  VLOG(0) << "6. expire task again";
+  LOG(INFO) << "6. expire task again";
   EXPECT_FALSE(task.expire());
   EXPECT_EQ(event::Task::State::cancelling, task.state());
   EXPECT_FALSE(task.is_finished());
   EXPECT_EQ(0, n);
 
-  VLOG(0) << "6. finish task [CANCELLED]";
+  LOG(INFO) << "6. finish task [CANCELLED]";
   EXPECT_TRUE(task.finish_cancel());
   EXPECT_EQ(event::Task::State::done, task.state());
   EXPECT_TRUE(task.is_finished());

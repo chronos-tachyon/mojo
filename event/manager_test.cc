@@ -74,34 +74,34 @@ static void TestManagerImplementation_FDs(event::Manager m) {
 
   event::Task task;
   auto closure = [&s, &task](event::Data data) {
-    VLOG(0) << "hello from closure";
+    LOG(INFO) << "hello from closure";
     read_some_data(s.right, kHelloWorld, kHelloLen);
     task.finish_ok();
-    VLOG(0) << "task: finished";
+    LOG(INFO) << "task: finished";
     return base::Result();
   };
 
   EXPECT_TRUE(task.start());
 
-  VLOG(0) << "registering fd";
+  LOG(INFO) << "registering fd";
   event::FileDescriptor fd;
   EXPECT_OK(
       m.fd(&fd, s.right, event::Set::readable_bit(), event::handler(closure)));
 
-  VLOG(0) << "writing data";
+  LOG(INFO) << "writing data";
   write_some_data(s.left, kHelloWorld, kHelloLen);
 
-  VLOG(0) << "task: waiting for finish";
+  LOG(INFO) << "task: waiting for finish";
   event::wait(m, &task);
-  VLOG(0) << "task: got finish";
+  LOG(INFO) << "task: got finish";
   EXPECT_OK(task.result());
 
-  VLOG(0) << "before release";
+  LOG(INFO) << "before release";
   EXPECT_OK(fd.release());
-  VLOG(0) << "after release";
+  LOG(INFO) << "after release";
   EXPECT_OK(s.left->close());
   EXPECT_OK(s.right->close());
-  VLOG(0) << "after close";
+  LOG(INFO) << "after close";
 }
 
 static void TestManagerImplementation_Signals(event::Manager m) {
@@ -111,45 +111,45 @@ static void TestManagerImplementation_Signals(event::Manager m) {
   IntPredicate predicate = [](int flags) { return flags == 7; };
 
   auto handler = [&task, &mu, &flags, &predicate](int bit, event::Data data) {
-    VLOG(0) << "hello from handler";
+    LOG(INFO) << "hello from handler";
     auto lock = base::acquire_lock(mu);
     flags |= bit;
-    VLOG(0) << "flags = " << flags;
+    LOG(INFO) << "flags = " << flags;
     bool done = predicate(flags);
     lock.unlock();
     if (done && !task.is_finished()) {
       task.finish_ok();
-      VLOG(0) << "task: finished";
+      LOG(INFO) << "task: finished";
     }
     return base::Result();
   };
 
   EXPECT_TRUE(task.start());
 
-  VLOG(0) << "registering signals";
+  LOG(INFO) << "registering signals";
   event::Signal hup, usr1, usr2;
   EXPECT_OK(m.signal(&hup, SIGHUP, event::handler(handler, 1)));
   EXPECT_OK(m.signal(&usr1, SIGUSR1, event::handler(handler, 2)));
   EXPECT_OK(m.signal(&usr2, SIGUSR2, event::handler(handler, 4)));
 
-  VLOG(0) << "sending signals";
+  LOG(INFO) << "sending signals";
   ::kill(::getpid(), SIGHUP);
   ::kill(::getpid(), SIGUSR1);
   ::kill(::getpid(), SIGUSR2);
 
-  VLOG(0) << "task: waiting for finish";
+  LOG(INFO) << "task: waiting for finish";
   event::wait(m, &task);
-  VLOG(0) << "task: got finish";
+  LOG(INFO) << "task: got finish";
   auto lock = base::acquire_lock(mu);
   EXPECT_OK(task.result());
   EXPECT_EQ(7, flags);
   lock.unlock();
 
-  VLOG(0) << "before release";
+  LOG(INFO) << "before release";
   EXPECT_OK(usr2.release());
   EXPECT_OK(usr1.release());
   EXPECT_OK(hup.release());
-  VLOG(0) << "after release";
+  LOG(INFO) << "after release";
 }
 
 static void TestManagerImplementation_Timers(event::Manager m) {
@@ -159,14 +159,14 @@ static void TestManagerImplementation_Timers(event::Manager m) {
   IntPredicate predicate = [](int counter) { return counter >= 5; };
 
   auto timer_closure = [&task, &mu, &counter, &predicate](event::Data data) {
-    VLOG(0) << "hello from timer handler, int_value = " << data.int_value;
+    LOG(INFO) << "hello from timer handler, int_value = " << data.int_value;
     auto lock = base::acquire_lock(mu);
     counter += data.int_value;
     bool done = predicate(counter);
     lock.unlock();
     if (done && !task.is_finished()) {
       task.finish_ok();
-      VLOG(0) << "task: finished";
+      LOG(INFO) << "task: finished";
     }
     return base::Result();
   };
@@ -174,17 +174,17 @@ static void TestManagerImplementation_Timers(event::Manager m) {
   EXPECT_TRUE(task.start());
   auto lock = base::acquire_lock(mu);
 
-  VLOG(0) << "registering timer";
+  LOG(INFO) << "registering timer";
   event::Timer t;
   EXPECT_OK(m.timer(&t, event::handler(timer_closure)));
 
-  VLOG(0) << "setting timer to period 1ms";
+  LOG(INFO) << "setting timer to period 1ms";
   EXPECT_OK(t.set_periodic(base::milliseconds(1)));
 
   lock.unlock();
-  VLOG(0) << "task: waiting for finish";
+  LOG(INFO) << "task: waiting for finish";
   event::wait(m, &task);
-  VLOG(0) << "task: got finish";
+  LOG(INFO) << "task: got finish";
   lock.lock();
   EXPECT_GE(counter, 5);
   EXPECT_OK(task.result());
@@ -195,20 +195,20 @@ static void TestManagerImplementation_Timers(event::Manager m) {
   counter = 0;
   predicate = [](int counter) { return counter != 0; };
 
-  VLOG(0) << "setting timer to oneshot now+5ms";
+  LOG(INFO) << "setting timer to oneshot now+5ms";
   EXPECT_OK(t.set_at(base::monotonic_now() + base::milliseconds(5)));
 
   lock.unlock();
-  VLOG(0) << "task: waiting for finish";
+  LOG(INFO) << "task: waiting for finish";
   event::wait(m, &task);
-  VLOG(0) << "got: counter = " << counter;
+  LOG(INFO) << "got: counter = " << counter;
   lock.lock();
   EXPECT_OK(task.result());
   EXPECT_GE(counter, 1);
 
-  VLOG(0) << "before release";
+  LOG(INFO) << "before release";
   EXPECT_OK(t.release());
-  VLOG(0) << "after release";
+  LOG(INFO) << "after release";
 }
 
 static void TestManagerImplementation_Events(event::Manager m) {
@@ -218,7 +218,7 @@ static void TestManagerImplementation_Events(event::Manager m) {
   bool ready = false;
 
   auto handler = [&task](event::Data data) {
-    VLOG(0) << "hello from generic event handler, int_value = "
+    LOG(INFO) << "hello from generic event handler, int_value = "
             << data.int_value;
     if (data.int_value == 42)
       task.finish_ok();
@@ -229,36 +229,36 @@ static void TestManagerImplementation_Events(event::Manager m) {
 
   EXPECT_TRUE(task.start());
 
-  VLOG(0) << "registering event";
+  LOG(INFO) << "registering event";
   event::Generic e;
   EXPECT_OK(m.generic(&e, event::handler(handler)));
 
-  VLOG(0) << "spawning thread";
+  LOG(INFO) << "spawning thread";
   std::thread thd([&mu, &cv, &ready, &e] {
-    VLOG(0) << "hello from thread";
+    LOG(INFO) << "hello from thread";
     auto lock = base::acquire_lock(mu);
     while (!ready) cv.wait(lock);
-    VLOG(0) << "got: ready = true";
+    LOG(INFO) << "got: ready = true";
     e.fire(42);
-    VLOG(0) << "event has been fired";
+    LOG(INFO) << "event has been fired";
   });
 
-  VLOG(0) << "notify: ready = true";
+  LOG(INFO) << "notify: ready = true";
   auto lock = base::acquire_lock(mu);
   ready = true;
   cv.notify_all();
   lock.unlock();
-  VLOG(0) << "task: waiting for finish";
+  LOG(INFO) << "task: waiting for finish";
   event::wait(m, &task);
-  VLOG(0) << "task: got finish";
+  LOG(INFO) << "task: got finish";
   EXPECT_OK(task.result());
 
-  VLOG(0) << "joining thread";
+  LOG(INFO) << "joining thread";
   thd.join();
 
-  VLOG(0) << "before release";
+  LOG(INFO) << "before release";
   EXPECT_OK(e.release());
-  VLOG(0) << "after release";
+  LOG(INFO) << "after release";
 }
 
 static void TestManagerImplementation_TaskTimeouts(event::Manager m) {
@@ -274,7 +274,7 @@ static void TestManagerImplementation_TaskTimeouts(event::Manager m) {
       auto i = data.int_value;
       while (i > 0) {
         unsigned int c = a + b;
-        VLOG(0) << "a(" << a << ") + b(" << b << ") = c(" << c << ")";
+        LOG(INFO) << "a(" << a << ") + b(" << b << ") = c(" << c << ")";
         a = b;
         b = c;
         --i;
@@ -299,19 +299,19 @@ static void TestManagerImplementation_TaskTimeouts(event::Manager m) {
 }
 
 static void TestManagerImplementation(event::Manager m, std::string name) {
-  VLOG(0) << "[" << name << ":TestManagerImplementation_FDs]";
+  LOG(INFO) << "[" << name << ":TestManagerImplementation_FDs]";
   TestManagerImplementation_FDs(m);
-  VLOG(0) << "[" << name << ":TestManagerImplementation_Signals]";
+  LOG(INFO) << "[" << name << ":TestManagerImplementation_Signals]";
   TestManagerImplementation_Signals(m);
-  VLOG(0) << "[" << name << ":TestManagerImplementation_Timers]";
+  LOG(INFO) << "[" << name << ":TestManagerImplementation_Timers]";
   TestManagerImplementation_Timers(m);
-  VLOG(0) << "[" << name << ":TestManagerImplementation_Events]";
+  LOG(INFO) << "[" << name << ":TestManagerImplementation_Events]";
   TestManagerImplementation_Events(m);
-  VLOG(0) << "[" << name << ":TestManagerImplementation_TaskTimeouts]";
+  LOG(INFO) << "[" << name << ":TestManagerImplementation_TaskTimeouts]";
   TestManagerImplementation_TaskTimeouts(m);
-  VLOG(0) << "[" << name << ":shutdown]";
+  LOG(INFO) << "[" << name << ":shutdown]";
   EXPECT_OK(m.shutdown());
-  VLOG(0) << "OK";
+  LOG(INFO) << "OK";
 }
 
 TEST(Manager, DefaultDefault) {

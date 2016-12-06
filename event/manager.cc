@@ -1266,7 +1266,7 @@ void wait_n(std::vector<Manager> mv, std::vector<Task*> tv, std::size_t n) {
   }
 
   auto closure = [](std::shared_ptr<WaitData> data) {
-    VLOG(0) << "hello from event::wait_n closure";
+    VLOG(4) << "hello from event::wait_n closure";
     auto lock = base::acquire_lock(data->mu);
     ++data->done;
     data->cv.notify_all();
@@ -1294,7 +1294,7 @@ void wait_n(std::vector<Manager> mv, std::vector<Task*> tv, std::size_t n) {
     // Threaded? Don't be so eager to join the fray.
     if (all_threaded) {
       using MS = std::chrono::milliseconds;
-      VLOG(4) << "event::wait_n: blocking for 1ms";
+      VLOG(5) << "event::wait_n: blocking for 1ms";
       data->cv.wait_for(lock, MS(1));
       if (data->done >= n) return;
     }

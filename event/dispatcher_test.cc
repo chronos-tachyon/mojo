@@ -205,7 +205,7 @@ TEST(ThreadPoolDispatcher, EndToEnd) {
   auto inc_callback = [&mu, &cv, &n](std::size_t i) {
     EXPECT_LT(i, 10U);
     auto lock = base::acquire_lock(mu);
-    VLOG(0) << "hello from increment callback #" << i;
+    LOG(INFO) << "hello from increment callback #" << i;
     ++n;
     cv.notify_all();
     return base::Result();
@@ -213,11 +213,11 @@ TEST(ThreadPoolDispatcher, EndToEnd) {
 
   auto done_callback = [&mu, &cv, &n, &done] {
     auto lock = base::acquire_lock(mu);
-    VLOG(0) << "hello from done callback";
+    LOG(INFO) << "hello from done callback";
     while (n < 10) cv.wait(lock);
     done = true;
     cv.notify_all();
-    VLOG(0) << "done";
+    LOG(INFO) << "done";
     return base::Result();
   };
 
@@ -242,9 +242,9 @@ TEST(ThreadPoolDispatcher, EndToEnd) {
   EXPECT_FAILED_PRECONDITION(d->uncork());
 
   lock.lock();
-  VLOG(0) << "waiting on done";
+  LOG(INFO) << "waiting on done";
   while (!done) cv.wait(lock);
-  VLOG(0) << "got done";
+  LOG(INFO) << "got done";
   EXPECT_EQ(10, n);
   for (i = 0; i < 10; i++) {
     EXPECT_OK(tasks[i].result());
@@ -268,9 +268,9 @@ TEST(ThreadPoolDispatcher, EndToEnd) {
   expected.current_num_workers = 3;
   EXPECT_PRED2(equalish, expected, d->stats());
 
-  VLOG(0) << "waiting on shutdown";
+  LOG(INFO) << "waiting on shutdown";
   d->shutdown();
-  VLOG(0) << "got shutdown";
+  LOG(INFO) << "got shutdown";
 
   expected.min_workers = 0;
   expected.max_workers = 0;
@@ -293,7 +293,7 @@ TEST(ThreadPoolDispatcher, ThrowingCallback) {
   expected.current_num_workers = 1;
   EXPECT_EQ(expected, d->stats());
 
-  VLOG(0) << "dispatching callbacks that throw";
+  LOG(INFO) << "dispatching callbacks that throw";
   std::array<event::Task, 5> tasks;
   for (std::size_t i = 0; i < 5; ++i) {
     d->dispatch(&tasks[i], event::callback(Throw()));
