@@ -6,6 +6,7 @@
 #define EVENT_SET_H
 
 #include <algorithm>
+#include <ostream>
 
 namespace event {
 
@@ -142,6 +143,9 @@ class Set {
   static constexpr Set timer_bit() noexcept { return Set(bit_timer); }
   static constexpr Set event_bit() noexcept { return Set(bit_event); }
 
+  void append_to(std::string& out) const;
+  std::string as_string() const;
+
  private:
   uint8_t bits_;
 };
@@ -158,6 +162,10 @@ inline constexpr bool operator<=(const Set& a, const Set& b) noexcept {
 }
 inline constexpr bool operator>=(const Set& a, const Set& b) noexcept {
   return !(a < b);
+}
+
+inline std::ostream& operator<<(std::ostream& os, Set x) {
+  return (os << x.as_string());
 }
 
 #if 0
