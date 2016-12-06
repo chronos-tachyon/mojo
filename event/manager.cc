@@ -29,6 +29,10 @@ using base::token_t;
 
 namespace {
 
+static bool donate_ok(const base::Result& r) {
+  return r.ok() || r.code() == base::Result::Code::NOT_IMPLEMENTED;
+}
+
 template <typename T>
 static bool vec_erase_all(std::vector<T>& vec, const T& item) noexcept {
   bool found = false;
@@ -772,10 +776,6 @@ base::Result ManagerImpl::donate_as_poller(base::Lock lock, bool forever) {
 }
 
 base::Result ManagerImpl::donate_as_mixed(base::Lock lock, bool forever) {
-  auto donate_ok = [](const base::Result& r) {
-    return r.ok() || r.code() == base::Result::Code::NOT_IMPLEMENTED;
-  };
-
   ++current_;
   curr_cv_.notify_all();
   auto cleanup = base::cleanup([this] {
@@ -823,8 +823,18 @@ base::Result ManagerImpl::donate_as_mixed(base::Lock lock, bool forever) {
 
 base::Result ManagerImpl::donate_as_worker(base::Lock lock, bool forever) {
   std::shared_ptr<Dispatcher> d = DCHECK_NOTNULL(d_);
-  lock.unlock();
-  return d->donate(forever);
+  base::Result r;
+  while (running_) {
+    lock.unlock();
+    auto reacquire0 = base::cleanup([&lock] { lock.lock(); });
+    r = d->donate(false);
+    reacquire0.run();
+
+    if (!donate_ok(r)) break;
+    if (!forever) break;
+  }
+  r.expect_ok();
+  return base::Result();
 }
 
 void ManagerImpl::handle_event(CallbackVec* cbvec, base::token_t gt, Set set) {
@@ -1256,6 +1266,7 @@ void wait_n(std::vector<Manager> mv, std::vector<Task*> tv, std::size_t n) {
   }
 
   auto closure = [](std::shared_ptr<WaitData> data) {
+    VLOG(0) << "hello from event::wait_n closure";
     auto lock = base::acquire_lock(data->mu);
     ++data->done;
     data->cv.notify_all();
@@ -1283,6 +1294,7 @@ void wait_n(std::vector<Manager> mv, std::vector<Task*> tv, std::size_t n) {
     // Threaded? Don't be so eager to join the fray.
     if (all_threaded) {
       using MS = std::chrono::milliseconds;
+      VLOG(4) << "event::wait_n: blocking for 1ms";
       data->cv.wait_for(lock, MS(1));
       if (data->done >= n) return;
     }
