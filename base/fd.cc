@@ -25,13 +25,13 @@ static void invoke(FDHolder::HookFn hook) noexcept {
 }
 
 FDHolder::FDHolder(int fd) noexcept : fd_(fd) {
-  VLOG(0) << "FDHolder: obtained ownership of fd " << fd;
+  VLOG(2) << "FDHolder: obtained ownership of fd " << fd;
 }
 
 FDHolder::~FDHolder() noexcept {
   int fd = release_internal(true);
   if (fd != -1) {
-    VLOG(0) << "FDHolder::~FDHolder performing close of fd " << fd;
+    VLOG(3) << "FDHolder::~FDHolder performing close of fd " << fd;
     ::close(fd);
   }
 }
@@ -52,7 +52,7 @@ int FDHolder::release_internal(bool for_close) noexcept {
   std::swap(fd, fd_);
   std::vector<HookFn> hooks = std::move(hooks_);
   lock.unlock();
-  VLOG(0) << "FDHolder: relinquished ownership of fd " << fd << ", "
+  VLOG(2) << "FDHolder: relinquished ownership of fd " << fd << ", "
           << "for_close=" << std::boolalpha << for_close;
   for (auto& hook : hooks) {
     invoke(std::move(hook));
