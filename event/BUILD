@@ -36,6 +36,8 @@ cc_test(
     "//base:result_testing",
     "//external:gtest",
   ],
+  size = "small",
+  timeout = "short",
 )
 
 cc_test(
@@ -47,6 +49,8 @@ cc_test(
     "//base:result_testing",
     "//external:gtest",
   ],
+  size = "small",
+  timeout = "short",
 )
 
 cc_test(
@@ -58,6 +62,8 @@ cc_test(
     "//base:result_testing",
     "//external:gtest",
   ],
+  size = "small",
+  timeout = "short",
 )
 
 cc_test(
@@ -69,6 +75,8 @@ cc_test(
     "//base:result_testing",
     "//external:gtest",
   ],
+  size = "small",
+  timeout = "short",
 )
 
 cc_test(
@@ -80,6 +88,8 @@ cc_test(
     "//base:result_testing",
     "//external:gtest",
   ],
+  size = "small",
+  timeout = "short",
 )
 
 cc_test(
@@ -91,4 +101,6 @@ cc_test(
     "//base:result_testing",
     "//external:gtest",
   ],
+  size = "small",
+  timeout = "short",
 )

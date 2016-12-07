@@ -44,6 +44,8 @@ cc_test(
     "//external:gtest",
   ],
   visibility = ["//visibility:public"],
+  size = "small",
+  timeout = "short",
 )
 
 cc_test(
@@ -53,6 +55,8 @@ cc_test(
     ":base",
     "//external:gtest",
   ],
+  size = "small",
+  timeout = "short",
 )
 
 cc_test(
@@ -62,7 +66,8 @@ cc_test(
     ":base",
     "//external:gtest",
   ],
-  visibility = ["//visibility:public"],
+  size = "small",
+  timeout = "short",
 )
 
 cc_test(
@@ -72,6 +77,8 @@ cc_test(
     ":base",
     "//external:gtest",
   ],
+  size = "small",
+  timeout = "short",
 )
 
 cc_test(
@@ -83,6 +90,8 @@ cc_test(
     "//external:gtest",
     "//external:re2",
   ],
+  size = "small",
+  timeout = "short",
 )
 
 cc_test(
@@ -92,6 +101,8 @@ cc_test(
     ":base",
     "//external:gtest",
   ],
+  size = "small",
+  timeout = "short",
 )
 
 cc_test(
@@ -101,6 +112,8 @@ cc_test(
     ":base",
     "//external:gtest",
   ],
+  size = "small",
+  timeout = "short",
 )
 
 cc_test(
@@ -110,6 +123,8 @@ cc_test(
     ":base",
     "//external:gtest",
   ],
+  size = "small",
+  timeout = "short",
 )
 
 cc_library(
@@ -140,4 +155,6 @@ cc_test(
     ":result_testing",
     "//external:gtest",
   ],
+  size = "small",
+  timeout = "short",
 )
