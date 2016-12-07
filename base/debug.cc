@@ -3,14 +3,11 @@
 
 #include "base/debug.h"
 
-#include <mutex>
-
-#include "base/util.h"
+#include <atomic>
 
 namespace base {
 
-static std::mutex g_mu;
-static bool g_debug =
+static constexpr bool kDebugDefault =
 #ifdef NDEBUG
     false
 #else
@@ -18,14 +15,14 @@ static bool g_debug =
 #endif
     ;
 
+static std::atomic_bool g_debug(kDebugDefault);
+
 bool debug() noexcept {
-  auto lock = acquire_lock(g_mu);
-  return g_debug;
+  return g_debug.load(std::memory_order_relaxed);
 }
 
 void set_debug(bool value) noexcept {
-  auto lock = acquire_lock(g_mu);
-  g_debug = value;
+  g_debug.store(value, std::memory_order_relaxed);
 }
 
 }  // namespace base
