@@ -106,6 +106,8 @@ Result seek(off_t* out, FD fd, off_t offset, int whence);
 Result read_exactly(FD fd, void* ptr, std::size_t len, const char* what);
 Result write_exactly(FD fd, const void* ptr, std::size_t len, const char* what);
 
+Result make_tempfile(std::string* path, FD* fd, const char* tmpl);
+
 }  // namespace base
 
 #endif  // BASE_FD_H

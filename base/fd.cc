@@ -9,6 +9,7 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <cstdlib>
 #include <exception>
 
 #include "base/logging.h"
@@ -202,6 +203,31 @@ Result write_exactly(FD fd, const void* ptr, std::size_t len,
   }
   VLOG(4) << r.as_string();
   return r;
+}
+
+Result make_tempfile(std::string* path, FD* fd, const char* tmpl) {
+  path->clear();
+  *fd = nullptr;
+
+  const char* tmpdir = getenv("TMPDIR");
+  if (tmpdir == nullptr) tmpdir = "/tmp";
+  std::size_t tmpdir_len = ::strlen(tmpdir);
+  std::size_t tmpl_len = ::strlen(tmpl);
+
+  std::vector<char> buf;
+  buf.resize(tmpdir_len + tmpl_len + 2);
+  ::memcpy(buf.data(), tmpdir, tmpdir_len);
+  buf[tmpdir_len] = '/';
+  ::memcpy(buf.data() + tmpdir_len + 1, tmpl, tmpl_len + 1);
+
+  int fdnum = ::mkostemp(buf.data(), O_CLOEXEC);
+  if (fdnum == -1) {
+    int err_no = errno;
+    return base::Result::from_errno(err_no, "mkostemp(3)");
+  }
+  path->assign(buf.data(), buf.size() - 1);
+  *fd = base::FDHolder::make(fdnum);
+  return base::Result();
 }
 
 }  // namespace base
