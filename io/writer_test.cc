@@ -376,4 +376,4 @@ TEST(FDWriter, ThreadedWrite) {
 // }}}
 
 static void init() __attribute__((constructor));
-static void init() { base::log_stderr_set_level(0); }
+static void init() { base::log_stderr_set_level(VLOG_LEVEL(0)); }

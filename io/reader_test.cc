@@ -773,4 +773,4 @@ TEST(FDReader, WriteToSplice) {
 // }}}
 
 static void init() __attribute__((constructor));
-static void init() { base::log_stderr_set_level(-6); }
+static void init() { base::log_stderr_set_level(VLOG_LEVEL(6)); }

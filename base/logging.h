@@ -22,6 +22,7 @@ namespace base {
 #define LOG_LEVEL_DFATAL 4
 #define LOG_LEVEL_FATAL 5
 #define LOG_LEVEL(name) LOG_LEVEL_##name
+#define VLOG_LEVEL(vlevel) (-(vlevel))
 
 // Logger collects a single log message to be output.
 class Logger {
@@ -217,12 +218,12 @@ std::shared_ptr<T> log_check_notnull(const char* file, unsigned int line,
 Logger force_eval(bool);
 
 #define LOG(name) ::base::Logger(__FILE__, __LINE__, 1, LOG_LEVEL(name))
-#define VLOG(vlevel) ::base::Logger(__FILE__, __LINE__, 1, -(vlevel))
+#define VLOG(vlevel) ::base::Logger(__FILE__, __LINE__, 1, VLOG_LEVEL(vlevel))
 
 #define LOG_EVERY_N(name, n) \
   ::base::Logger(__FILE__, __LINE__, (n), LOG_LEVEL(name))
 #define VLOG_EVERY_N(vlevel, n) \
-  ::base::Logger(__FILE__, __LINE__, (n), -(vlevel))
+  ::base::Logger(__FILE__, __LINE__, (n), VLOG_LEVEL(vlevel))
 
 #define LOG_EXCEPTION(e) ::base::log_exception(__FILE__, __LINE__, (e))
 
