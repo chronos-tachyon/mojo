@@ -37,7 +37,7 @@ class ClockImpl {
 class Clock {
  public:
   // Clocks are normally constructed from an implementation.
-  Clock(std::shared_ptr<ClockImpl> ptr) noexcept : ptr_(std::move(ptr)) {}
+  Clock(std::shared_ptr<const ClockImpl> ptr) noexcept : ptr_(std::move(ptr)) {}
 
   // Clocks are default constructible, copyable, and moveable.
   Clock() noexcept = default;
@@ -61,7 +61,7 @@ class Clock {
   }
 
  private:
-  std::shared_ptr<ClockImpl> ptr_;
+  std::shared_ptr<const ClockImpl> ptr_;
 };
 
 // MonotonicClockImpl is the abstract base class for MonotonicClocks.
@@ -102,7 +102,7 @@ class MonotonicClockImpl {
 class MonotonicClock {
  public:
   // MonotonicClocks are normally constructed from an implementation.
-  MonotonicClock(std::shared_ptr<MonotonicClockImpl> ptr) noexcept
+  MonotonicClock(std::shared_ptr<const MonotonicClockImpl> ptr) noexcept
       : ptr_(std::move(ptr)) {}
 
   // MonotonicClocks are default constructible, copyable, and moveable.
@@ -137,7 +137,7 @@ class MonotonicClock {
   }
 
  private:
-  std::shared_ptr<MonotonicClockImpl> ptr_;
+  std::shared_ptr<const MonotonicClockImpl> ptr_;
 };
 
 // Returns a shared Clock that always reflects the current time.

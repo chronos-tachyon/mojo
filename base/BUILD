@@ -113,6 +113,15 @@ cc_test(
 )
 
 cc_library(
+  name = "clockfake",
+  srcs = ["clockfake.cc"],
+  hdrs = ["clockfake.h"],
+  deps = [":base"],
+  visibility = ["//visibility:public"],
+  testonly = True,
+)
+
+cc_library(
   name = "result_testing",
   srcs = ["result_testing.cc"],
   hdrs = ["result_testing.h"],
