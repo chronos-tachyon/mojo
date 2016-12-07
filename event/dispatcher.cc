@@ -275,6 +275,7 @@ class ThreadPoolDispatcher : public Dispatcher {
       return base::Result::failed_precondition(
           "event::Dispatcher is already corked");
     corked_ = true;
+    while (busy_ > 0) busy_cv_.wait(lock);
     return base::Result();
   }
 
@@ -319,6 +320,7 @@ class ThreadPoolDispatcher : public Dispatcher {
         item = std::move(work_.front());
         work_.pop();
         invoke(lock, busy_, done_, caught_, std::move(item));
+        if (busy_ == 0) busy_cv_.notify_all();
       }
       if (current_ > desired_) break;
       invoke(lock, idle_);
@@ -356,6 +358,7 @@ class ThreadPoolDispatcher : public Dispatcher {
   mutable std::mutex mu_;
   std::condition_variable work_cv_;
   std::condition_variable curr_cv_;
+  std::condition_variable busy_cv_;
   std::queue<Work> work_;
   IdleFunction idle_;
   std::size_t min_;

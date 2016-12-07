@@ -245,12 +245,17 @@ TEST(ThreadPoolDispatcher, EndToEnd) {
   LOG(INFO) << "waiting on done";
   while (!done) cv.wait(lock);
   LOG(INFO) << "got done";
+  lock.unlock();
+
+  d->cork();
+  d->uncork();
+  LOG(INFO) << "corked and uncorked";
+
   EXPECT_EQ(10, n);
   for (i = 0; i < 10; i++) {
     EXPECT_OK(tasks[i].result());
   }
   EXPECT_OK(donetask.result());
-  lock.unlock();
 
   expected.desired_num_workers = 4;
   expected.current_num_workers = 4;
