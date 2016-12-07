@@ -124,7 +124,9 @@ class SyncFunctionWriter : public WriterImpl {
 class CloseIgnoringWriter : public WriterImpl {
  public:
   CloseIgnoringWriter(Writer w) noexcept : WriterImpl(w.options()),
-                                           w_(std::move(w)) {}
+                                           w_(std::move(w)) {
+    w_.assert_valid();
+  }
 
   void write(event::Task* task, std::size_t* n, const char* ptr,
              std::size_t len) override {
@@ -140,9 +142,11 @@ class CloseIgnoringWriter : public WriterImpl {
     if (prologue(task)) task->finish_ok();
   }
 
- private:
-  friend base::FD internal::writerfd(const Writer& w);
+  base::FD internal_writerfd() const override {
+    return w_.implementation()->internal_writerfd();
+  }
 
+ private:
   Writer w_;
 };
 
@@ -392,9 +396,9 @@ class FDWriter : public WriterImpl {
     if (prologue(task)) task->finish(fd_->close());
   }
 
- private:
-  friend base::FD internal::writerfd(const Writer& w);
+  base::FD internal_writerfd() const override { return fd_; }
 
+ private:
   base::FD fd_;
 };
 }  // anonymous namespace
@@ -432,26 +436,5 @@ Writer fullwriter(Options o) {
 Writer fdwriter(base::FD fd, Options o) {
   return Writer(std::make_shared<FDWriter>(std::move(fd), std::move(o)));
 }
-
-namespace internal {
-base::FD writerfd(const Writer& w) {
-  WriterImpl* base;
-  CloseIgnoringWriter* ciw;
-  FDWriter* fdw;
-
-  base = w.implementation();
-redo:
-  ciw = dynamic_cast<CloseIgnoringWriter*>(base);
-  if (ciw != nullptr) {
-    base = ciw->w_.implementation();
-    goto redo;
-  }
-  fdw = dynamic_cast<FDWriter*>(base);
-  if (fdw != nullptr) {
-    return fdw->fd_;
-  }
-  return base::FD();
-}
-}  // namespace internal
 
 }  // namespace io

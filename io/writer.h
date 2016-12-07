@@ -123,6 +123,25 @@ class WriterImpl {
   // Returns the minimum size which results in efficient writes.
   virtual std::size_t ideal_block_size() const noexcept { return 4096; }
 
+  // FOR INTERNAL USE ONLY.  DO NOT CALL DIRECTLY.
+  //
+  // Notes for implementers follow.
+  //
+  // Returns an FD suitable as the target of sendfile(2) or splice(2), or
+  // returns null if there is no such suitable FD.
+  //
+  // WARNING: A "suitable" FD means one where a direct write of data is
+  // acceptable, bypassing the |write()| and |read_from()| methods entirely.
+  //
+  // Examples of non-suitable FDs:
+  // - Implementations using pwrite(2) and a userspace file offset
+  // - Implementations of TLS, SSL, or other cryptographic stream protocols
+  // - Implementations that add any sort of protocol framing
+  //
+  // If you do not have a suitable FD on hand, just return |nullptr|.
+  //
+  virtual base::FD internal_writerfd() const { return nullptr; }
+
   // Accesses the io::Options which were provided at construction time.
   const Options& options() const noexcept { return o_; }
 
@@ -280,10 +299,6 @@ Writer fullwriter(Options o = default_options());
 
 // Returns a Writer that writes bytes to a file descriptor.
 Writer fdwriter(base::FD fd, Options o = default_options());
-
-namespace internal {
-base::FD writerfd(const Writer& r);
-}  // namespace internal
 
 }  // namespace io
 

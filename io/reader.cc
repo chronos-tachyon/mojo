@@ -447,23 +447,29 @@ class FDReader : public ReaderImpl {
                 const Writer& w) override {
     if (!prologue(task, n, max, w)) return;
 
+    auto xm = transfer_mode(options(), w.options());
+    if (xm < TransferMode::sendfile) {
+      task->finish(base::Result::not_implemented());
+      return;
+    }
+
     base::FD rfd = fd_;
-    base::FD wfd = internal::writerfd(w);
+    base::FD wfd = w.implementation()->internal_writerfd();
+    if (!wfd) {
+      task->finish(base::Result::not_implemented());
+      return;
+    }
 
     event::Manager rmgr = options().manager();
     event::Manager wmgr = w.options().manager();
-
-    auto xm = transfer_mode(options(), w.options());
 
     auto* helper =
         new WriteToHelper(task, n, max, std::move(wfd), std::move(rfd),
                           std::move(wmgr), std::move(rmgr));
     if (xm >= TransferMode::splice) {
       helper->run_splice();
-    } else if (xm >= TransferMode::sendfile) {
-      helper->run_sendfile();
     } else {
-      helper->run_fallback();
+      helper->run_sendfile();
     }
   }
 
@@ -687,7 +693,7 @@ class FDReader : public ReaderImpl {
           }
 
           // splice(2) not implemented, at all or for this pair of fds?
-          // Switch to fallback mode
+          // Switch to sendfile(2) mode
           if (err_no == ENOSYS) {
             VLOG(4) << "ENOSYS";
             return run_sendfile();
