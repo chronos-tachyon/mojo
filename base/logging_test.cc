@@ -21,47 +21,42 @@ static int my_gettimeofday(struct timeval* tv, struct timezone* unused) {
   return 0;
 }
 
-static base::Result setup(base::Pipe* pipe) {
-  base::Result r = base::make_pipe(pipe);
-  if (r) {
-    base::log_set_gettid(my_gettid);
-    base::log_set_gettimeofday(my_gettimeofday);
-    auto pair = pipe->write->acquire_fd();
-    base::log_fd_set_level(pair.first, LOG_LEVEL_INFO);
+namespace {
+class LogCapture : public base::LogTarget {
+ public:
+  explicit LogCapture(std::string* out) noexcept : out_(out) {}
+
+  bool want(const char* file, unsigned int line,
+            base::level_t level) const noexcept override {
+    return level >= LOG_LEVEL_INFO;
   }
-  return r;
+
+  void log(const base::LogEntry& entry) noexcept override {
+    entry.append_to(*out_);
+  }
+
+  std::string* string() noexcept { return out_; }
+
+ private:
+  std::string* out_;
+};
+}  // anonymous namespace
+
+static void setup(LogCapture* target) {
+  base::log_set_gettid(my_gettid);
+  base::log_set_gettimeofday(my_gettimeofday);
+  base::log_target_add(target);
 }
 
-static base::Result teardown(std::string* str, base::Pipe& pipe) {
-  {
-    auto pair = pipe.write->acquire_fd();
-    base::log_fd_remove(pair.first);
-  }
-  base::Result wr = pipe.write->close();
-  base::Result r;
-  str->clear();
-  while (true) {
-    char buf[256];
-    auto pair = pipe.read->acquire_fd();
-    ssize_t n = ::read(pair.first, buf, sizeof(buf));
-    if (n < 0) {
-      int err_no = errno;
-      r = base::Result::from_errno(err_no, "read(2)");
-      break;
-    }
-    if (n == 0) break;
-    str->append(buf, n);
-  }
-  re2::RE2::GlobalReplace(str, ":[0-9]+\\] ", ":XX] ");
-  base::Result rr = pipe.read->close();
-  if (r) r = wr;
-  if (r) r = rr;
-  return r;
+static void teardown(LogCapture* target) {
+  base::log_target_remove(target);
+  re2::RE2::GlobalReplace(target->string(), ":[0-9]+\\] ", ":XX] ");
 }
 
 TEST(Logger, EndToEnd) {
-  base::Pipe pipe;
-  ASSERT_OK(setup(&pipe));
+  std::string data;
+  LogCapture target(&data);
+  setup(&target);
 
   VLOG(0) << "who cares?";
   LOG(INFO) << "hello";
@@ -69,8 +64,7 @@ TEST(Logger, EndToEnd) {
   LOG(ERROR) << "oh no!";
   EXPECT_THROW(LOG(FATAL) << "aaaah!", base::fatal_error);
 
-  std::string data;
-  ASSERT_OK(teardown(&data, pipe));
+  teardown(&target);
 
   std::string expected(
       "I0102 22:04:05.123456  42 base/logging_test.cc:XX] hello\n"
@@ -81,15 +75,15 @@ TEST(Logger, EndToEnd) {
 }
 
 TEST(Logger, LogEveryN) {
-  base::Pipe pipe;
-  ASSERT_OK(setup(&pipe));
+  std::string data;
+  LogCapture target(&data);
+  setup(&target);
 
   for (std::size_t i = 0; i < 10; ++i) {
     LOG_EVERY_N(INFO, 3) << "hi #" << i;
   }
 
-  std::string data;
-  ASSERT_OK(teardown(&data, pipe));
+  teardown(&target);
 
   std::string expected(
       "I0102 22:04:05.123456  42 base/logging_test.cc:XX] hi #0\n"
@@ -112,8 +106,9 @@ TEST(Check, Correct) {
 }
 
 TEST(Check, Wrong) {
-  base::Pipe pipe;
-  ASSERT_OK(setup(&pipe));
+  std::string data;
+  LogCapture target(&data);
+  setup(&target);
 
   base::set_debug(true);
 
@@ -129,8 +124,7 @@ TEST(Check, Wrong) {
   EXPECT_THROW(CHECK_GT(q, r) << ": error #7", base::fatal_error);
   EXPECT_THROW(CHECK_GE(q, r) << ": error #8", base::fatal_error);
 
-  std::string data;
-  ASSERT_OK(teardown(&data, pipe));
+  teardown(&target);
 
   std::string expected(
       "F0102 22:04:05.123456  42 base/logging_test.cc:XX] "

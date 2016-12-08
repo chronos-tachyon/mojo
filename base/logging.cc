@@ -8,140 +8,207 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include <cmath>
+#include <condition_variable>
 #include <cstdint>
-#include <cstdio>
 #include <cstring>
 #include <map>
+#include <memory>
 #include <mutex>
+#include <queue>
+#include <thread>
 #include <vector>
 
+#include "base/concat.h"
 #include "base/debug.h"
 #include "base/util.h"
 
+namespace base {
+
 static pid_t gettid() { return syscall(SYS_gettid); }
 
-static std::size_t uintlen(unsigned long value) {
-  if (value < 10) return 1;
-  if (value < 100) return 2;
-  if (value < 1000) return 3;
-  if (value < 10000) return 4;
-  if (value < 100000) return 5;
-  double x = log10(value);
-  return static_cast<std::size_t>(round(x));
-}
-
-static std::size_t intlen(long value) {
-  if (value < 0)
-    return 1 + uintlen(-value);
-  else
-    return uintlen(value);
-}
-
 namespace {
-
-struct FileLine {
+struct Key {
   const char* file;
   unsigned int line;
 
-  FileLine(const char* file, unsigned int line) noexcept : file(file),
-                                                           line(line) {}
+  Key(const char* file, unsigned int line) noexcept : file(file), line(line) {}
 };
 
-static bool operator==(FileLine a, FileLine b) noexcept __attribute__((unused));
-static bool operator==(FileLine a, FileLine b) noexcept {
+static bool operator==(Key a, Key b) noexcept __attribute__((unused));
+static bool operator==(Key a, Key b) noexcept {
   return a.line == b.line && ::strcmp(a.file, b.file) == 0;
 }
 
-static bool operator<(FileLine a, FileLine b) noexcept {
+static bool operator<(Key a, Key b) noexcept {
   int cmp = ::strcmp(a.file, b.file);
   return cmp < 0 || (cmp == 0 && a.line < b.line);
 }
-
-struct Info {
-  std::size_t count;
-  signed char level;
-
-  Info() noexcept : count(0), level(127) {}
-};
-
-using Map = std::map<FileLine, Info>;
-
-struct Target {
-  int fd;
-  signed char level;
-
-  Target(int fd, signed char level) noexcept : fd(fd), level(level) {}
-};
-
-using Vec = std::vector<Target>;
-
 }  // anonymous namespace
 
+using Map = std::map<Key, std::size_t>;
+using Vec = std::vector<LogTarget*>;
+using Queue = std::queue<LogEntry>;
+
 static std::mutex g_mu;
-static signed char g_min = -127;
-static Map* g_map = nullptr;
-static Vec* g_vec = nullptr;
-static base::GetTidFunc g_gtid = nullptr;
-static base::GetTimeOfDayFunc g_gtod = nullptr;
+static std::mutex g_queue_mu;
+static std::condition_variable g_queue_put_cv;
+static std::condition_variable g_queue_empty_cv;
+static std::once_flag g_once;
+static level_t g_stderr = LOG_LEVEL_INFO;
+static GetTidFunc g_gtid = nullptr;
+static GetTimeOfDayFunc g_gtod = nullptr;
 
-static const Info* map_find(std::unique_lock<std::mutex>& lock,
-                            const char* file, unsigned int line) noexcept {
-  if (g_map == nullptr) return nullptr;
-  auto it = g_map->find(FileLine(file, line));
-  if (it == g_map->end()) return nullptr;
-  return &it->second;
-}
+static base::LogTarget* make_stderr();
 
-static Info* map_find_mutable(std::unique_lock<std::mutex>& lock,
-                              const char* file, unsigned int line) noexcept {
-  if (g_map == nullptr) g_map = new Map;
-  return &(*g_map)[FileLine(file, line)];
+static Map& map_get(std::unique_lock<std::mutex>& lock) {
+  static Map& m = *new Map;
+  return m;
 }
 
 static Vec& vec_get(std::unique_lock<std::mutex>& lock) {
-  if (g_vec == nullptr) {
-    g_vec = new Vec;
-    g_vec->emplace_back(2, LOG_LEVEL_INFO);
+  static Vec& v = *new Vec;
+  if (v.empty()) {
+    v.push_back(make_stderr());
   }
-  return *g_vec;
+  return v;
+}
+
+static Queue& queue_get(std::unique_lock<std::mutex>& lock) {
+  static Queue& q = *new Queue;
+  return q;
+}
+
+static void thread_body() {
+  auto lock0 = base::acquire_lock(g_queue_mu);
+  auto& q = queue_get(lock0);
+  while (true) {
+    while (q.empty()) g_queue_put_cv.wait(lock0);
+    auto entry = std::move(q.front());
+    q.pop();
+    auto lock1 = base::acquire_lock(g_mu);
+    auto& v = vec_get(lock1);
+    for (const auto& target : v) {
+      if (target->want(entry.file, entry.line, entry.level))
+        target->log(entry);
+    }
+    if (q.empty()) g_queue_empty_cv.notify_all();
+  }
 }
 
 static bool want(const char* file, unsigned int line, unsigned int n,
-                 signed char level) {
-  auto lock = base::acquire_lock(g_mu);
+                 level_t level) {
   if (level >= LOG_LEVEL_DFATAL) return true;
-  if (level < g_min) {
-    const Info* info = map_find(lock, file, line);
-    if (info == nullptr || level < info->level) {
-      return false;
-    }
-  }
+  auto lock = base::acquire_lock(g_mu);
   if (n > 1) {
-    Info* info = map_find_mutable(lock, file, line);
-    bool result = (info->count % n) == 0;
-    info->count++;
-    return result;
+    auto& m = map_get(lock);
+    Key key(file, line);
+    auto pair = m.insert(std::make_pair(key, 0));
+    auto& count = pair.first->second;
+    bool x = (count == 0);
+    count = (count + 1) % n;
+    if (!x) return false;
   }
-  return true;
+  auto& v = vec_get(lock);
+  for (const auto& target : v) {
+    if (target->want(file, line, level)) return true;
+  }
+  return false;
+}
+
+static void log(LogEntry entry) {
+  std::call_once(g_once, [] { std::thread(thread_body).detach(); });
+  auto lock = base::acquire_lock(g_queue_mu);
+  auto& q = queue_get(lock);
+  q.push(std::move(entry));
+  g_queue_put_cv.notify_one();
+}
+
+namespace {
+class LogSTDERR : public LogTarget {
+ public:
+  LogSTDERR() noexcept = default;
+  bool want(const char* file, unsigned int line, level_t level) const noexcept override {
+    // g_mu held by base::want()
+    return level >= g_stderr;
+  }
+  void log(const LogEntry& entry) noexcept override {
+    // g_mu held by base::thread_body()
+    auto str = entry.as_string();
+    ::write(2, str.data(), str.size());
+  }
+};
+}  // anonymous namespace
+
+static base::LogTarget* make_stderr() {
+  static base::LogTarget* const ptr = new LogSTDERR;
+  return ptr;
+}
+
+LogEntry::LogEntry(const char* file, unsigned int line, level_t level,
+                   std::string message) noexcept : file(file),
+                                                   line(line),
+                                                   level(level),
+                                                   message(std::move(message)) {
+  auto lock = acquire_lock(g_mu);
+  ::bzero(&time, sizeof(time));
+  if (g_gtod) {
+    (*g_gtod)(&time, nullptr);
+  } else {
+    ::gettimeofday(&time, nullptr);
+  }
+  if (g_gtid) {
+    tid = (*g_gtid)();
+  } else {
+    tid = gettid();
+  }
+}
+
+void LogEntry::append_to(std::string& out) const {
+  char ch;
+  if (level >= LOG_LEVEL_DFATAL) {
+    ch = 'F';
+  } else if (level >= LOG_LEVEL_ERROR) {
+    ch = 'E';
+  } else if (level >= LOG_LEVEL_WARN) {
+    ch = 'W';
+  } else if (level >= LOG_LEVEL_INFO) {
+    ch = 'I';
+  } else {
+    ch = 'D';
+  }
+
+  struct tm tm;
+  ::gmtime_r(&time.tv_sec, &tm);
+
+  // "[IWEF]<mm><dd> <hh>:<mm>:<ss>.<uuuuuu>  <tid> <file>:<line>] <message>"
+
+  std::array<char, 24> buf;
+  ::snprintf(buf.data(), buf.size(), "%c%02u%02u %02u:%02u:%02u.%06lu  ", ch,
+             tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec,
+             time.tv_usec);
+  concat_to(out, std::string(buf.data()), tid, ' ', file, ':', line, "] ", message, '\n');
+}
+
+std::string LogEntry::as_string() const {
+  std::string out;
+  append_to(out);
+  return out;
 }
 
 static std::unique_ptr<std::ostringstream> make_ss(const char* file,
                                                    unsigned int line,
                                                    unsigned int n,
-                                                   signed char level) {
+                                                   level_t level) {
   std::unique_ptr<std::ostringstream> ptr;
   if (want(file, line, n, level)) ptr.reset(new std::ostringstream);
   return ptr;
 }
 
-namespace base {
-
 Logger::Logger(std::nullptr_t)
     : file_(nullptr), line_(0), n_(0), level_(0), ss_(nullptr) {}
 
 Logger::Logger(const char* file, unsigned int line, unsigned int every_n,
-               signed char level)
+               level_t level)
     : file_(file),
       line_(line),
       n_(every_n),
@@ -150,67 +217,7 @@ Logger::Logger(const char* file, unsigned int line, unsigned int every_n,
 
 Logger::~Logger() noexcept(false) {
   if (ss_) {
-    auto lock = acquire_lock(g_mu);
-
-    char ch;
-    if (level_ >= LOG_LEVEL_DFATAL) {
-      ch = 'F';
-    } else if (level_ >= LOG_LEVEL_ERROR) {
-      ch = 'E';
-    } else if (level_ >= LOG_LEVEL_WARN) {
-      ch = 'W';
-    } else if (level_ >= LOG_LEVEL_INFO) {
-      ch = 'I';
-    } else {
-      ch = 'D';
-    }
-
-    struct timeval tv;
-    ::bzero(&tv, sizeof(tv));
-    if (g_gtod) {
-      (*g_gtod)(&tv, nullptr);
-    } else {
-      ::gettimeofday(&tv, nullptr);
-    }
-
-    struct tm tm;
-    ::gmtime_r(&tv.tv_sec, &tm);
-
-    pid_t tid;
-    if (g_gtid) {
-      tid = (*g_gtid)();
-    } else {
-      tid = gettid();
-    }
-
-    std::string message = ss_->str();
-
-    //   1     2   2  1 2  1 2  1 2  1 6      2  ?   1 ?    1 ?    2  ?       1
-    //   1     3   5  6 8  9 11 1214 1521     23 -   24-    25-    27 -       28
-    // "[IWEF]<mm><dd> <hh>:<mm>:<ss>.<uuuuuu>  <tid> <file>:<line>] <message>"
-
-    std::vector<char> buf;
-    const std::size_t n_tid = intlen(tid);
-    const std::size_t n_file = ::strlen(file_);
-    const std::size_t n_line = uintlen(line_);
-    const std::size_t n_message = message.size();
-    buf.resize(64 + n_tid + n_file + n_line + n_message);
-
-    ::snprintf(buf.data(), buf.size(),
-               "%c%02u%02u %02u:%02u:%02u.%06lu  %d %s:%u] %s", ch,
-               tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec,
-               tv.tv_usec, tid, file_, line_, message.c_str());
-    std::size_t n = ::strlen(buf.data());
-    buf.resize(n + 1);
-    buf[n] = '\n';
-
-    auto& vec = vec_get(lock);
-    for (auto target : vec) {
-      if (level_ >= target.level) {
-        write(target.fd, buf.data(), buf.size());
-      }
-    }
-
+    log(LogEntry(file_, line_, level_, ss_->str()));
     if (level_ >= LOG_LEVEL_DFATAL) {
       if (level_ >= LOG_LEVEL_FATAL || debug()) {
         throw fatal_error();
@@ -229,33 +236,28 @@ void log_set_gettimeofday(GetTimeOfDayFunc func) {
   g_gtod = func;
 }
 
-void log_stderr_set_level(signed char level) { log_fd_set_level(2, level); }
-
-void log_fd_set_level(int fd, signed char level) {
+void log_stderr_set_level(level_t level) {
   auto lock = acquire_lock(g_mu);
-  auto& vec = vec_get(lock);
-  bool found = false;
-  for (auto& target : vec) {
-    if (target.fd == fd) {
-      target.level = level;
-      found = true;
-      break;
-    }
-  }
-  if (!found) {
-    vec.emplace_back(fd, level);
-  }
+  g_stderr = level;
 }
 
-void log_fd_remove(int fd) {
+void log_target_add(LogTarget* target) {
   auto lock = acquire_lock(g_mu);
-  auto& vec = vec_get(lock);
-  auto it = vec.begin();
-  while (it != vec.end()) {
-    if (it->fd == fd) {
-      vec.erase(it);
-    } else {
-      ++it;
+  auto& v = vec_get(lock);
+  v.push_back(target);
+}
+
+void log_target_remove(LogTarget* target) {
+  auto lock0 = base::acquire_lock(g_queue_mu);
+  auto& q = queue_get(lock0);
+  while (!q.empty()) g_queue_empty_cv.wait(lock0);
+  auto lock1 = acquire_lock(g_mu);
+  auto& v = vec_get(lock1);
+  auto begin = v.begin(), it = v.end();
+  while (it != begin) {
+    --it;
+    if (*it == target) {
+      v.erase(it);
     }
   }
 }
@@ -284,15 +286,13 @@ void log_exception(const char* file, unsigned int line, std::exception_ptr e) {
 }
 
 Logger log_check(const char* file, unsigned int line, const char* expr,
-                        bool cond) {
+                 bool cond) {
   if (cond) return Logger(nullptr);
   Logger logger(file, line, 1, LOG_LEVEL_DFATAL);
   logger << "CHECK FAILED: " << expr;
   return logger;
 }
 
-Logger force_eval(bool) {
-  return Logger(nullptr);
-}
+Logger force_eval(bool) { return Logger(nullptr); }
 
 }  // namespace base

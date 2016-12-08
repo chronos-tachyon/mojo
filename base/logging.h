@@ -16,6 +16,8 @@
 
 namespace base {
 
+using level_t = signed char;
+
 #define LOG_LEVEL_INFO 1
 #define LOG_LEVEL_WARN 2
 #define LOG_LEVEL_ERROR 3
@@ -23,6 +25,45 @@ namespace base {
 #define LOG_LEVEL_FATAL 5
 #define LOG_LEVEL(name) LOG_LEVEL_##name
 #define VLOG_LEVEL(vlevel) (-(vlevel))
+
+// Exception class thrown by LOG(FATAL) errors.
+class fatal_error {
+ public:
+  fatal_error() noexcept = default;
+  fatal_error(const fatal_error&) noexcept = default;
+  fatal_error(fatal_error&&) noexcept = default;
+  fatal_error& operator=(const fatal_error&) noexcept = default;
+  fatal_error& operator=(fatal_error&&) noexcept = default;
+};
+
+// Exception class thrown by CHECK_NOTNULL errors.
+class null_pointer {
+ public:
+  null_pointer() noexcept : what_("") {}
+  null_pointer(const char* what) noexcept : what_(what ? what : "") {}
+  null_pointer(const null_pointer&) noexcept = default;
+  null_pointer(null_pointer&&) noexcept = default;
+  null_pointer& operator=(const null_pointer&) noexcept = default;
+  null_pointer& operator=(null_pointer&&) noexcept = default;
+  const char* what() const noexcept { return what_; }
+
+ private:
+  const char* what_;
+};
+
+// LogEntry represents a single log message.
+struct LogEntry {
+  struct timeval time;
+  pid_t tid;
+  const char* file;
+  unsigned int line;
+  level_t level;
+  std::string message;
+
+  LogEntry(const char* file, unsigned int line, level_t level, std::string message) noexcept;
+  void append_to(std::string& out) const;
+  std::string as_string() const;
+};
 
 // Logger collects a single log message to be output.
 class Logger {
@@ -32,7 +73,7 @@ class Logger {
  public:
   Logger(std::nullptr_t);
   Logger(const char* file, unsigned int line, unsigned int every_n,
-         signed char level);
+         level_t level);
   ~Logger() noexcept(false);
 
   // Logger is move-only.
@@ -44,7 +85,7 @@ class Logger {
   const char* file() const noexcept { return file_; }
   unsigned int line() const noexcept { return line_; }
   unsigned int every_n() const noexcept { return n_; }
-  signed char level() const noexcept { return level_; }
+  level_t level() const noexcept { return level_; }
 
   explicit operator bool() const noexcept { return !!ss_; }
   std::ostringstream* stream() noexcept { return ss_.get(); }
@@ -70,40 +111,25 @@ class Logger {
   const char* const file_;
   const unsigned int line_;
   const unsigned int n_;
-  const signed char level_;
+  const level_t level_;
   std::unique_ptr<std::ostringstream> ss_;
 };
 
-// Exception class thrown by LOG(FATAL) errors.
-class fatal_error {
- public:
-  constexpr fatal_error() noexcept = default;
-  constexpr fatal_error(const fatal_error&) noexcept = default;
-  constexpr fatal_error(fatal_error&&) noexcept = default;
-  fatal_error& operator=(const fatal_error&) noexcept = default;
-  fatal_error& operator=(fatal_error&&) noexcept = default;
-};
+class LogTarget {
+ protected:
+  LogTarget() noexcept = default;
 
-// Exception class thrown by CHECK_NOTNULL errors.
-class null_pointer {
  public:
-  constexpr null_pointer() noexcept : what_("") {}
-  constexpr null_pointer(const char* what) noexcept : what_(what ? what : "") {}
-  constexpr null_pointer(const null_pointer&) noexcept = default;
-  constexpr null_pointer(null_pointer&&) noexcept = default;
-  null_pointer& operator=(const null_pointer&) noexcept = default;
-  null_pointer& operator=(null_pointer&&) noexcept = default;
-  constexpr const char* what() const noexcept { return what_; }
-
- private:
-  const char* what_;
+  virtual ~LogTarget() noexcept = default;
+  virtual bool want(const char* file, unsigned int line, level_t level) const noexcept = 0;
+  virtual void log(const LogEntry& entry) noexcept = 0;
 };
 
 // Low-level functions for routing logs {{{
 
-void log_stderr_set_level(signed char level);
-void log_fd_set_level(int fd, signed char level);
-void log_fd_remove(int fd);
+void log_stderr_set_level(level_t level);
+void log_target_add(LogTarget* target);
+void log_target_remove(LogTarget* target);
 
 // }}}
 // Functions for mocking in tests {{{
