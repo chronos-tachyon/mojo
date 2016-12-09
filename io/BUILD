@@ -7,6 +7,7 @@ cc_library(
     "buffer.cc",
     "common.cc",
     "options.cc",
+    "pipe.cc",
     "reader.cc",
     "util.cc",
     "writer.cc",
@@ -15,6 +16,7 @@ cc_library(
     "buffer.h",
     "common.h",
     "options.h",
+    "pipe.h",
     "reader.h",
     "util.h",
     "writer.h",
@@ -31,6 +33,18 @@ cc_test(
   srcs = ["buffer_test.cc"],
   deps = [
     ":io",
+    "//external:gtest",
+  ],
+  size = "small",
+  timeout = "short",
+)
+
+cc_test(
+  name = "pipe_test",
+  srcs = ["pipe_test.cc"],
+  deps = [
+    ":io",
+    "//base:result_testing",
     "//external:gtest",
   ],
   size = "small",
