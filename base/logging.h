@@ -253,7 +253,7 @@ Logger force_eval(bool);
 
 #define LOG_EXCEPTION(e) ::base::log_exception(__FILE__, __LINE__, (e))
 
-#define CHECK(x) ::base::log_check(__FILE__, __LINE__, #x, (x))
+#define CHECK(x) ::base::log_check(__FILE__, __LINE__, #x, !!(x))
 
 #define CHECK_EQ(x, y) \
   ::base::log_check_op(__FILE__, __LINE__, ::base::OpEQ(), #x, (x), #y, (y))
