@@ -71,6 +71,11 @@ class PipeReader : public ReaderImpl {
       : ReaderImpl(std::move(o)),
         guts_(std::move(g)) {}
 
+  ~PipeReader() noexcept {
+    auto lock = base::acquire_lock(guts_->mu);
+    close_guts();
+  }
+
   void read(event::Task* task, char* out, std::size_t* n, std::size_t min,
             std::size_t max) override {
     if (!prologue(task, out, n, min, max)) return;
@@ -90,6 +95,12 @@ class PipeReader : public ReaderImpl {
       task->finish(base::Result::failed_precondition("pipe is closed"));
       return;
     }
+    close_guts();
+    task->finish_ok();
+  }
+
+ private:
+  void close_guts() noexcept {
     guts_->write_closed = true;
     guts_->read_closed = true;
     for (const auto& op : guts_->readq) {
@@ -97,10 +108,8 @@ class PipeReader : public ReaderImpl {
     }
     guts_->buffer.clear();
     guts_->readq.clear();
-    task->finish_ok();
   }
 
- private:
   std::shared_ptr<PipeGuts> guts_;
 };
 
@@ -109,6 +118,12 @@ class PipeWriter : public WriterImpl {
   PipeWriter(std::shared_ptr<PipeGuts> g, Options o) noexcept
       : WriterImpl(std::move(o)),
         guts_(std::move(g)) {}
+
+  ~PipeWriter() noexcept {
+    auto lock = base::acquire_lock(guts_->mu);
+    guts_->write_closed = true;
+    guts_->process();
+  }
 
   void write(event::Task* task, std::size_t* n, const char* ptr,
              std::size_t len) override {
