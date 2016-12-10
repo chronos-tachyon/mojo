@@ -52,4 +52,30 @@ TEST(Pipe, EndToEnd) {
   EXPECT_EQ(4U, n1);
   EXPECT_EQ(4U, n2);
   EXPECT_EQ("abcdefghijklmnop", std::string(buf, 16));
+
+  event::Task rd3, wr3, cl;
+  std::size_t n3, m3;
+
+  LOG(INFO) << "writing 2 bytes";
+  w.write(&wr3, &m3, "qr", 2);
+
+  LOG(INFO) << "closing pipe";
+  w.close(&cl);
+
+  LOG(INFO) << "waiting for completion";
+  event::wait_all({o.manager()}, {&wr3, &cl});
+
+  EXPECT_OK(wr3.result());
+  EXPECT_EQ(2U, m3);
+  EXPECT_OK(cl.result());
+
+  LOG(INFO) << "reading 4 bytes at offset 0";
+  r.read(&rd3, buf, &n3, 4, 4);
+
+  LOG(INFO) << "waiting for completion";
+  event::wait(o.manager(), &rd3);
+
+  EXPECT_EOF(rd3.result());
+  EXPECT_EQ(2U, n3);
+  EXPECT_EQ("qr", std::string(buf, 2));
 }

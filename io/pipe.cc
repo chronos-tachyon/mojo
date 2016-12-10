@@ -28,17 +28,14 @@ struct ReadOp {
 
 struct PipeGuts {
   mutable std::mutex mu;
-  bool closed;
+  bool write_closed;
+  bool read_closed;
   std::vector<char> buffer;
   std::deque<ReadOp> readq;
 
-  PipeGuts() noexcept : closed(false) {}
+  PipeGuts() noexcept : write_closed(false), read_closed(false) {}
 
   bool process_one(const ReadOp& op) {
-    if (closed) {
-      op.task->finish(base::Result::failed_precondition("pipe is closed"));
-      return true;
-    }
     if (buffer.size() >= op.min) {
       std::size_t count = buffer.size();
       if (count > op.max) count = op.max;
@@ -47,6 +44,13 @@ struct PipeGuts {
       auto it = buffer.begin();
       buffer.erase(it, it + count);
       op.task->finish_ok();
+      return true;
+    }
+    if (write_closed) {
+      ::memcpy(op.out, buffer.data(), buffer.size());
+      *op.n = buffer.size();
+      buffer.clear();
+      op.task->finish(base::Result::eof());
       return true;
     }
     return false;
@@ -59,42 +63,6 @@ struct PipeGuts {
       readq.pop_front();
     }
   }
-
-  void read(event::Task* task, char* out, std::size_t* n, std::size_t min,
-            std::size_t max) {
-    auto lock = base::acquire_lock(mu);
-    if (closed) {
-      task->finish(base::Result::failed_precondition("pipe is closed"));
-      return;
-    }
-    readq.emplace_back(task, out, n, min, max);
-    process();
-  }
-
-  void write(event::Task* task, std::size_t* n, const char* ptr,
-             std::size_t len) {
-    auto lock = base::acquire_lock(mu);
-    if (closed) {
-      task->finish(base::Result::failed_precondition("pipe is closed"));
-      return;
-    }
-    buffer.insert(buffer.end(), ptr, ptr + len);
-    *n = len;
-    task->finish_ok();
-    process();
-  }
-
-  void close(event::Task* task) {
-    auto lock = base::acquire_lock(mu);
-    if (closed) {
-      task->finish(base::Result::failed_precondition("pipe is closed"));
-      return;
-    }
-    closed = true;
-    buffer.clear();
-    readq.clear();
-    task->finish_ok();
-  }
 };
 
 class PipeReader : public ReaderImpl {
@@ -106,12 +74,30 @@ class PipeReader : public ReaderImpl {
   void read(event::Task* task, char* out, std::size_t* n, std::size_t min,
             std::size_t max) override {
     if (!prologue(task, out, n, min, max)) return;
-    guts_->read(task, out, n, min, max);
+    auto lock = base::acquire_lock(guts_->mu);
+    if (guts_->read_closed) {
+      task->finish(base::Result::failed_precondition("pipe is closed"));
+      return;
+    }
+    guts_->readq.emplace_back(task, out, n, min, max);
+    guts_->process();
   }
 
   void close(event::Task* task) override {
     if (!prologue(task)) return;
-    guts_->close(task);
+    auto lock = base::acquire_lock(guts_->mu);
+    if (guts_->read_closed) {
+      task->finish(base::Result::failed_precondition("pipe is closed"));
+      return;
+    }
+    guts_->write_closed = true;
+    guts_->read_closed = true;
+    for (const auto& op : guts_->readq) {
+      op.task->finish_cancel();
+    }
+    guts_->buffer.clear();
+    guts_->readq.clear();
+    task->finish_ok();
   }
 
  private:
@@ -127,12 +113,28 @@ class PipeWriter : public WriterImpl {
   void write(event::Task* task, std::size_t* n, const char* ptr,
              std::size_t len) override {
     if (!prologue(task, n, ptr, len)) return;
-    guts_->write(task, n, ptr, len);
+    auto lock = base::acquire_lock(guts_->mu);
+    if (guts_->write_closed) {
+      task->finish(base::Result::failed_precondition("pipe is closed"));
+      return;
+    }
+    auto& buf = guts_->buffer;
+    buf.insert(buf.end(), ptr, ptr + len);
+    *n = len;
+    task->finish_ok();
+    guts_->process();
   }
 
   void close(event::Task* task) override {
     if (!prologue(task)) return;
-    guts_->close(task);
+    auto lock = base::acquire_lock(guts_->mu);
+    if (guts_->write_closed) {
+      task->finish(base::Result::failed_precondition("pipe is closed"));
+      return;
+    }
+    guts_->write_closed = true;
+    task->finish_ok();
+    guts_->process();
   }
 
  private:
