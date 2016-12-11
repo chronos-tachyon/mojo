@@ -8,7 +8,7 @@ TEST(Pipe, EndToEnd) {
   io::Options o;
   io::Reader r;
   io::Writer w;
-  io::make_pipe(&r, &w, o);
+  io::make_pipe(&r, o, &w, o);
 
   event::Task rd0, rd1, rd2;
   std::size_t n0, n1, n2;
