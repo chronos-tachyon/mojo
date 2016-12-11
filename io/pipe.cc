@@ -104,7 +104,7 @@ class PipeReader : public ReaderImpl {
     guts_->write_closed = true;
     guts_->read_closed = true;
     for (const auto& op : guts_->readq) {
-      op.task->finish_cancel();
+      op.task->finish_cancel();  // TODO: more appropriate error?
     }
     guts_->buffer.clear();
     guts_->readq.clear();
