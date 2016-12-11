@@ -100,8 +100,8 @@ class Options {
 // Returns the default Options. Thread-safe.
 const Options& default_options();
 
-// Changes the default Options. Thread-safe.
-void set_default_options(Options o);
+// Changes the default Options. THREAD-HOSTILE.
+Options& mutable_default_options();
 
 }  // namespace io
 
