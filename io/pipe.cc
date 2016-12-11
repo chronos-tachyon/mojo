@@ -157,12 +157,12 @@ class PipeWriter : public WriterImpl {
 };
 }  // anonymous namespace
 
-void make_pipe(Reader* r, Writer* w, Options o) {
+void make_pipe(Reader* r, Options ro, Writer* w, Options wo) {
   CHECK_NOTNULL(r);
   CHECK_NOTNULL(w);
   auto guts = std::make_shared<PipeGuts>();
-  *r = Reader(std::make_shared<PipeReader>(guts, o));
-  *w = Writer(std::make_shared<PipeWriter>(std::move(guts), std::move(o)));
+  *r = Reader(std::make_shared<PipeReader>(guts, std::move(ro)));
+  *w = Writer(std::make_shared<PipeWriter>(std::move(guts), std::move(wo)));
 }
 
 }  // namespace io
