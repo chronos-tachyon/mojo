@@ -6,6 +6,7 @@
 #include <unistd.h>
 
 #include <cstring>
+#include <deque>
 #include <mutex>
 #include <stdexcept>
 #include <vector>
@@ -13,6 +14,14 @@
 #include "base/logging.h"
 #include "base/util.h"
 #include "io/reader.h"
+
+static base::Result writer_closed() {
+  return base::Result::failed_precondition("io::Writer is closed");
+}
+
+static base::Result writer_full() {
+  return base::Result::from_errno(ENOSPC, "io::Writer is full");
+}
 
 namespace io {
 
@@ -161,7 +170,7 @@ class StringWriter : public WriterImpl {
     if (!prologue(task, n, ptr, len)) return;
     auto lock = base::acquire_lock(mu_);
     if (closed_) {
-      task->finish(base::Result::failed_precondition("writer is closed"));
+      task->finish(writer_closed());
       return;
     }
     str_->append(ptr, ptr + len);
@@ -177,7 +186,7 @@ class StringWriter : public WriterImpl {
     lock.unlock();
     if (prologue(task)) {
       if (was)
-        task->finish(base::Result::failed_precondition("writer is closed"));
+        task->finish(writer_closed());
       else
         task->finish_ok();
     }
@@ -204,7 +213,7 @@ class BufferWriter : public WriterImpl {
     if (!prologue(task, n, ptr, len)) return;
     auto lock = base::acquire_lock(mu_);
     if (closed_) {
-      task->finish(base::Result::failed_precondition("writer is closed"));
+      task->finish(writer_closed());
       return;
     }
     char* data = buf_.data() + *buflen_;
@@ -215,7 +224,7 @@ class BufferWriter : public WriterImpl {
     lock.unlock();
     *n = size;
     if (size < len)
-      task->finish(base::Result::resource_exhausted("out of space"));
+      task->finish(writer_full());
     else
       task->finish_ok();
   }
@@ -226,8 +235,7 @@ class BufferWriter : public WriterImpl {
 
     auto lock = base::acquire_lock(mu_);
     if (closed_) {
-      if (task->start())
-        task->finish(base::Result::failed_precondition("writer is closed"));
+      if (task->start()) task->finish(writer_closed());
       return;
     }
     char* data = buf_.data() + *buflen_;
@@ -252,7 +260,7 @@ class BufferWriter : public WriterImpl {
     lock.unlock();
     if (prologue(task)) {
       if (was)
-        task->finish(base::Result::failed_precondition("writer is closed"));
+        task->finish(writer_closed());
       else
         task->finish_ok();
     }
@@ -297,7 +305,7 @@ class FullWriter : public WriterImpl {
     if (!prologue(task, n, ptr, len)) return;
     *n = 0;
     base::Result r;
-    if (len > 0) r = base::Result::from_errno(ENOSPC, "write(2)");
+    if (len > 0) r = writer_full();
     task->finish(std::move(r));
   }
 
@@ -308,88 +316,28 @@ class FullWriter : public WriterImpl {
 
 class FDWriter : public WriterImpl {
  public:
-  FDWriter(base::FD fd, Options o) noexcept : WriterImpl(std::move(o)),
-                                              fd_(std::move(fd)) {}
-
- private:
-  struct WriteHelper {
+  struct WriteOp {
     event::Task* const task;
     std::size_t* const n;
     const char* const ptr;
     const std::size_t len;
-    FDWriter* const writer;
-    event::FileDescriptor fdevt;
 
-    WriteHelper(event::Task* t, std::size_t* n, const char* p, std::size_t l,
-                FDWriter* w) noexcept : task(t),
-                                        n(n),
-                                        ptr(p),
-                                        len(l),
-                                        writer(w) {}
-
-    base::Result run() {
-      base::Result r;
-      while (*n < len) {
-        // Check for cancellation
-        if (!task->is_running()) {
-          task->finish_cancel();
-          break;
-        }
-
-        // Try to write all the remaining data.
-        auto pair = writer->fd_->acquire_fd();
-        VLOG(4) << "io::FDWriter::write: "
-                << "fd=" << pair.first << ", "
-                << "len=" << len << ", "
-                << "*n=" << *n;
-        ssize_t written = ::write(pair.first, ptr + *n, len - *n);
-        int err_no = errno;
-        VLOG(5) << "result=" << written;
-        pair.second.unlock();
-
-        // Check the return code
-        if (written < 0) {
-          // Interrupted by signal? Retry immediately
-          if (err_no == EINTR) {
-            VLOG(4) << "EINTR";
-            continue;
-          }
-
-          // No data for non-blocking write? Reschedule for later
-          if (err_no == EAGAIN || err_no == EWOULDBLOCK) {
-            VLOG(4) << "EAGAIN";
-            if (!fdevt) {
-              auto closure = [this](event::Data data) {
-                VLOG(5) << "woke io::FDWriter::write, set=" << data.events;
-                return run();
-              };
-              r = writer->options().manager().fd(&fdevt, writer->fd_,
-                                                 event::Set::writable_bit(),
-                                                 event::handler(closure));
-              if (!r.ok()) break;
-            }
-            return base::Result();
-          }
-
-          // Other error? Bomb out
-          r = base::Result::from_errno(err_no, "write(2)");
-          VLOG(5) << "errno=" << err_no << ", " << r.as_string();
-          break;
-        }
-        *n += written;
-      }
-      task->finish(std::move(r));
-      delete this;
-      return base::Result();
-    }
+    WriteOp(event::Task* t, std::size_t* n, const char* p,
+            std::size_t l) noexcept : task(t),
+                                      n(n),
+                                      ptr(p),
+                                      len(l) {}
   };
 
- public:
+  FDWriter(base::FD fd, Options o) noexcept : WriterImpl(std::move(o)),
+                                              fd_(std::move(fd)) {}
+
   void write(event::Task* task, std::size_t* n, const char* ptr,
              std::size_t len) override {
     if (!prologue(task, n, ptr, len)) return;
-    auto* helper = new WriteHelper(task, n, ptr, len, this);
-    helper->run();
+    auto lock = base::acquire_lock(mu_);
+    q_.emplace_back(task, n, ptr, len);
+    process(lock);
   }
 
   void close(event::Task* task) override {
@@ -398,8 +346,93 @@ class FDWriter : public WriterImpl {
 
   base::FD internal_writerfd() const override { return fd_; }
 
+  void process(base::Lock& lock) {
+    while (!q_.empty()) {
+      if (!process_one(lock, q_.front())) break;
+      q_.pop_front();
+    }
+
+    // If we emptied out the queue, nothing more to do.
+    if (q_.empty()) return;
+
+    // If we already have an event handler, nothing more to do.
+    if (fdevt_) return;
+
+    // Finish processing the queue once the FD becomes writable again.
+    auto fn = [this](event::Data) {
+      auto lock = base::acquire_lock(mu_);
+      process(lock);
+      return base::Result();
+    };
+    auto m = options().manager();
+    auto r = m.fd(&fdevt_, fd_, event::Set::writable_bit(), event::handler(fn));
+    r.expect_ok();
+
+    // If we failed to set up the event handler, give the bad news to all
+    // pending write operations.
+    if (!r) {
+      for (const WriteOp& op : q_) {
+        op.task->finish(r);
+      }
+      q_.clear();
+    }
+  }
+
+  bool process_one(base::Lock& lock, const WriteOp& op) {
+    base::Result r;
+    // Until we've fulfilled the write operation...
+    while (*op.n < op.len) {
+      // Check for cancellation
+      if (!op.task->is_running()) {
+        op.task->finish_cancel();
+        return true;
+      }
+
+      // Try to write all the remaining data.
+      auto pair = fd_->acquire_fd();
+      VLOG(4) << "io::FDWriter::write: "
+              << "fd=" << pair.first << ", "
+              << "len=" << op.len << ", "
+              << "*n=" << *op.n;
+      const char* ptr = op.ptr + *op.n;
+      std::size_t len = op.len - *op.n;
+      ssize_t written = ::write(pair.first, ptr, len);
+      int err_no = errno;
+      VLOG(5) << "result=" << written;
+      pair.second.unlock();
+
+      // Check the return code
+      if (written < 0) {
+        // Interrupted by signal? Retry immediately
+        if (err_no == EINTR) {
+          VLOG(4) << "EINTR";
+          continue;
+        }
+
+        // No data for non-blocking write? Reschedule for later
+        if (err_no == EAGAIN || err_no == EWOULDBLOCK) {
+          VLOG(4) << "EAGAIN";
+          return false;
+        }
+
+        // Other error? Bomb out
+        r = base::Result::from_errno(err_no, "write(2)");
+        VLOG(5) << "errno=" << err_no << ", " << r.as_string();
+        break;
+      }
+
+      // Update the bytes written.
+      *op.n += written;
+    }
+    op.task->finish(std::move(r));
+    return true;
+  }
+
  private:
   base::FD fd_;
+  event::FileDescriptor fdevt_;
+  mutable std::mutex mu_;
+  std::deque<WriteOp> q_;
 };
 }  // anonymous namespace
 
