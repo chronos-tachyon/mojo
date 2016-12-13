@@ -20,6 +20,7 @@
 #include <unistd.h>
 
 #include <cstring>
+#include <deque>
 #include <exception>
 #include <mutex>
 #include <stdexcept>
@@ -432,322 +433,347 @@ class ZeroReader : public ReaderImpl {
   }
 };
 
-// FIXME: FDReader needs to be re-architected to serialize concurrent reads by
-//        diverting them into a queue and processing them in some order.
-//        (While |read(2)| is atomic, we call it multiple times, so our use is
-//        not thread-safe.)
 class FDReader : public ReaderImpl {
  public:
+  struct Op {
+    virtual ~Op() noexcept = default;
+    virtual bool process(base::Lock& lock, FDReader* reader) = 0;
+  };
+
+  struct ReadOp : public Op {
+    event::Task* const task;
+    char* const out;
+    std::size_t* const n;
+    const std::size_t min;
+    const std::size_t max;
+
+    ReadOp(event::Task* t, char* o, std::size_t* n, std::size_t mn,
+           std::size_t mx) noexcept : task(t),
+                                      out(o),
+                                      n(n),
+                                      min(mn),
+                                      max(mx) {}
+    bool process(base::Lock& lock, FDReader* reader) override;
+  };
+
+  struct WriteToOp : public Op {
+    event::Task* const task;
+    std::size_t* const n;
+    const std::size_t max;
+    const Writer w;
+    event::FileDescriptor wrevt;
+
+    WriteToOp(event::Task* t, std::size_t* n, std::size_t mx, Writer w) noexcept
+        : task(t),
+          n(n),
+          max(mx),
+          w(std::move(w)) {}
+    bool process(base::Lock& lock, FDReader* reader) override;
+  };
+
   FDReader(base::FD fd, Options o) noexcept : ReaderImpl(std::move(o)),
                                               fd_(std::move(fd)) {}
 
   void read(event::Task* task, char* out, std::size_t* n, std::size_t min,
             std::size_t max) override {
     if (!prologue(task, out, n, min, max)) return;
-    auto* helper = new ReadHelper(task, out, n, min, max, this);
-    helper->run();
+    auto lock = base::acquire_lock(mu_);
+    q_.emplace_back(new ReadOp(task, out, n, min, max));
+    VLOG(6) << "io::FDReader::read";
+    process(lock);
   }
 
   void write_to(event::Task* task, std::size_t* n, std::size_t max,
                 const Writer& w) override {
     if (!prologue(task, n, max, w)) return;
-
-    auto xm = transfer_mode(options(), w.options());
-    if (xm < TransferMode::sendfile) {
-      task->finish(base::Result::not_implemented());
-      return;
-    }
-
-    base::FD rfd = fd_;
-    base::FD wfd = w.implementation()->internal_writerfd();
-    if (!wfd) {
-      task->finish(base::Result::not_implemented());
-      return;
-    }
-
-    event::Manager rmgr = options().manager();
-    event::Manager wmgr = w.options().manager();
-
-    auto* helper =
-        new WriteToHelper(task, n, max, std::move(wfd), std::move(rfd),
-                          std::move(wmgr), std::move(rmgr));
-    if (xm >= TransferMode::splice) {
-      helper->run_splice();
-    } else {
-      helper->run_sendfile();
-    }
+    auto lock = base::acquire_lock(mu_);
+    q_.emplace_back(new WriteToOp(task, n, max, w));
+    VLOG(6) << "io::FDReader::write_to";
+    process(lock);
   }
 
   void close(event::Task* task) override {
     if (prologue(task)) task->finish(fd_->close());
   }
 
- private:
-  struct ReadHelper {
-    event::Task* const task;
-    char* const out;
-    std::size_t* const n;
-    const std::size_t min;
-    const std::size_t max;
-    FDReader* const reader;
-    event::FileDescriptor fdevt;
-
-    ReadHelper(event::Task* t, char* p, std::size_t* n, std::size_t mn,
-               std::size_t mx, FDReader* r) noexcept : task(t),
-                                                       out(p),
-                                                       n(n),
-                                                       min(mn),
-                                                       max(mx),
-                                                       reader(r) {}
-
-    base::Result run() {
-      base::Result r;
-      while (*n < max) {
-        // Check for cancellation
-        if (!task->is_running()) {
-          task->finish_cancel();
-          break;
-        }
-
-        // Attempt to read some data
-        auto pair = reader->fd_->acquire_fd();
-        VLOG(4) << "io::FDReader::read: "
-                << "fd=" << pair.first << ", "
-                << "max=" << max << ", "
-                << "*n=" << *n;
-        ssize_t len = ::read(pair.first, out + *n, max - *n);
-        int err_no = errno;
-        VLOG(5) << "result=" << len;
-        pair.second.unlock();
-
-        // Check the return code
-        if (len < 0) {
-          // Interrupted by signal? Retry immediately
-          if (err_no == EINTR) {
-            VLOG(4) << "EINTR";
-            continue;
-          }
-
-          // No data for non-blocking read?
-          // |min == 0| is success, otherwise reschedule for later
-          if (err_no == EAGAIN || err_no == EWOULDBLOCK) {
-            VLOG(4) << "EAGAIN";
-
-            // If we've hit the minimum threshold, call it a day.
-            if (*n >= min) break;
-
-            // Register a callback for poll, if we didn't already.
-            auto closure = [this](event::Data data) {
-              VLOG(5) << "woke io::FDReader::read, set=" << data.events;
-              return run();
-            };
-            if (!fdevt) {
-              r = reader->options().manager().fd(&fdevt, reader->fd_,
-                                                 event::Set::readable_bit(),
-                                                 event::handler(closure));
-              if (!r) break;
-            }
-            return base::Result();
-          }
-
-          // Other error? Bomb out
-          r = base::Result::from_errno(err_no, "read(2)");
-          VLOG(5) << "errno=" << err_no << ", " << r.as_string();
-          break;
-        }
-        if (len == 0) {
-          if (*n < min) r = base::Result::eof();
-          VLOG(4) << "EOF, " << r.as_string();
-          break;
-        }
-        *n += len;
+  void process(base::Lock& lock) {
+    VLOG(4) << "io::FDReader::process: q.size()=" << q_.size();
+    while (!q_.empty()) {
+      std::unique_ptr<Op> op = std::move(q_.front());
+      q_.pop_front();
+      if (!op->process(lock, this)) {
+        q_.push_front(std::move(op));
+        break;
       }
-      task->finish(std::move(r));
-      delete this;
-      return base::Result();
+      VLOG(5) << "io::FDReader::process: consumed";
     }
-  };
+  }
 
-  struct WriteToHelper {
-    event::Task* const task;
-    std::size_t* const n;
-    std::size_t const max;
-    const base::FD wfd;
-    const base::FD rfd;
-    const event::Manager wmgr;
-    const event::Manager rmgr;
-    event::FileDescriptor wevt;
-    event::FileDescriptor revt;
+  base::Result wake(event::Data data) {
+    VLOG(6) << "woke io::FDReader, set=" << data.events;
+    auto lock = base::acquire_lock(mu_);
+    process(lock);
+    return base::Result();
+  }
 
-    WriteToHelper(event::Task* t, std::size_t* n, std::size_t mx, base::FD wd,
-                  base::FD rd, event::Manager wm, event::Manager rm) noexcept
-        : task(t),
-          n(n),
-          max(mx),
-          wfd(std::move(wd)),
-          rfd(std::move(rd)),
-          wmgr(std::move(wm)),
-          rmgr(std::move(rm)) {}
-
-    base::Result run_fallback() {
-      task->finish(base::Result::not_implemented());
-      delete this;
-      return base::Result();
+  base::Result arm(base::Lock& lock) {
+    base::Result r;
+    if (!rdevt_) {
+      auto closure = [this](event::Data data) { return wake(data); };
+      auto m = options().manager();
+      r = m.fd(&rdevt_, fd_, event::Set::readable_bit(),
+               event::handler(closure));
     }
+    return r;
+  }
 
-    base::Result run_sendfile() {
-      base::Result r;
-      while (*n < max) {
-        std::size_t cmax = max - *n;
-        if (cmax > kSendfileMax) cmax = kSendfileMax;
-
-        auto pair0 = wfd->acquire_fd();
-        auto pair1 = rfd->acquire_fd();
-        VLOG(4) << "io::FDReader::write_to: sendfile: "
-                << "wfd=" << pair0.first << ", "
-                << "rfd=" << pair1.first << ", "
-                << "max=" << max << ", "
-                << "*n=" << *n << ", "
-                << "cmax=" << cmax;
-        ssize_t sent = ::sendfile(pair0.first, pair1.first, nullptr, cmax);
-        int err_no = errno;
-        VLOG(5) << "result=" << sent;
-        pair1.second.unlock();
-        pair0.second.unlock();
-
-        // Check the return code
-        if (sent < 0) {
-          // Interrupted by signal? Retry immediately
-          if (err_no == EINTR) {
-            VLOG(4) << "EINTR";
-            continue;
-          }
-
-          // sendfile(2) not implemented, at all or for this pair of fds?
-          // Switch to fallback mode
-          if (err_no == ENOSYS) {
-            VLOG(4) << "ENOSYS";
-            return run_fallback();
-          }
-          if (err_no == EINVAL) {
-            VLOG(4) << "EINVAL";
-            return run_fallback();
-          }
-
-          // No data for read, or full buffers for write?
-          // Reschedule for later
-          if (err_no == EAGAIN || err_no == EWOULDBLOCK) {
-            VLOG(4) << "EAGAIN";
-
-            // Errno doesn't distinguish "reader is empty" from "writer is
-            // full", so schedule on both of them.
-            auto closure = [this](event::Data data) {
-              VLOG(5) << "woke io::FDReader::write_to, set=" << data.events;
-              return run_sendfile();
-            };
-            if (!wevt) {
-              r = wmgr.fd(&wevt, wfd, event::Set::writable_bit(),
-                          event::handler(closure));
-              if (!r) break;
-              r = rmgr.fd(&revt, rfd, event::Set::readable_bit(),
-                          event::handler(closure));
-              if (!r) break;
-            }
-            return base::Result();
-          }
-
-          // Other error? Bomb out
-          r = base::Result::from_errno(err_no, "sendfile(2)");
-          VLOG(5) << "errno=" << err_no << ", " << r.as_string();
-          break;
-        }
-        if (sent == 0) break;
-        *n += sent;
-      }
-      task->finish(std::move(r));
-      delete this;
-      return base::Result();
+  base::Result arm_write(event::FileDescriptor* wrevt, const base::FD& wfd,
+                         const io::Options& o) {
+    base::Result r;
+    if (!*wrevt) {
+      auto closure = [this](event::Data data) { return wake(data); };
+      auto m = o.manager();
+      r = m.fd(wrevt, wfd, event::Set::writable_bit(), event::handler(closure));
     }
-
-    base::Result run_splice() {
-      base::Result r;
-      while (*n < max) {
-        std::size_t cmax = max - *n;
-        if (cmax > kSendfileMax) cmax = kSendfileMax;
-
-        auto pair0 = wfd->acquire_fd();
-        auto pair1 = rfd->acquire_fd();
-        VLOG(4) << "io::FDReader::write_to: splice: "
-                << "wfd=" << pair0.first << ", "
-                << "rfd=" << pair1.first << ", "
-                << "max=" << max << ", "
-                << "*n=" << *n << ", "
-                << "cmax=" << cmax;
-        ssize_t sent = ::splice(pair1.first, nullptr, pair0.first, nullptr,
-                                cmax, SPLICE_F_NONBLOCK);
-        int err_no = errno;
-        VLOG(5) << "result=" << sent;
-        pair1.second.unlock();
-        pair0.second.unlock();
-
-        // Check the return code
-        if (sent < 0) {
-          // Interrupted by signal? Retry immediately
-          if (err_no == EINTR) {
-            VLOG(4) << "EINTR";
-            continue;
-          }
-
-          // splice(2) not implemented, at all or for this pair of fds?
-          // Switch to sendfile(2) mode
-          if (err_no == ENOSYS) {
-            VLOG(4) << "ENOSYS";
-            return run_sendfile();
-          }
-          if (err_no == EINVAL) {
-            VLOG(4) << "EINVAL";
-            return run_sendfile();
-          }
-
-          // No data for read, or full buffers for write?
-          // Reschedule for later
-          if (err_no == EAGAIN || err_no == EWOULDBLOCK) {
-            VLOG(4) << "EAGAIN";
-
-            // Errno doesn't distinguish "reader is empty" from "writer is
-            // full", so schedule on both of them.
-            auto closure = [this](event::Data data) {
-              VLOG(5) << "woke io::FDReader::write_to, set=" << data.events;
-              return run_splice();
-            };
-            if (!wevt) {
-              r = wmgr.fd(&wevt, wfd, event::Set::writable_bit(),
-                          event::handler(closure));
-              if (!r) break;
-              r = rmgr.fd(&revt, rfd, event::Set::readable_bit(),
-                          event::handler(closure));
-              if (!r) break;
-            }
-            return base::Result();
-          }
-
-          // Other error? Bomb out
-          r = base::Result::from_errno(err_no, "sendfile(2)");
-          VLOG(5) << "errno=" << err_no << ", " << r.as_string();
-          break;
-        }
-        if (sent == 0) break;
-        *n += sent;
-      }
-      task->finish(std::move(r));
-      delete this;
-      return base::Result();
-    }
-  };
+    return r;
+  }
 
  private:
-  base::FD fd_;
+  const base::FD fd_;
+  mutable std::mutex mu_;
+  event::FileDescriptor rdevt_;
+  std::deque<std::unique_ptr<Op>> q_;
 };
+
+bool FDReader::ReadOp::process(base::Lock& lock, FDReader* reader) {
+  VLOG(6) << "io::FDReader::ReadOp: begin: "
+          << "*n=" << *n << ", "
+          << "min=" << min << ", "
+          << "max=" << max;
+
+  // Check for cancellation
+  if (!task->is_running()) {
+    VLOG(6) << "io::FDReader::ReadOp: cancel";
+    lock.unlock();
+    auto cleanup = base::cleanup([&lock] { lock.lock(); });
+    task->finish_cancel();
+    return true;
+  }
+
+  base::Result r;
+  while (*n < max) {
+    // Attempt to read some data
+    auto pair = reader->fd_->acquire_fd();
+    VLOG(4) << "io::FDReader::ReadOp: read: "
+            << "fd=" << pair.first << ", "
+            << "*n=" << *n << ", "
+            << "max=" << max;
+    ssize_t len = ::read(pair.first, out + *n, max - *n);
+    int err_no = errno;
+    VLOG(5) << "result=" << len;
+    pair.second.unlock();
+
+    // Check the return code
+    if (len < 0) {
+      // Interrupted by signal? Retry immediately
+      if (err_no == EINTR) {
+        VLOG(5) << "EINTR";
+        continue;
+      }
+
+      // No data for non-blocking read?
+      // |min == 0| is success, otherwise reschedule for later
+      if (err_no == EAGAIN || err_no == EWOULDBLOCK) {
+        VLOG(5) << "EAGAIN";
+
+        // If we've hit the minimum threshold, call it a day.
+        if (*n >= min) break;
+
+        // Register a callback for poll, if we didn't already.
+        r = reader->arm(lock);
+        if (!r) break;
+        return false;
+      }
+
+      // Other error? Bomb out
+      r = base::Result::from_errno(err_no, "read(2)");
+      break;
+    }
+    if (len == 0) {
+      if (*n < min) r = base::Result::eof();
+      VLOG(4) << "io::FDReader::ReadOp: EOF, " << r;
+      break;
+    }
+    *n += len;
+  }
+  VLOG(6) << "io::FDReader::ReadOp: finish: "
+          << "*n=" << *n << ", "
+          << "r=" << r;
+  lock.unlock();
+  auto cleanup = base::cleanup([&lock] { lock.lock(); });
+  task->finish(std::move(r));
+  return true;
+}
+
+bool FDReader::WriteToOp::process(base::Lock& lock, FDReader* reader) {
+  VLOG(6) << "io::FDReader::WriteToOp: begin: "
+          << "*n=" << *n << ", "
+          << "max=" << max;
+
+  // Check for cancellation
+  if (!task->is_running()) {
+    VLOG(6) << "io::FDReader::WriteToOp: cancel";
+    lock.unlock();
+    auto cleanup = base::cleanup([&lock] { lock.lock(); });
+    task->finish_cancel();
+    return true;
+  }
+
+  auto xm = transfer_mode(reader->options(), w.options());
+  base::FD rfd = reader->fd_;
+  base::FD wfd = w.implementation()->internal_writerfd();
+  base::Result r;
+
+  // Try using splice(2)
+  if (xm >= TransferMode::splice && wfd) {
+    while (*n < max) {
+      std::size_t cmax = max - *n;
+      if (cmax > kSpliceMax) cmax = kSpliceMax;
+
+      auto pair0 = wfd->acquire_fd();
+      auto pair1 = rfd->acquire_fd();
+      VLOG(4) << "io::FDReader::WriteToOp: splice: "
+              << "wfd=" << pair0.first << ", "
+              << "rfd=" << pair1.first << ", "
+              << "max=" << cmax << ", "
+              << "*n=" << *n;
+      ssize_t sent = ::splice(pair1.first, nullptr, pair0.first, nullptr, cmax,
+                              SPLICE_F_NONBLOCK);
+      int err_no = errno;
+      VLOG(5) << "result=" << sent;
+      pair1.second.unlock();
+      pair0.second.unlock();
+
+      // Check the return code
+      if (sent < 0) {
+        // Interrupted by signal? Retry immediately
+        if (err_no == EINTR) {
+          VLOG(5) << "EINTR";
+          continue;
+        }
+
+        // splice(2) not implemented, at all?
+        if (err_no == ENOSYS) {
+          VLOG(5) << "ENOSYS";
+          goto no_splice;
+        }
+        // splice(2) not implemented, for this pair of fds?
+        if (err_no == EINVAL) {
+          VLOG(5) << "EINVAL";
+          goto no_splice;
+        }
+
+        // No data for read, or full buffers for write?
+        // Reschedule for later
+        if (err_no == EAGAIN || err_no == EWOULDBLOCK) {
+          VLOG(5) << "EAGAIN";
+
+          // Errno doesn't distinguish "reader is empty" from "writer is
+          // full", so schedule on both of them.
+          r = reader->arm(lock);
+          if (!r) break;
+          r = reader->arm_write(&wrevt, wfd, w.options());
+          if (!r) break;
+          return false;
+        }
+
+        // Other error? Bomb out
+        r = base::Result::from_errno(err_no, "sendfile(2)");
+        break;
+      }
+      *n += sent;
+      if (sent == 0) break;
+    }
+    goto finish;
+  }
+no_splice:
+
+  // Try using sendfile(2)
+  if (xm >= TransferMode::sendfile && wfd) {
+    while (*n < max) {
+      std::size_t cmax = max - *n;
+      if (cmax > kSendfileMax) cmax = kSendfileMax;
+
+      auto pair0 = wfd->acquire_fd();
+      auto pair1 = rfd->acquire_fd();
+      VLOG(4) << "io::FDReader::WriteToOp: sendfile: "
+              << "wfd=" << pair0.first << ", "
+              << "rfd=" << pair1.first << ", "
+              << "max=" << cmax << ", "
+              << "*n=" << *n;
+      ssize_t sent = ::sendfile(pair0.first, pair1.first, nullptr, cmax);
+      int err_no = errno;
+      VLOG(5) << "result=" << sent;
+      pair1.second.unlock();
+      pair0.second.unlock();
+
+      // Check the return code
+      if (sent < 0) {
+        // Interrupted by signal? Retry immediately
+        if (err_no == EINTR) {
+          VLOG(5) << "EINTR";
+          continue;
+        }
+
+        // sendfile(2) not implemented, at all?
+        if (err_no == ENOSYS) {
+          VLOG(5) << "ENOSYS";
+          goto no_sendfile;
+        }
+        // sendfile(2) not implemented, for this pair of fds?
+        if (err_no == EINVAL) {
+          VLOG(5) << "EINVAL";
+          goto no_sendfile;
+        }
+
+        // No data for read, or full buffers for write?
+        // Reschedule for later
+        if (err_no == EAGAIN || err_no == EWOULDBLOCK) {
+          VLOG(5) << "EAGAIN";
+
+          // Errno doesn't distinguish "reader is empty" from "writer is
+          // full", so schedule on both of them.
+          r = reader->arm(lock);
+          if (!r) break;
+          r = reader->arm_write(&wrevt, wfd, w.options());
+          if (!r) break;
+          return false;
+        }
+
+        // Other error? Bomb out
+        r = base::Result::from_errno(err_no, "sendfile(2)");
+        VLOG(5) << "errno=" << err_no << ", " << r.as_string();
+        break;
+      }
+      *n += sent;
+      if (sent == 0) break;
+    }
+    goto finish;
+  }
+no_sendfile:
+
+  // Nothing else left to try
+  r = base::Result::not_implemented();
+
+finish:
+  VLOG(6) << "io::FDReader::WriteToOp: finish: "
+          << "*n=" << *n << ", "
+          << "r=" << r;
+  lock.unlock();
+  auto cleanup = base::cleanup([&lock] { lock.lock(); });
+  task->finish(std::move(r));
+  return true;
+}
 }  // anonymous namespace
 
 Reader reader(ReadFn rfn, CloseFn cfn) {
