@@ -60,15 +60,18 @@ struct CopyHelper {
   void begin() {
     VLOG(6) << "io::CopyHelper::begin";
     task->add_subtask(&subtask);
-    reader.write_to(&subtask, copied, max, writer);
+    reader.write_to(&subtask, &n, max, writer);
     auto closure = [this] { return write_to_complete(); };
     subtask.on_finished(event::callback(closure));
   }
 
   base::Result write_to_complete() {
+    *copied += n;
     auto r = subtask.result();
-    VLOG(6) << "io::CopyHelper::write_to_complete, r=" << r
-            << ", copied=" << *copied;
+    VLOG(6) << "io::CopyHelper::write_to_complete: "
+            << "*copied=" << *copied << ", "
+            << "n=" << n << ", "
+            << "r=" << r;
     if (r.code() != base::Result::Code::NOT_IMPLEMENTED) {
       task->finish(std::move(r));
       delete this;
@@ -76,16 +79,19 @@ struct CopyHelper {
     }
     subtask.reset();
     task->add_subtask(&subtask);
-    writer.read_from(&subtask, copied, max, reader);
+    writer.read_from(&subtask, &n, max, reader);
     auto closure = [this] { return read_from_complete(); };
     subtask.on_finished(event::callback(closure));
     return base::Result();
   }
 
   base::Result read_from_complete() {
+    *copied += n;
     auto r = subtask.result();
-    VLOG(6) << "io::CopyHelper::read_from_complete: r=" << r
-            << ", copied=" << *copied;
+    VLOG(6) << "io::CopyHelper::read_from_complete: "
+            << "*copied=" << *copied << ", "
+            << "n=" << n << ", "
+            << "r=" << r;
     if (r.code() != base::Result::Code::NOT_IMPLEMENTED) {
       task->finish(std::move(r));
       delete this;
@@ -105,8 +111,10 @@ struct CopyHelper {
 
   base::Result fallback_read_complete() {
     auto r = subtask.result();
-    VLOG(6) << "io::CopyHelper::fallback_read_complete: r=" << r
-            << ", *copied=" << *copied << ", n=" << n;
+    VLOG(6) << "io::CopyHelper::fallback_read_complete: "
+            << "*copied=" << *copied << ", "
+            << "n=" << n << ", "
+            << "r=" << r;
     switch (r.code()) {
       case base::Result::Code::OK:
         eof = (n == 0);
@@ -133,10 +141,13 @@ struct CopyHelper {
   }
 
   base::Result fallback_write_complete() {
-    auto r = subtask.result();
     *copied += n;
-    VLOG(6) << "io::CopyHelper::fallback_write_complete: r=" << r
-            << ", *copied=" << *copied << ", eof=" << std::boolalpha << eof;
+    auto r = subtask.result();
+    VLOG(6) << "io::CopyHelper::fallback_write_complete: "
+            << "*copied=" << *copied << ", "
+            << "n=" << n << ", "
+            << "eof=" << std::boolalpha << eof << ", "
+            << "r=" << r;
     if (eof || !r.ok()) {
       task->finish(std::move(r));
       delete this;
