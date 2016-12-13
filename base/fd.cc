@@ -151,9 +151,8 @@ Result read_exactly(FD fd, void* ptr, std::size_t len, const char* what) {
             << "len=" << len << ", "
             << "what=\"" << what << "\"";
     n = ::read(pair.first, ptr, len);
-    int err_no = errno;
-    VLOG(5) << "result=" << n;
     if (n < 0) {
+      int err_no = errno;
       if (err_no == EINTR) {
         VLOG(4) << "EINTR";
         continue;
@@ -161,6 +160,7 @@ Result read_exactly(FD fd, void* ptr, std::size_t len, const char* what) {
       r = Result::from_errno(err_no, "read(2) from ", what);
       break;
     }
+    VLOG(5) << "result=" << n;
     if (n == 0) {
       r = Result::eof();
       break;
@@ -195,6 +195,7 @@ Result write_exactly(FD fd, const void* ptr, std::size_t len,
       r = Result::from_errno(err_no, "write(2) from ", what);
       break;
     }
+    VLOG(5) << "result=" << n;
     if (std::size_t(n) != len) {
       r = Result::internal("short write(2) from ", what);
       break;
