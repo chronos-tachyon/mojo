@@ -254,9 +254,6 @@ class CloseIgnoringReader : public ReaderImpl {
   Reader r_;
 };
 
-// FIXME: LimitedReader needs to be re-architected to serialize concurrent
-//        reads by diverting them into a queue and not looking at |remaining_|
-//        until after previous operations have finished.
 class LimitedReader : public ReaderImpl {
  public:
   LimitedReader(Reader r, std::size_t max)
@@ -270,14 +267,12 @@ class LimitedReader : public ReaderImpl {
     std::size_t amax = std::min(max, remaining_);
     std::size_t amin = std::min(min, remaining_);
     bool eof = (amax < min);
-    lock.unlock();
 
     auto* subtask = new event::Task;
     task->add_subtask(subtask);
     r_.read(subtask, out, n, amin, amax);
 
-    auto closure = [this, task, n, subtask, eof] {
-      auto lock = base::acquire_lock(mu_);
+    auto closure = [this, task, n, subtask, eof](base::Lock lock) {
       remaining_ -= *n;
       lock.unlock();
       if (propagate_failure(task, subtask)) {
@@ -289,7 +284,7 @@ class LimitedReader : public ReaderImpl {
       delete subtask;
       return base::Result();
     };
-    subtask->on_finished(event::callback(closure));
+    subtask->on_finished(event::callback(closure, std::move(lock)));
   }
 
   void write_to(event::Task* task, std::size_t* n, std::size_t max,
