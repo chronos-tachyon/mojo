@@ -6,6 +6,8 @@
 #include <type_traits>
 #include <vector>
 
+#include "base/logging.h"
+
 namespace io {
 
 namespace {
@@ -30,7 +32,11 @@ struct CopyHelper {
                                   pool(choose_pool(writer, reader)),
                                   buffer(pool.take()),
                                   n(0),
-                                  eof(false) {}
+                                  eof(false) {
+    VLOG(6) << "io::CopyHelper::CopyHelper: max=" << max;
+  }
+
+  ~CopyHelper() noexcept { VLOG(6) << "io::CopyHelper::~CopyHelper"; }
 
   static std::size_t compute_block_size(const Writer& w, const Reader& r) {
     std::size_t wbsz = w.block_size();
@@ -52,6 +58,7 @@ struct CopyHelper {
   }
 
   void begin() {
+    VLOG(6) << "io::CopyHelper::begin";
     task->add_subtask(&subtask);
     reader.write_to(&subtask, copied, max, writer);
     auto closure = [this] { return write_to_complete(); };
@@ -59,8 +66,11 @@ struct CopyHelper {
   }
 
   base::Result write_to_complete() {
-    if (subtask.result().code() != base::Result::Code::NOT_IMPLEMENTED) {
-      task->finish(subtask.result());
+    auto r = subtask.result();
+    VLOG(6) << "io::CopyHelper::write_to_complete, r=" << r
+            << ", copied=" << *copied;
+    if (r.code() != base::Result::Code::NOT_IMPLEMENTED) {
+      task->finish(std::move(r));
       delete this;
       return base::Result();
     }
@@ -73,8 +83,11 @@ struct CopyHelper {
   }
 
   base::Result read_from_complete() {
-    if (subtask.result().code() != base::Result::Code::NOT_IMPLEMENTED) {
-      task->finish(subtask.result());
+    auto r = subtask.result();
+    VLOG(6) << "io::CopyHelper::read_from_complete: r=" << r
+            << ", copied=" << *copied;
+    if (r.code() != base::Result::Code::NOT_IMPLEMENTED) {
+      task->finish(std::move(r));
       delete this;
       return base::Result();
     }
@@ -91,7 +104,10 @@ struct CopyHelper {
   }
 
   base::Result fallback_read_complete() {
-    switch (subtask.result().code()) {
+    auto r = subtask.result();
+    VLOG(6) << "io::CopyHelper::fallback_read_complete: r=" << r
+            << ", *copied=" << *copied << ", n=" << n;
+    switch (r.code()) {
       case base::Result::Code::OK:
         eof = (n == 0);
         break;
@@ -101,7 +117,7 @@ struct CopyHelper {
         break;
 
       default:
-        task->finish(subtask.result());
+        task->finish(std::move(r));
         delete this;
         return base::Result();
     }
@@ -117,9 +133,12 @@ struct CopyHelper {
   }
 
   base::Result fallback_write_complete() {
+    auto r = subtask.result();
     *copied += n;
-    if (eof || !subtask.result().ok()) {
-      task->finish(subtask.result());
+    VLOG(6) << "io::CopyHelper::fallback_write_complete: r=" << r
+            << ", *copied=" << *copied << ", eof=" << std::boolalpha << eof;
+    if (eof || !r.ok()) {
+      task->finish(std::move(r));
       delete this;
       return base::Result();
     }
