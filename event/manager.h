@@ -336,8 +336,7 @@ class ManagerOptions {
 //
 //    event::Manager m;
 //    event::ManagerOptions o;
-//    base::Result result = new_manager(&m, o);
-//    result.assert_ok();
+//    CHECK_OK(new_manager(&m, o));
 //
 //    std::mutex mu;
 //    std::condition_variable cv;
@@ -351,10 +350,10 @@ class ManagerOptions {
 //      cv.notify_all();
 //      return base::Result();
 //    }));
-//    result.assert_ok();
+//    CHECK_OK(result);
 //
 //    result = timer.set_delay(base::seconds(10));
-//    result.assert_ok();
+//    CHECK_OK(result);
 //
 //    std::unique_lock<std::mutex> lock(mu);
 //    while (!done) cv.wait(lock);

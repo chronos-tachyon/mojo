@@ -20,6 +20,7 @@
 
 #include "base/concat.h"
 #include "base/debug.h"
+#include "base/result.h"
 #include "base/util.h"
 
 namespace base {
@@ -296,6 +297,14 @@ Logger log_check(const char* file, unsigned int line, const char* expr,
   if (cond) return Logger(nullptr);
   Logger logger(file, line, 1, LOG_LEVEL_DFATAL);
   logger << "CHECK FAILED: " << expr;
+  return logger;
+}
+
+Logger log_check_ok(const char* file, unsigned int line, const char* expr,
+                    const Result& rslt) {
+  if (rslt) return Logger(nullptr);
+  Logger logger(file, line, 1, LOG_LEVEL_DFATAL);
+  logger << "CHECK FAILED: " << expr << ": " << rslt.as_string();
   return logger;
 }
 

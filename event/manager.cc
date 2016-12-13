@@ -119,7 +119,7 @@ static void signal_thread_body() {
   base::Result r;
   while (true) {
     r = base::read_exactly(*g_sig_pipe_rfd, &si, sizeof(si), "signal pipe");
-    r.expect_ok();
+    r.expect_ok(__FILE__, __LINE__);
     if (!r) continue;
 
     lock.lock();
@@ -134,7 +134,7 @@ static void signal_thread_body() {
     populate_data_from_siginfo(&data, si);
     for (const auto& fd : vec) {
       r = base::write_exactly(fd, &data, sizeof(data), "pipe");
-      r.expect_ok();
+      r.expect_ok(__FILE__, __LINE__);
     }
   }
 }
@@ -771,7 +771,7 @@ base::Result ManagerImpl::donate_as_poller(base::Lock lock, bool forever) {
     if (!r) break;
     if (!forever) break;
   }
-  r.expect_ok();
+  r.expect_ok(__FILE__, __LINE__);
   return base::Result();
 }
 
@@ -817,7 +817,7 @@ base::Result ManagerImpl::donate_as_mixed(base::Lock lock, bool forever) {
     if (!r) break;
     if (!forever) break;
   }
-  r.expect_ok();
+  r.expect_ok(__FILE__, __LINE__);
   return base::Result();
 }
 
@@ -833,7 +833,7 @@ base::Result ManagerImpl::donate_as_worker(base::Lock lock, bool forever) {
     if (!donate_ok(r)) break;
     if (!forever) break;
   }
-  r.expect_ok();
+  r.expect_ok(__FILE__, __LINE__);
   return base::Result();
 }
 
@@ -871,7 +871,7 @@ void ManagerImpl::handle_pipe_event(CallbackVec* cbvec) {
     r = base::read_exactly(pipe_.read, &data, sizeof(data), "event pipe");
     if (r.code() == base::Result::Code::END_OF_FILE) return;
     if (r.errno_value() == EAGAIN || r.errno_value() == EWOULDBLOCK) return;
-    r.expect_ok();
+    r.expect_ok(__FILE__, __LINE__);
     if (!r) return;
 
     if (data.events.signal()) {
@@ -911,7 +911,7 @@ void ManagerImpl::handle_timer_event(CallbackVec* cbvec,
 
   uint64_t x = 0;
   auto r = base::read_exactly(src.fd, &x, sizeof(x), "timerfd");
-  r.expect_ok();
+  r.expect_ok(__FILE__, __LINE__);
   if (x > INTMAX) x = INTMAX;
 
   for (const auto& rec : src.records) {
@@ -1300,7 +1300,7 @@ void wait_n(std::vector<Manager> mv, std::vector<Task*> tv, std::size_t n) {
     }
     lock.unlock();
     for (const Manager& m : mv) {
-      m.donate(false).assert_ok();
+      CHECK_OK(m.donate(false));
     }
     lock.lock();
   }
@@ -1357,7 +1357,7 @@ Manager& system_manager() {
   if (g_sysmgr_ptr == nullptr) {
     ManagerOptions o;
     std::unique_ptr<Manager> m(new Manager);
-    new_manager(m.get(), o).assert_ok();
+    CHECK_OK(new_manager(m.get(), o));
     g_sysmgr_ptr = m.release();
   }
   return *g_sysmgr_ptr;

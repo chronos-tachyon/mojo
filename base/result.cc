@@ -231,15 +231,10 @@ std::string Result::as_string() const {
   return out;
 }
 
-void Result::assert_ok() const {
+void Result::expect_ok(const char* file, unsigned int line) const {
   if (!ok()) {
-    LOG(FATAL) << as_string();
-  }
-}
-
-void Result::expect_ok() const {
-  if (!ok()) {
-    LOG(ERROR) << as_string();
+    Logger logger(file, line, 1, LOG_LEVEL_ERROR);
+    logger << as_string();
   }
 }
 

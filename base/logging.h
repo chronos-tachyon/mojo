@@ -16,6 +16,8 @@
 
 namespace base {
 
+class Result;  // forward declaration
+
 using level_t = signed char;
 
 #define LOG_LEVEL_INFO 1
@@ -60,7 +62,8 @@ struct LogEntry {
   level_t level;
   std::string message;
 
-  LogEntry(const char* file, unsigned int line, level_t level, std::string message) noexcept;
+  LogEntry(const char* file, unsigned int line, level_t level,
+           std::string message) noexcept;
   void append_to(std::string& out) const;
   std::string as_string() const;
 };
@@ -121,7 +124,8 @@ class LogTarget {
 
  public:
   virtual ~LogTarget() noexcept = default;
-  virtual bool want(const char* file, unsigned int line, level_t level) const noexcept = 0;
+  virtual bool want(const char* file, unsigned int line, level_t level) const
+      noexcept = 0;
   virtual void log(const LogEntry& entry) noexcept = 0;
 };
 
@@ -149,6 +153,9 @@ void log_exception(const char* file, unsigned int line, std::exception_ptr e);
 
 Logger log_check(const char* file, unsigned int line, const char* expr,
                  bool cond);
+
+Logger log_check_ok(const char* file, unsigned int line, const char* expr,
+                    const Result& rslt);
 
 template <typename T, typename U, typename Predicate>
 Logger log_check_op(const char* file, unsigned int line, Predicate pred,
@@ -257,6 +264,7 @@ Logger force_eval(bool);
 #define LOG_EXCEPTION(e) ::base::log_exception(__FILE__, __LINE__, (e))
 
 #define CHECK(x) ::base::log_check(__FILE__, __LINE__, #x, !!(x))
+#define CHECK_OK(x) ::base::log_check_ok(__FILE__, __LINE__, #x, (x))
 
 #define CHECK_EQ(x, y) \
   ::base::log_check_op(__FILE__, __LINE__, ::base::OpEQ(), #x, (x), #y, (y))
@@ -281,7 +289,8 @@ Logger force_eval(bool);
 #define DLOG_EVERY_N(name, n) ::base::Logger(nullptr)
 #define DVLOG_EVERY_N(vlevel, n) ::base::Logger(nullptr)
 
-#define DCHECK(x) ::base::force_eval(x)
+#define DCHECK(x) ::base::force_eval(!!(x))
+#define DCHECK_OK(x) ::base::force_eval(!!(x))
 
 #define DCHECK_EQ(x, y) ::base::force_eval((x) == (y))
 #define DCHECK_NE(x, y) ::base::force_eval(!((x) == (y)))
@@ -300,6 +309,7 @@ Logger force_eval(bool);
 #define DVLOG_EVERY_N(vlevel, n) VLOG_EVERY_N((vlevel), (n))
 
 #define DCHECK(x) CHECK(x)
+#define DCHECK_OK(x) CHECK_OK(x)
 
 #define DCHECK_EQ(x, y) CHECK_EQ((x), (y))
 #define DCHECK_NE(x, y) CHECK_NE((x), (y))

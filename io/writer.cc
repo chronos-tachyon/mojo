@@ -366,7 +366,7 @@ class FDWriter : public WriterImpl {
     };
     auto m = options().manager();
     auto r = m.fd(&fdevt_, fd_, event::Set::writable_bit(), event::handler(fn));
-    r.expect_ok();
+    r.expect_ok(__FILE__, __LINE__);
 
     // If we failed to set up the event handler, give the bad news to all
     // pending write operations.

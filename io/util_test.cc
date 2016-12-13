@@ -40,7 +40,7 @@ static event::Manager make_manager() {
   event::ManagerOptions mo;
   mo.set_num_pollers(0, 1);
   mo.dispatcher().set_type(event::DispatcherType::async_dispatcher);
-  event::new_manager(&m, mo).assert_ok();
+  CHECK_OK(event::new_manager(&m, mo));
   return m;
 }
 

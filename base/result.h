@@ -248,8 +248,7 @@ class Result {
   // Checks if the Result was successful.
   explicit operator bool() const { return !guts_; }
   bool ok() const { return !!*this; }
-  void assert_ok() const;
-  void expect_ok() const;
+  void expect_ok(const char* file, unsigned int line) const;
   void ignore_ok() const;
 
   // Returns the Code for this Result.
@@ -276,11 +275,12 @@ class Result {
   //
   // Typical usage:
   //
-  //    op1().and_then([] {
-  //      return op2();  // only runs if op1() succeeded
+  //    base::Result result = op1().and_then([] {
+  //      return op2();    // only runs if op1() succeeded
   //    }).and_then([] {
-  //      return op3();  // only runs if op1() and op2() both succeeded
-  //    }).assert_ok();  // throws if ANY of op1(), op2(), or op3() failed
+  //      return op3();    // only runs if op1() and op2() both succeeded
+  //    });
+  //    CHECK_OK(result);  // throws if ANY of op1(), op2(), or op3() failed
   //
   template <typename F, typename... Args>
   base::Result and_then(F continuation, Args&&... args) const {
@@ -293,11 +293,12 @@ class Result {
   //
   // Typical usage:
   //
-  //    op1().or_else([] {
-  //      return op2();  // only runs if op1() failed
+  //    base::Result result = op1().or_else([] {
+  //      return op2();    // only runs if op1() failed
   //    }).or_else([] {
-  //      return op3();  // only runs if op1() and op2() both failed
-  //    }).assert_ok();  // throws if ALL of op1(), op2(), and op3() failed
+  //      return op3();    // only runs if op1() and op2() both failed
+  //    });
+  //    CHECK_OK(result);  // throws if ALL of op1(), op2(), and op3() failed
   //
   template <typename F, typename... Args>
   base::Result or_else(F continuation, Args&&... args) const {

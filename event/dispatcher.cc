@@ -53,7 +53,7 @@ static void invoke(std::unique_lock<std::mutex>& lock, std::size_t& busy,
       if (item.task != nullptr)
         item.task->finish(std::move(result));
       else
-        result.expect_ok();
+        result.expect_ok(__FILE__, __LINE__);
       threw = false;
     } catch (...) {
       std::exception_ptr eptr = std::current_exception();
