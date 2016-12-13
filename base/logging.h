@@ -125,6 +125,9 @@ class LogTarget {
   virtual void log(const LogEntry& entry) noexcept = 0;
 };
 
+// Wait for all pending logs to reach disk.
+void log_flush();
+
 // Low-level functions for routing logs {{{
 
 void log_stderr_set_level(level_t level);

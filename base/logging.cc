@@ -236,6 +236,12 @@ void log_set_gettimeofday(GetTimeOfDayFunc func) {
   g_gtod = func;
 }
 
+void log_flush() {
+  auto lock = base::acquire_lock(g_queue_mu);
+  auto& q = queue_get(lock);
+  while (!q.empty()) g_queue_empty_cv.wait(lock);
+}
+
 void log_stderr_set_level(level_t level) {
   auto lock = acquire_lock(g_mu);
   g_stderr = level;
