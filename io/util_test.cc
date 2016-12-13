@@ -57,6 +57,8 @@ TEST(Copy, StringReaderStringWriter) {
   EXPECT_OK(task.result());
   EXPECT_EQ(12U, n);
   EXPECT_EQ(out, in);
+
+  base::log_flush();
 }
 
 static void TestFileFileCopy(io::Options o) {
@@ -122,6 +124,8 @@ static void TestFileFileCopy(io::Options o) {
 
   EXPECT_EQ(std::string(in.begin(), in.end()),
             std::string(out.begin(), out.end()));
+
+  base::log_flush();
 }
 
 TEST(Copy, FileFileLoop512) {
@@ -230,6 +234,8 @@ TEST(Copy, HeterogenousManagers) {
   t1.join();
   t2.join();
   EXPECT_EQ(4U * 16U, blocks_transferred);
+
+  base::log_flush();
 }
 
 static void init() __attribute__((constructor));
