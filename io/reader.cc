@@ -30,7 +30,11 @@
 #include "io/writer.h"
 
 static constexpr std::size_t kSendfileMax = 4U << 20;  // 4 MiB
-static constexpr std::size_t kSpliceMax = 4U << 20;  // 4 MiB
+static constexpr std::size_t kSpliceMax = 4U << 20;    // 4 MiB
+
+static base::Result reader_closed() {
+  return base::Result::failed_precondition("io::Reader is closed");
+}
 
 static void propagate_result(event::Task* dst, const event::Task* src) {
   try {
@@ -250,6 +254,9 @@ class CloseIgnoringReader : public ReaderImpl {
   Reader r_;
 };
 
+// FIXME: LimitedReader needs to be re-architected to serialize concurrent
+//        reads by diverting them into a queue and not looking at |remaining_|
+//        until after previous operations have finished.
 class LimitedReader : public ReaderImpl {
  public:
   LimitedReader(Reader r, std::size_t max)
@@ -328,7 +335,7 @@ class StringOrBufferReader : public ReaderImpl {
     auto lock = base::acquire_lock(mu_);
 
     if (closed_) {
-      task->finish(base::Result::failed_precondition("reader is closed"));
+      task->finish(reader_closed());
       return;
     }
 
@@ -352,8 +359,7 @@ class StringOrBufferReader : public ReaderImpl {
     auto* lock = new base::Lock(mu_);
     if (closed_) {
       delete lock;
-      if (task->start())
-        task->finish(base::Result::failed_precondition("reader is closed"));
+      if (task->start()) task->finish(reader_closed());
       return;
     }
     const char* ptr = buf_.data() + pos_;
@@ -375,7 +381,7 @@ class StringOrBufferReader : public ReaderImpl {
     lock.unlock();
     if (prologue(task)) {
       if (was)
-        task->finish(base::Result::failed_precondition("reader is closed"));
+        task->finish(reader_closed());
       else
         task->finish_ok();
     }
@@ -431,6 +437,10 @@ class ZeroReader : public ReaderImpl {
   }
 };
 
+// FIXME: FDReader needs to be re-architected to serialize concurrent reads by
+//        diverting them into a queue and processing them in some order.
+//        (While |read(2)| is atomic, we call it multiple times, so our use is
+//        not thread-safe.)
 class FDReader : public ReaderImpl {
  public:
   FDReader(base::FD fd, Options o) noexcept : ReaderImpl(std::move(o)),
@@ -678,7 +688,8 @@ class FDReader : public ReaderImpl {
                 << "max=" << max << ", "
                 << "*n=" << *n << ", "
                 << "cmax=" << cmax;
-        ssize_t sent = ::splice(pair1.first, nullptr, pair0.first, nullptr, cmax, SPLICE_F_NONBLOCK);
+        ssize_t sent = ::splice(pair1.first, nullptr, pair0.first, nullptr,
+                                cmax, SPLICE_F_NONBLOCK);
         int err_no = errno;
         VLOG(5) << "result=" << sent;
         pair1.second.unlock();
@@ -739,7 +750,6 @@ class FDReader : public ReaderImpl {
     }
   };
 
- public:
  private:
   base::FD fd_;
 };
