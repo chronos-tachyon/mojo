@@ -360,7 +360,9 @@ ManagerImpl::ManagerImpl(std::shared_ptr<Poller> p,
   while (current_ < min_) curr_cv_.wait(lock);
 }
 
-ManagerImpl::~ManagerImpl() noexcept { shutdown().ignore_ok(); }
+ManagerImpl::~ManagerImpl() noexcept {
+  shutdown().expect_ok(__FILE__, __LINE__);
+}
 
 base::Result ManagerImpl::fd_add(base::token_t* out, base::FD fd, Set set,
                                  std::shared_ptr<Handler> handler) {
@@ -491,6 +493,7 @@ base::Result ManagerImpl::fd_modify(base::token_t t, Set set) {
 
 base::Result ManagerImpl::fd_remove(base::token_t t) {
   auto lock = base::acquire_lock(mu_);
+  if (!running_) return base::Result();
   std::shared_ptr<Poller> p = DCHECK_NOTNULL(p_);
 
   auto ltit = ltmap_.find(t);
@@ -588,6 +591,8 @@ base::Result ManagerImpl::signal_add(base::token_t* out, int signo,
 
 base::Result ManagerImpl::signal_remove(base::token_t t) {
   auto lock = base::acquire_lock(mu_);
+  if (!running_) return base::Result();
+
   auto ltit = ltmap_.find(t);
   if (ltit == ltmap_.end()) return base::Result::not_found();
   auto gt = ltit->second;
@@ -678,6 +683,8 @@ base::Result ManagerImpl::timer_arm(base::token_t t, base::Duration delay,
 
 base::Result ManagerImpl::timer_remove(base::token_t t) {
   auto lock = base::acquire_lock(mu_);
+  if (!running_) return base::Result();
+
   auto srcit = sources_.find(t);
   if (srcit == sources_.end()) return base::Result::not_found();
   if (srcit->second.type != Type::timer) return base::Result::wrong_type();
@@ -717,9 +724,12 @@ base::Result ManagerImpl::generic_fire(base::token_t t, int value) {
 
 base::Result ManagerImpl::generic_remove(base::token_t t) {
   auto lock = base::acquire_lock(mu_);
+  if (!running_) return base::Result();
+
   auto srcit = sources_.find(t);
   if (srcit == sources_.end()) return base::Result::not_found();
   if (srcit->second.type != Type::generic) return base::Result::wrong_type();
+
   sources_.erase(srcit);
   return base::Result();
 }
@@ -946,7 +956,7 @@ void ManagerImpl::handle_fd_event(CallbackVec* cbvec,
 base::Result ManagerImpl::shutdown() noexcept {
   auto lock = base::acquire_lock(mu_);
 
-  if (!running_) return base::Result::failed_precondition("already stopped");
+  if (!running_) return base::Result();
 
   // Mark ourselves as no longer running.
   running_ = false;
@@ -958,11 +968,17 @@ base::Result ManagerImpl::shutdown() noexcept {
   fdmap_.clear();
   sig_tee_remove_all(pipe_.write);
 
+  // Wait for the pollers to notice.
+  while (current_ > 0) {
+    std::size_t x = current_;
+    event::Data data;
+    base::write_exactly(pipe_.write, &data, sizeof(data), "event pipe")
+        .expect_ok(__FILE__, __LINE__);
+    while (current_ == x) curr_cv_.wait(lock);
+  }
+
   // Close the event pipe write fd.
   base::Result wr = pipe_.write->close();
-
-  // Wait for the pollers to notice.
-  while (current_ > 0) curr_cv_.wait(lock);
 
   // Close the event pipe read fd.
   base::Result rr = pipe_.read->close();
@@ -976,7 +992,7 @@ base::Result ManagerImpl::shutdown() noexcept {
 }
 
 FileDescriptor& FileDescriptor::operator=(FileDescriptor&& other) noexcept {
-  release().ignore_ok();
+  release().expect_ok(__FILE__, __LINE__);
   swap(other);
   return *this;
 }
@@ -1006,7 +1022,7 @@ base::Result FileDescriptor::release() {
 }
 
 Signal& Signal::operator=(Signal&& other) noexcept {
-  release().ignore_ok();
+  release().expect_ok(__FILE__, __LINE__);
   swap(other);
   return *this;
 }
@@ -1025,7 +1041,7 @@ base::Result Signal::release() {
 }
 
 Timer& Timer::operator=(Timer&& other) noexcept {
-  release().ignore_ok();
+  release().expect_ok(__FILE__, __LINE__);
   swap(other);
   return *this;
 }
@@ -1099,7 +1115,7 @@ base::Result Timer::release() {
 }
 
 Generic& Generic::operator=(Generic&& other) noexcept {
-  release().ignore_ok();
+  release().expect_ok(__FILE__, __LINE__);
   swap(other);
   return *this;
 }
