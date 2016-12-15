@@ -97,8 +97,8 @@ class PollerOptions {
   void reset() noexcept { *this = PollerOptions(); }
 
   // The |type()| value is used by new_poller to override which
-  // Poller implementation will be constructed. If |type()| is an empty
-  // function object, then a suitable default will be selected.
+  // Poller implementation will be constructed. If |type()| is
+  // |PollerType::unspecified|, then a suitable default will be selected.
   PollerType type() const noexcept { return type_; }
   void reset_type() noexcept { type_ = PollerType::unspecified; }
   void set_type(PollerType type) noexcept { type_ = type; }
