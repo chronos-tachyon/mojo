@@ -93,7 +93,7 @@ class MockReader : public ReaderImpl {
     auto mock = next();
     if (mock.verb != Mock::Verb::read)
       throw mock_violation("did not expect read()");
-    if (mock.data.size() < min && mock.result.ok())
+    if (mock.data.size() < min && mock.result)
       throw mock_violation("mock.data too short");
     if (mock.data.size() > max) throw mock_violation("mock.data too long");
     ::memcpy(out, mock.data.data(), mock.data.size());

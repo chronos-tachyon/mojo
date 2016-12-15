@@ -30,7 +30,7 @@ using base::token_t;
 namespace {
 
 static bool donate_ok(const base::Result& r) {
-  return r.ok() || r.code() == base::Result::Code::NOT_IMPLEMENTED;
+  return r || r.code() == base::Result::Code::NOT_IMPLEMENTED;
 }
 
 template <typename T>

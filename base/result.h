@@ -247,7 +247,6 @@ class Result {
 
   // Checks if the Result was successful.
   explicit operator bool() const { return !guts_; }
-  bool ok() const { return !!*this; }
   void expect_ok(const char* file, unsigned int line) const;
   void ignore_ok() const;
 
@@ -288,6 +287,12 @@ class Result {
     return continuation(std::forward<Args>(args)...);
   }
 
+  // Helper for returning the leftmost failure, if any, or the last success.
+  base::Result and_then(base::Result x) const {
+    if (guts_) return *this;
+    return x;
+  }
+
   // Helper for chaining together blocks of code, conditional on failure.
   // Short-circuits to the first success.
   //
@@ -303,6 +308,12 @@ class Result {
   template <typename F, typename... Args>
   base::Result or_else(F continuation, Args&&... args) const {
     if (guts_) return continuation(std::forward<Args>(args)...);
+    return *this;
+  }
+
+  // Helper for returning the leftmost success, if any, or the last failure.
+  base::Result or_else(base::Result r) const {
+    if (guts_) return r;
     return *this;
   }
 

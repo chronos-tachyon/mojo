@@ -148,7 +148,7 @@ struct CopyHelper {
             << "n=" << n << ", "
             << "eof=" << std::boolalpha << eof << ", "
             << "r=" << r;
-    if (eof || !r.ok()) {
+    if (eof || !r) {
       task->finish(std::move(r));
       delete this;
       return base::Result();

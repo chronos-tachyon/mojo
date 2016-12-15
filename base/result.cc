@@ -232,7 +232,7 @@ std::string Result::as_string() const {
 }
 
 void Result::expect_ok(const char* file, unsigned int line) const {
-  if (!ok()) {
+  if (guts_) {
     Logger logger(file, line, 1, LOG_LEVEL_ERROR);
     logger << as_string();
   }
