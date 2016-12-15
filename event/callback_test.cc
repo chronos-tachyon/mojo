@@ -7,7 +7,7 @@
 #include "event/callback.h"
 
 TEST(Callback, Basics) {
-  std::unique_ptr<event::Callback> c;
+  event::CallbackPtr c;
 
   int a = 0;
   std::function<base::Result()> f = [&a] {

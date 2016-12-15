@@ -71,7 +71,7 @@ void Task::add_subtask(Task* subtask) {
   }
 }
 
-void Task::on_finished(std::unique_ptr<Callback> cb) {
+void Task::on_finished(CallbackPtr cb) {
   auto lock = base::acquire_lock(mu_);
   if (state_ >= State::done) {
     lock.unlock();

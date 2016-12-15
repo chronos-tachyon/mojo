@@ -26,15 +26,17 @@ namespace event {
 
 class ManagerImpl;  // forward declaration
 
+using ManagerPtr = std::shared_ptr<ManagerImpl>;
+
 // An event::FileDescriptor binds an event handler to a file descriptor.
 class FileDescriptor {
  private:
   friend class Manager;
 
-  FileDescriptor(std::shared_ptr<ManagerImpl> ptr, base::FD fd,
-                 base::token_t t) noexcept : ptr_(std::move(ptr)),
-                                             fd_(std::move(fd)),
-                                             t_(t) {}
+  FileDescriptor(ManagerPtr ptr, base::FD fd, base::token_t t) noexcept
+      : ptr_(std::move(ptr)),
+        fd_(std::move(fd)),
+        t_(t) {}
 
  public:
   // The default constructor produces an invalid (unbound) FileDescriptor.
@@ -75,7 +77,7 @@ class FileDescriptor {
   base::Result release();
 
  private:
-  std::shared_ptr<ManagerImpl> ptr_;
+  ManagerPtr ptr_;
   base::FD fd_;
   base::token_t t_;
 };
@@ -87,7 +89,7 @@ class Signal {
  private:
   friend class Manager;
 
-  Signal(std::shared_ptr<ManagerImpl> ptr, int signo, base::token_t t) noexcept
+  Signal(ManagerPtr ptr, int signo, base::token_t t) noexcept
       : ptr_(std::move(ptr)),
         sig_(signo),
         t_(t) {}
@@ -129,7 +131,7 @@ class Signal {
   base::Result release();
 
  private:
-  std::shared_ptr<ManagerImpl> ptr_;
+  ManagerPtr ptr_;
   int sig_;
   base::token_t t_;
 };
@@ -142,9 +144,8 @@ class Timer {
  private:
   friend class Manager;
 
-  Timer(std::shared_ptr<ManagerImpl> ptr, base::token_t t) noexcept
-      : ptr_(std::move(ptr)),
-        t_(t) {}
+  Timer(ManagerPtr ptr, base::token_t t) noexcept : ptr_(std::move(ptr)),
+                                                    t_(t) {}
 
  public:
   // The default constructor produces an invalid (unbound) Timer.
@@ -205,7 +206,7 @@ class Timer {
   base::Result release();
 
  private:
-  std::shared_ptr<ManagerImpl> ptr_;
+  ManagerPtr ptr_;
   base::token_t t_;
 };
 
@@ -216,9 +217,8 @@ class Generic {
  private:
   friend class Manager;
 
-  Generic(std::shared_ptr<ManagerImpl> ptr, base::token_t t) noexcept
-      : ptr_(std::move(ptr)),
-        t_(t) {}
+  Generic(ManagerPtr ptr, base::token_t t) noexcept : ptr_(std::move(ptr)),
+                                                      t_(t) {}
 
  public:
   // The default constructor produces an invalid (unbound) Generic.
@@ -254,7 +254,7 @@ class Generic {
   base::Result release();
 
  private:
-  std::shared_ptr<ManagerImpl> ptr_;
+  ManagerPtr ptr_;
   base::token_t t_;
 };
 
@@ -399,7 +399,7 @@ class ManagerOptions {
 class Manager {
  public:
   // INTERNAL USE. Manager is constructible from an implementation.
-  Manager(std::shared_ptr<ManagerImpl> ptr) noexcept : ptr_(std::move(ptr)) {}
+  Manager(ManagerPtr ptr) noexcept : ptr_(std::move(ptr)) {}
 
   // Manager is default constructible.  It begins in the empty state.
   Manager() noexcept : ptr_() {}
@@ -429,34 +429,32 @@ class Manager {
   Manager or_system_manager() const;
 
   // Returns this Manager's Poller implementation.
-  std::shared_ptr<Poller> poller() const;
+  PollerPtr poller() const;
 
   // Returns this Manager's Dispatcher implementation.
-  std::shared_ptr<Dispatcher> dispatcher() const;
+  DispatcherPtr dispatcher() const;
 
   // Forwards the given <Task, Callback> to this Manager's Dispatcher.
-  void dispatch(Task* /*nullable*/ task,
-                std::unique_ptr<Callback> callback) const {
+  void dispatch(Task* /*nullable*/ task, CallbackPtr callback) const {
     dispatcher()->dispatch(task, std::move(callback));
   }
-  void dispatch(std::unique_ptr<Callback> callback) const {
+  void dispatch(CallbackPtr callback) const {
     dispatcher()->dispatch(std::move(callback));
   }
 
   // Registers an event handler for a file descriptor.
   base::Result fd(FileDescriptor* out, base::FD fd, Set set,
-                  std::shared_ptr<Handler> handler) const;
+                  HandlerPtr handler) const;
 
   // Registers an event handler for a Unix signal.
-  base::Result signal(Signal* out, int signo,
-                      std::shared_ptr<Handler> handler) const;
+  base::Result signal(Signal* out, int signo, HandlerPtr handler) const;
 
   // Registers an event handler for a timer.
   // The timer is initially disarmed. Use |Timer::set_*()| to arm it.
-  base::Result timer(Timer* out, std::shared_ptr<Handler> handler) const;
+  base::Result timer(Timer* out, HandlerPtr handler) const;
 
   // Registers an event handler for a generic event.
-  base::Result generic(Generic* out, std::shared_ptr<Handler> handler) const;
+  base::Result generic(Generic* out, HandlerPtr handler) const;
 
   // Arranges for |task->expire()| to be called at time |at|.
   base::Result set_deadline(Task* task, base::MonotonicTime at);
@@ -474,7 +472,7 @@ class Manager {
   base::Result shutdown() const;
 
  private:
-  std::shared_ptr<ManagerImpl> ptr_;
+  ManagerPtr ptr_;
 };
 
 inline void swap(Manager& a, Manager& b) noexcept { a.swap(b); }

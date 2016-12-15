@@ -127,7 +127,7 @@ class Task {
 
   // Registers a Callback to execute when the Task reaches the |done| state.
   // - Will execute |callback| immediately if this Task is already |done|.
-  void on_finished(std::unique_ptr<Callback> callback);
+  void on_finished(CallbackPtr callback);
 
   // Marks the task as having exceeded its deadline.
   // - Changes |ready| to |done| with result DEADLINE_EXCEEDED and returns true
@@ -183,7 +183,7 @@ class Task {
   State state_;
   base::Result result_;
   std::exception_ptr eptr_;
-  std::vector<std::unique_ptr<Callback>> callbacks_;
+  std::vector<CallbackPtr> callbacks_;
   std::vector<Task*> subtasks_;
 };
 

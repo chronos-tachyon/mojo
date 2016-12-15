@@ -22,9 +22,8 @@ base::Result FunctionCallback::run() {
 }
 }  // namespace internal
 
-std::unique_ptr<Callback> callback(std::function<base::Result()> f) {
-  return std::unique_ptr<Callback>(
-      new internal::FunctionCallback(std::move(f)));
+CallbackPtr callback(std::function<base::Result()> f) {
+  return CallbackPtr(new internal::FunctionCallback(std::move(f)));
 }
 
 }  // namespace event

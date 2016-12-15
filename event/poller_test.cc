@@ -52,7 +52,7 @@ redo:
   EXPECT_EQ(value, *counter);
 }
 
-static void TestPollerImplementation(std::shared_ptr<event::Poller> p) {
+static void TestPollerImplementation(event::PollerPtr p) {
   base::SocketPair s;
   base::Result r = base::make_socketpair(&s, AF_UNIX, SOCK_STREAM, 0);
   ASSERT_OK(r);
@@ -123,7 +123,7 @@ static void TestPollerImplementation(std::shared_ptr<event::Poller> p) {
 
 TEST(Poller, Default) {
   event::PollerOptions o;
-  std::shared_ptr<event::Poller> p;
+  event::PollerPtr p;
   ASSERT_OK(event::new_poller(&p, o));
   TestPollerImplementation(std::move(p));
 }
@@ -131,7 +131,7 @@ TEST(Poller, Default) {
 TEST(Poller, EPoll) {
   event::PollerOptions o;
   o.set_type(event::PollerType::epoll_poller);
-  std::shared_ptr<event::Poller> p;
+  event::PollerPtr p;
   ASSERT_OK(event::new_poller(&p, o));
   TestPollerImplementation(std::move(p));
 }

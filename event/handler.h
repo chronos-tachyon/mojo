@@ -43,6 +43,8 @@ class Handler {
   virtual base::Result run(Data data) const = 0;
 };
 
+using HandlerPtr = std::shared_ptr<Handler>;
+
 // Implementation details {{{
 
 namespace internal {
@@ -71,11 +73,11 @@ class ClosureHandler : public Handler {
 // }}}
 
 // Constructs a Handler from an existing function object.
-std::shared_ptr<Handler> handler(std::function<base::Result(Data)> f);
+HandlerPtr handler(std::function<base::Result(Data)> f);
 
 // Constructs a Handler from the given function/functor and arguments.
 template <typename Function, typename... Args>
-std::shared_ptr<Handler> handler(Function&& f, Args&&... args) {
+HandlerPtr handler(Function&& f, Args&&... args) {
   using T =
       internal::ClosureHandler<typename std::remove_reference<Function>::type,
                                typename std::remove_reference<Args>::type...>;
@@ -89,7 +91,7 @@ std::shared_ptr<Handler> handler(Function&& f, Args&&... args) {
 // - If the std::shared_ptr reference count on the Handler goes to 0 before the
 //   Callback executes, then the Callback will politely do nothing.
 //
-std::unique_ptr<Callback> handler_callback(std::weak_ptr<Handler> h, Data d);
+CallbackPtr handler_callback(std::weak_ptr<Handler> h, Data d);
 
 }  // namespace event
 

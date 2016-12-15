@@ -36,13 +36,12 @@ base::Result HandlerCallback::run() {
 }
 }  // namespace internal
 
-std::shared_ptr<Handler> handler(std::function<base::Result(Data)> f) {
+HandlerPtr handler(std::function<base::Result(Data)> f) {
   return std::make_shared<internal::FunctionHandler>(std::move(f));
 }
 
-std::unique_ptr<Callback> handler_callback(std::weak_ptr<Handler> h, Data d) {
-  return std::unique_ptr<Callback>(
-      new internal::HandlerCallback(std::move(h), std::move(d)));
+CallbackPtr handler_callback(std::weak_ptr<Handler> h, Data d) {
+  return CallbackPtr(new internal::HandlerCallback(std::move(h), std::move(d)));
 }
 
 }  // namespace event

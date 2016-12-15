@@ -75,8 +75,7 @@ class Dispatcher {
   // - If |task| is provided and |callback| runs, then |callback|'s
   //   base::Result return value will be stored in |task->finish()|.
   //
-  virtual void dispatch(Task* /*nullable*/ task,
-                        std::unique_ptr<Callback> callback) = 0;
+  virtual void dispatch(Task* /*nullable*/ task, CallbackPtr callback) = 0;
 
   // Runs the provided Callback on the Dispatcher.
   //
@@ -86,7 +85,7 @@ class Dispatcher {
   //  (b) you do not care about *when* |callback| completes; AND
   //  (c) you do not care about canceling |callback|.
   //
-  void dispatch(std::unique_ptr<Callback> callback) {
+  void dispatch(CallbackPtr callback) {
     return dispatch(nullptr, std::move(callback));
   }
 
@@ -328,28 +327,29 @@ struct DispatcherStats {
   }
 };
 
+using DispatcherPtr = std::shared_ptr<Dispatcher>;
+
 // Constructs a new Dispatcher, or returns the shared |system_dispatcher()|, as
 // specified in |opts|.
-base::Result new_dispatcher(std::shared_ptr<Dispatcher>* out,
-                            const DispatcherOptions& opts);
+base::Result new_dispatcher(DispatcherPtr* out, const DispatcherOptions& opts);
 
 // Returns a shared instance of an inline Dispatcher.
 //
 // THREAD SAFETY: This function is thread-safe.
 //
-std::shared_ptr<Dispatcher> system_inline_dispatcher();
+DispatcherPtr system_inline_dispatcher();
 
 // Returns a shared instance of a Dispatcher.
 //
 // THREAD SAFETY: This function is thread-safe.
 //
-std::shared_ptr<Dispatcher> system_dispatcher();
+DispatcherPtr system_dispatcher();
 
 // Replaces the shared instance of Dispatcher.
 //
 // THREAD SAFETY: This function is thread-safe.
 //
-void set_system_dispatcher(std::shared_ptr<Dispatcher> ptr);
+void set_system_dispatcher(DispatcherPtr ptr);
 
 }  // namespace event
 

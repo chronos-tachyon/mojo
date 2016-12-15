@@ -28,9 +28,9 @@ static std::size_t num_cores() {
 
 struct Work {
   event::Task* task;
-  std::unique_ptr<event::Callback> callback;
+  event::CallbackPtr callback;
 
-  Work(event::Task* task, std::unique_ptr<event::Callback> callback) noexcept
+  Work(event::Task* task, event::CallbackPtr callback) noexcept
       : task(task),
         callback(std::move(callback)) {}
   Work() noexcept : Work(nullptr, nullptr) {}
@@ -105,7 +105,7 @@ class InlineDispatcher : public Dispatcher {
     return DispatcherType::inline_dispatcher;
   }
 
-  void dispatch(Task* task, std::unique_ptr<Callback> callback) override {
+  void dispatch(Task* task, CallbackPtr callback) override {
     auto lock = base::acquire_lock(mu_);
     invoke(lock, busy_, done_, caught_, Work(task, std::move(callback)));
   }
@@ -142,7 +142,7 @@ class AsyncDispatcher : public Dispatcher {
     return DispatcherType::async_dispatcher;
   }
 
-  void dispatch(Task* task, std::unique_ptr<Callback> callback) override {
+  void dispatch(Task* task, CallbackPtr callback) override {
     auto lock = base::acquire_lock(mu_);
     work_.emplace(task, std::move(callback));
   }
@@ -211,7 +211,7 @@ class ThreadPoolDispatcher : public Dispatcher {
     return DispatcherType::threaded_dispatcher;
   }
 
-  void dispatch(Task* task, std::unique_ptr<Callback> callback) override {
+  void dispatch(Task* task, CallbackPtr callback) override {
     auto lock = base::acquire_lock(mu_);
     work_.emplace(task, std::move(callback));
     if (corked_) return;
@@ -373,8 +373,7 @@ class ThreadPoolDispatcher : public Dispatcher {
 
 }  // anonymous namespace
 
-base::Result new_dispatcher(std::shared_ptr<Dispatcher>* out,
-                            const DispatcherOptions& opts) {
+base::Result new_dispatcher(DispatcherPtr* out, const DispatcherOptions& opts) {
   auto idle = opts.idle_function();
   auto type = opts.type();
   std::size_t min, max;
@@ -412,27 +411,27 @@ base::Result new_dispatcher(std::shared_ptr<Dispatcher>* out,
 }
 
 static std::mutex g_sys_mu;
-static std::shared_ptr<Dispatcher>* g_sys_i = nullptr;
-static std::shared_ptr<Dispatcher>* g_sys_d = nullptr;
+static DispatcherPtr* g_sys_i = nullptr;
+static DispatcherPtr* g_sys_d = nullptr;
 
-std::shared_ptr<Dispatcher> system_inline_dispatcher() {
+DispatcherPtr system_inline_dispatcher() {
   auto lock = base::acquire_lock(g_sys_mu);
-  if (g_sys_i == nullptr) g_sys_i = new std::shared_ptr<Dispatcher>;
+  if (g_sys_i == nullptr) g_sys_i = new DispatcherPtr;
   if (!*g_sys_i) *g_sys_i = std::make_shared<InlineDispatcher>();
   return *g_sys_i;
 }
 
-std::shared_ptr<Dispatcher> system_dispatcher() {
+DispatcherPtr system_dispatcher() {
   auto lock = base::acquire_lock(g_sys_mu);
-  if (g_sys_d == nullptr) g_sys_d = new std::shared_ptr<Dispatcher>;
+  if (g_sys_d == nullptr) g_sys_d = new DispatcherPtr;
   if (!*g_sys_d)
     *g_sys_d = std::make_shared<ThreadPoolDispatcher>(nullptr, 1, num_cores());
   return *g_sys_d;
 }
 
-void set_system_dispatcher(std::shared_ptr<Dispatcher> ptr) {
+void set_system_dispatcher(DispatcherPtr ptr) {
   auto lock = base::acquire_lock(g_sys_mu);
-  if (g_sys_d == nullptr) g_sys_d = new std::shared_ptr<Dispatcher>;
+  if (g_sys_d == nullptr) g_sys_d = new DispatcherPtr;
   g_sys_d->swap(ptr);
 }
 

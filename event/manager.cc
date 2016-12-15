@@ -24,7 +24,7 @@
 
 using TeeVec = std::vector<base::FD>;
 using TeeMap = std::unordered_map<int, TeeVec>;
-using CallbackVec = std::vector<std::unique_ptr<event::Callback>>;
+using CallbackVec = std::vector<event::CallbackPtr>;
 using base::token_t;
 
 namespace {
@@ -240,9 +240,8 @@ namespace event {
 
 class ManagerImpl {
  public:
-  ManagerImpl(std::shared_ptr<Poller> p, std::shared_ptr<Dispatcher> d,
-              base::Pipe pipe, std::size_t min_pollers,
-              std::size_t max_pollers);
+  ManagerImpl(PollerPtr p, DispatcherPtr d, base::Pipe pipe,
+              std::size_t min_pollers, std::size_t max_pollers);
   ~ManagerImpl() noexcept;
 
   bool is_running() const noexcept {
@@ -250,32 +249,30 @@ class ManagerImpl {
     return running_;
   }
 
-  std::shared_ptr<Poller> poller() const noexcept {
+  PollerPtr poller() const noexcept {
     auto lock = base::acquire_lock(mu_);
     return DCHECK_NOTNULL(p_);
   }
 
-  std::shared_ptr<Dispatcher> dispatcher() const noexcept {
+  DispatcherPtr dispatcher() const noexcept {
     auto lock = base::acquire_lock(mu_);
     return DCHECK_NOTNULL(d_);
   }
 
-  base::Result fd_add(token_t* out, base::FD fd, Set set,
-                      std::shared_ptr<Handler> handler);
+  base::Result fd_add(token_t* out, base::FD fd, Set set, HandlerPtr handler);
   base::Result fd_get(Set* out, token_t t);
   base::Result fd_modify(token_t t, Set set);
   base::Result fd_remove(token_t t);
 
-  base::Result signal_add(token_t* out, int signo,
-                          std::shared_ptr<Handler> handler);
+  base::Result signal_add(token_t* out, int signo, HandlerPtr handler);
   base::Result signal_remove(token_t t);
 
-  base::Result timer_add(token_t* out, std::shared_ptr<Handler> handler);
+  base::Result timer_add(token_t* out, HandlerPtr handler);
   base::Result timer_arm(token_t t, base::Duration delay, base::Duration period,
                          bool delay_abs);
   base::Result timer_remove(token_t t);
 
-  base::Result generic_add(token_t* out, std::shared_ptr<Handler> handler);
+  base::Result generic_add(token_t* out, HandlerPtr handler);
   base::Result generic_fire(token_t t, int value);
   base::Result generic_remove(token_t t);
 
@@ -293,14 +290,13 @@ class ManagerImpl {
   };
 
   struct Record {
-    std::shared_ptr<Handler> h;
+    HandlerPtr h;
     token_t t;
     Set set;
 
-    Record(token_t t, Set set, std::shared_ptr<Handler> h) noexcept
-        : h(std::move(h)),
-          t(t),
-          set(set) {}
+    Record(token_t t, Set set, HandlerPtr h) noexcept : h(std::move(h)),
+                                                        t(t),
+                                                        set(set) {}
     Record() noexcept : Record(token_t(), Set(), nullptr) {}
   };
 
@@ -331,8 +327,8 @@ class ManagerImpl {
   std::unordered_map<int, token_t> sigmap_;      // signo -> global token
   std::unordered_map<token_t, token_t> ltmap_;   // local -> global token
   std::unordered_map<token_t, Source> sources_;  // global token -> source
-  std::shared_ptr<Poller> p_;
-  std::shared_ptr<Dispatcher> d_;
+  PollerPtr p_;
+  DispatcherPtr d_;
   base::Pipe pipe_;
   std::size_t min_;
   std::size_t max_;
@@ -340,8 +336,7 @@ class ManagerImpl {
   bool running_;
 };
 
-ManagerImpl::ManagerImpl(std::shared_ptr<Poller> p,
-                         std::shared_ptr<Dispatcher> d, base::Pipe pipe,
+ManagerImpl::ManagerImpl(PollerPtr p, DispatcherPtr d, base::Pipe pipe,
                          std::size_t min_pollers, std::size_t max_pollers)
     : p_(DCHECK_NOTNULL(std::move(p))),
       d_(DCHECK_NOTNULL(std::move(d))),
@@ -365,7 +360,7 @@ ManagerImpl::~ManagerImpl() noexcept {
 }
 
 base::Result ManagerImpl::fd_add(base::token_t* out, base::FD fd, Set set,
-                                 std::shared_ptr<Handler> handler) {
+                                 HandlerPtr handler) {
   DCHECK_NOTNULL(out);
   DCHECK_NOTNULL(fd);
   DCHECK_NOTNULL(handler);
@@ -379,7 +374,7 @@ base::Result ManagerImpl::fd_add(base::token_t* out, base::FD fd, Set set,
     return base::Result::invalid_argument("file descriptor is closed");
 
   auto lock = base::acquire_lock(mu_);
-  std::shared_ptr<Poller> p = DCHECK_NOTNULL(p_);
+  PollerPtr p = DCHECK_NOTNULL(p_);
 
   token_t gt;
   bool added_gt = false;
@@ -459,7 +454,7 @@ base::Result ManagerImpl::fd_get(Set* out, base::token_t t) {
 
 base::Result ManagerImpl::fd_modify(base::token_t t, Set set) {
   auto lock = base::acquire_lock(mu_);
-  std::shared_ptr<Poller> p = DCHECK_NOTNULL(p_);
+  PollerPtr p = DCHECK_NOTNULL(p_);
 
   auto ltit = ltmap_.find(t);
   if (ltit == ltmap_.end()) return base::Result::not_found();
@@ -494,7 +489,7 @@ base::Result ManagerImpl::fd_modify(base::token_t t, Set set) {
 base::Result ManagerImpl::fd_remove(base::token_t t) {
   auto lock = base::acquire_lock(mu_);
   if (!running_) return base::Result();
-  std::shared_ptr<Poller> p = DCHECK_NOTNULL(p_);
+  PollerPtr p = DCHECK_NOTNULL(p_);
 
   auto ltit = ltmap_.find(t);
   if (ltit == ltmap_.end()) return base::Result::not_found();
@@ -536,7 +531,7 @@ base::Result ManagerImpl::fd_remove(base::token_t t) {
 }
 
 base::Result ManagerImpl::signal_add(base::token_t* out, int signo,
-                                     std::shared_ptr<Handler> handler) {
+                                     HandlerPtr handler) {
   *DCHECK_NOTNULL(out) = token_t();
   DCHECK_NOTNULL(handler);
 
@@ -623,8 +618,7 @@ base::Result ManagerImpl::signal_remove(base::token_t t) {
   return r;
 }
 
-base::Result ManagerImpl::timer_add(base::token_t* out,
-                                    std::shared_ptr<Handler> handler) {
+base::Result ManagerImpl::timer_add(base::token_t* out, HandlerPtr handler) {
   *DCHECK_NOTNULL(out) = token_t();
   DCHECK_NOTNULL(handler);
 
@@ -636,7 +630,7 @@ base::Result ManagerImpl::timer_add(base::token_t* out,
   base::FD fd = base::FDHolder::make(fdnum);
 
   auto lock = base::acquire_lock(mu_);
-  std::shared_ptr<Poller> p = DCHECK_NOTNULL(p_);
+  PollerPtr p = DCHECK_NOTNULL(p_);
 
   token_t t = base::next_token();
   auto& src = sources_[t];
@@ -695,8 +689,7 @@ base::Result ManagerImpl::timer_remove(base::token_t t) {
   return r;
 }
 
-base::Result ManagerImpl::generic_add(base::token_t* out,
-                                      std::shared_ptr<Handler> handler) {
+base::Result ManagerImpl::generic_add(base::token_t* out, HandlerPtr handler) {
   *DCHECK_NOTNULL(out) = token_t();
   DCHECK_NOTNULL(handler);
 
@@ -753,8 +746,8 @@ base::Result ManagerImpl::donate_as_poller(base::Lock lock, bool forever) {
     curr_cv_.notify_all();
   });
 
-  std::shared_ptr<Dispatcher> d = DCHECK_NOTNULL(d_);
-  std::shared_ptr<Poller> p = DCHECK_NOTNULL(p_);
+  DispatcherPtr d = DCHECK_NOTNULL(d_);
+  PollerPtr p = DCHECK_NOTNULL(p_);
 
   Poller::EventVec vec;
   CallbackVec cbvec;
@@ -793,8 +786,8 @@ base::Result ManagerImpl::donate_as_mixed(base::Lock lock, bool forever) {
     curr_cv_.notify_all();
   });
 
-  std::shared_ptr<Dispatcher> d = DCHECK_NOTNULL(d_);
-  std::shared_ptr<Poller> p = DCHECK_NOTNULL(p_);
+  DispatcherPtr d = DCHECK_NOTNULL(d_);
+  PollerPtr p = DCHECK_NOTNULL(p_);
 
   Poller::EventVec vec;
   CallbackVec cbvec;
@@ -832,7 +825,7 @@ base::Result ManagerImpl::donate_as_mixed(base::Lock lock, bool forever) {
 }
 
 base::Result ManagerImpl::donate_as_worker(base::Lock lock, bool forever) {
-  std::shared_ptr<Dispatcher> d = DCHECK_NOTNULL(d_);
+  DispatcherPtr d = DCHECK_NOTNULL(d_);
   base::Result r;
   while (running_) {
     lock.unlock();
@@ -1013,7 +1006,7 @@ base::Result FileDescriptor::modify(Set set) {
 }
 
 base::Result FileDescriptor::release() {
-  std::shared_ptr<ManagerImpl> ptr;
+  ManagerPtr ptr;
   ptr.swap(ptr_);
   if (ptr) return ptr->fd_remove(t_);
   return base::Result();
@@ -1030,7 +1023,7 @@ void Signal::assert_valid() const {
 }
 
 base::Result Signal::release() {
-  std::shared_ptr<ManagerImpl> ptr;
+  ManagerPtr ptr;
   ptr.swap(ptr_);
   if (ptr) return ptr->signal_remove(t_);
   return base::Result();
@@ -1042,9 +1035,7 @@ Timer& Timer::operator=(Timer&& other) noexcept {
   return *this;
 }
 
-void Timer::assert_valid() const {
-  CHECK(ptr_) << ": event::Timer is empty!";
-}
+void Timer::assert_valid() const { CHECK(ptr_) << ": event::Timer is empty!"; }
 
 base::Result Timer::set_at(base::MonotonicTime at) {
   assert_valid();
@@ -1102,7 +1093,7 @@ base::Result Timer::cancel() {
 }
 
 base::Result Timer::release() {
-  std::shared_ptr<ManagerImpl> ptr;
+  ManagerPtr ptr;
   ptr.swap(ptr_);
   if (ptr) return ptr->timer_remove(t_);
   return base::Result();
@@ -1124,7 +1115,7 @@ base::Result Generic::fire(int value) const {
 }
 
 base::Result Generic::release() {
-  std::shared_ptr<ManagerImpl> ptr;
+  ManagerPtr ptr;
   ptr.swap(ptr_);
   if (ptr) return ptr->generic_remove(t_);
   return base::Result();
@@ -1134,18 +1125,18 @@ void Manager::assert_valid() const {
   CHECK(ptr_) << ": event::Manager is empty!";
 }
 
-std::shared_ptr<Poller> Manager::poller() const {
+PollerPtr Manager::poller() const {
   assert_valid();
   return ptr_->poller();
 }
 
-std::shared_ptr<Dispatcher> Manager::dispatcher() const {
+DispatcherPtr Manager::dispatcher() const {
   assert_valid();
   return ptr_->dispatcher();
 }
 
 base::Result Manager::fd(FileDescriptor* out, base::FD fd, Set set,
-                         std::shared_ptr<Handler> handler) const {
+                         HandlerPtr handler) const {
   DCHECK_NOTNULL(out);
   DCHECK_NOTNULL(fd);
   DCHECK_NOTNULL(handler);
@@ -1161,8 +1152,7 @@ base::Result Manager::fd(FileDescriptor* out, base::FD fd, Set set,
   return r;
 }
 
-base::Result Manager::signal(Signal* out, int signo,
-                             std::shared_ptr<Handler> handler) const {
+base::Result Manager::signal(Signal* out, int signo, HandlerPtr handler) const {
   DCHECK_NOTNULL(out);
   DCHECK_NOTNULL(handler);
   assert_valid();
@@ -1177,8 +1167,7 @@ base::Result Manager::signal(Signal* out, int signo,
   return r;
 }
 
-base::Result Manager::timer(Timer* out,
-                            std::shared_ptr<Handler> handler) const {
+base::Result Manager::timer(Timer* out, HandlerPtr handler) const {
   DCHECK_NOTNULL(out);
   DCHECK_NOTNULL(handler);
   assert_valid();
@@ -1193,8 +1182,7 @@ base::Result Manager::timer(Timer* out,
   return r;
 }
 
-base::Result Manager::generic(Generic* out,
-                              std::shared_ptr<Handler> handler) const {
+base::Result Manager::generic(Generic* out, HandlerPtr handler) const {
   DCHECK_NOTNULL(out);
   DCHECK_NOTNULL(handler);
   assert_valid();
@@ -1312,8 +1300,7 @@ void wait_n(std::vector<Manager> mv, std::vector<Task*> tv, std::size_t n) {
   }
 }
 
-static base::Result make_manager(std::shared_ptr<ManagerImpl>* out,
-                                 const ManagerOptions& o) {
+static base::Result make_manager(ManagerPtr* out, const ManagerOptions& o) {
   DCHECK_NOTNULL(out);
 
   std::size_t min, max;
@@ -1330,14 +1317,14 @@ static base::Result make_manager(std::shared_ptr<ManagerImpl>* out,
   base::Result r = base::make_pipe(&pipe);
   if (!r) return r;
 
-  std::shared_ptr<Poller> p;
+  PollerPtr p;
   r = new_poller(&p, o.poller());
   if (!r) return r;
 
   r = p->add(pipe.read, token_t(), Set::readable_bit());
   if (!r) return r;
 
-  std::shared_ptr<Dispatcher> d;
+  DispatcherPtr d;
   r = new_dispatcher(&d, o.dispatcher());
   if (!r) return r;
 
@@ -1348,7 +1335,7 @@ static base::Result make_manager(std::shared_ptr<ManagerImpl>* out,
 
 base::Result new_manager(Manager* out, const ManagerOptions& o) {
   DCHECK_NOTNULL(out)->reset();
-  std::shared_ptr<ManagerImpl> ptr;
+  ManagerPtr ptr;
   auto r = make_manager(&ptr, o);
   if (r) *out = Manager(std::move(ptr));
   return r;

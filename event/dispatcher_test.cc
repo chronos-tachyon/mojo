@@ -86,7 +86,7 @@ struct Throw {
 TEST(InlineDispatcher, EndToEnd) {
   event::DispatcherOptions o;
   o.set_type(event::DispatcherType::inline_dispatcher);
-  std::shared_ptr<event::Dispatcher> d;
+  event::DispatcherPtr d;
   ASSERT_OK(event::new_dispatcher(&d, o));
 
   int n = 0;
@@ -114,7 +114,7 @@ TEST(InlineDispatcher, EndToEnd) {
 TEST(InlineDispatcher, ThrowingCallback) {
   event::DispatcherOptions o;
   o.set_type(event::DispatcherType::inline_dispatcher);
-  std::shared_ptr<event::Dispatcher> d;
+  event::DispatcherPtr d;
   ASSERT_OK(event::new_dispatcher(&d, o));
 
   std::array<event::Task, 5> tasks;
@@ -134,7 +134,7 @@ TEST(InlineDispatcher, ThrowingCallback) {
 TEST(AsyncDispatcher, EndToEnd) {
   event::DispatcherOptions o;
   o.set_type(event::DispatcherType::async_dispatcher);
-  std::shared_ptr<event::Dispatcher> d;
+  event::DispatcherPtr d;
   ASSERT_OK(event::new_dispatcher(&d, o));
 
   int n = 0;
@@ -158,7 +158,7 @@ TEST(AsyncDispatcher, EndToEnd) {
 TEST(AsyncDispatcher, ThrowingCallback) {
   event::DispatcherOptions o;
   o.set_type(event::DispatcherType::async_dispatcher);
-  std::shared_ptr<event::Dispatcher> d;
+  event::DispatcherPtr d;
   ASSERT_OK(event::new_dispatcher(&d, o));
 
   std::array<event::Task, 5> tasks;
@@ -180,7 +180,7 @@ TEST(ThreadPoolDispatcher, EndToEnd) {
   event::DispatcherOptions o;
   o.set_type(event::DispatcherType::threaded_dispatcher);
   o.set_num_workers(1, 4);
-  std::shared_ptr<event::Dispatcher> d;
+  event::DispatcherPtr d;
   ASSERT_OK(event::new_dispatcher(&d, o));
 
   event::DispatcherStats expected;
@@ -288,7 +288,7 @@ TEST(ThreadPoolDispatcher, ThrowingCallback) {
   event::DispatcherOptions o;
   o.set_type(event::DispatcherType::threaded_dispatcher);
   o.set_num_workers(1, 2);
-  std::shared_ptr<event::Dispatcher> d;
+  event::DispatcherPtr d;
   ASSERT_OK(event::new_dispatcher(&d, o));
 
   event::DispatcherStats expected;

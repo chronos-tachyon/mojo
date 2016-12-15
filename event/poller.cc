@@ -106,8 +106,7 @@ class EPollPoller : public Poller {
   const int epoll_fd_;
 };
 
-base::Result new_epoll_poller(std::shared_ptr<Poller>* out,
-                              const PollerOptions& opts) {
+base::Result new_epoll_poller(PollerPtr* out, const PollerOptions& opts) {
   int fd = ::epoll_create1(EPOLL_CLOEXEC);
   if (fd == -1) {
     int err_no = errno;
@@ -119,8 +118,7 @@ base::Result new_epoll_poller(std::shared_ptr<Poller>* out,
 
 }  // anonymous namespace
 
-base::Result new_poller(std::shared_ptr<Poller>* out,
-                        const PollerOptions& opts) {
+base::Result new_poller(PollerPtr* out, const PollerOptions& opts) {
   DCHECK_NOTNULL(out)->reset();
   auto type = opts.type();
   switch (type) {

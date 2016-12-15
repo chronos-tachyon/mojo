@@ -107,9 +107,10 @@ class PollerOptions {
   PollerType type_;
 };
 
+using PollerPtr = std::shared_ptr<Poller>;
+
 // Constructs a new Poller instance.
-base::Result new_poller(std::shared_ptr<Poller>* out,
-                        const PollerOptions& opts);
+base::Result new_poller(PollerPtr* out, const PollerOptions& opts);
 
 }  // namespace event
 

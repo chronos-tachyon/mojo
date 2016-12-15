@@ -39,6 +39,8 @@ class Callback {
   virtual base::Result run() = 0;
 };
 
+using CallbackPtr = std::unique_ptr<Callback>;
+
 // Implementation details {{{
 
 namespace internal {
@@ -67,15 +69,15 @@ class ClosureCallback : public Callback {
 // }}}
 
 // Constructs a Callback from an existing std::function object.
-std::unique_ptr<Callback> callback(std::function<base::Result()> f);
+CallbackPtr callback(std::function<base::Result()> f);
 
 // Constructs a Callback from the given function/functor and arguments.
 template <typename Function, typename... Args>
-std::unique_ptr<Callback> callback(Function&& f, Args&&... args) {
+CallbackPtr callback(Function&& f, Args&&... args) {
   using T =
       internal::ClosureCallback<typename std::remove_reference<Function>::type,
                                 typename std::remove_reference<Args>::type...>;
-  return std::unique_ptr<Callback>(
+  return CallbackPtr(
       new T(std::forward<Function>(f),
             std::forward_as_tuple<Args...>(std::forward<Args>(args)...)));
 }
