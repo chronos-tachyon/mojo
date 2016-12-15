@@ -262,9 +262,9 @@ class ManagerOptions {
   // There is intentionally no constructor for aggregate initialization.
   ManagerOptions() noexcept : min_(0), max_(0), has_(0) {}
   ManagerOptions(const ManagerOptions&) = default;
-  ManagerOptions(ManagerOptions&&) noexcept = default;
+  ManagerOptions(ManagerOptions&&) = default;
   ManagerOptions& operator=(const ManagerOptions&) = default;
-  ManagerOptions& operator=(ManagerOptions&&) noexcept = default;
+  ManagerOptions& operator=(ManagerOptions&&) = default;
 
   // Resets all fields to their default values.
   void reset() { *this = ManagerOptions(); }

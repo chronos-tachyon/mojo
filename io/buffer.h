@@ -124,7 +124,7 @@ struct null_pool_t {
   constexpr null_pool_t() noexcept = default;
 };
 
-static constexpr null_pool_t null_pool;
+static constexpr null_pool_t null_pool = {};
 
 // A BufferPool is a thread-safe pool of OwnedBuffer objects.
 // - All OwnedBuffer objects in the pool have the same size.

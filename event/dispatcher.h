@@ -16,8 +16,8 @@
 
 namespace event {
 
-struct DispatcherOptions;  // forward declaration
-struct DispatcherStats;    // forward declaration
+class DispatcherOptions;  // forward declaration
+struct DispatcherStats;   // forward declaration
 
 // DispatcherType is used to identify which callback execution strategy to use.
 enum class DispatcherType : uint8_t {
@@ -169,7 +169,7 @@ class DispatcherOptions {
                                  max_(0),
                                  has_(0) {}
   DispatcherOptions(const DispatcherOptions&) = default;
-  DispatcherOptions(DispatcherOptions&&) noexcept = default;
+  DispatcherOptions(DispatcherOptions&&) = default;
   DispatcherOptions& operator=(const DispatcherOptions&) = default;
   DispatcherOptions& operator=(DispatcherOptions&&) noexcept = default;
 
