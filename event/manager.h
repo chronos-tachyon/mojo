@@ -26,7 +26,7 @@ namespace event {
 
 class ManagerImpl;  // forward declaration
 
-// An event::FileDescriptor binds a file descriptor to an event::Manager.
+// An event::FileDescriptor binds an event handler to a file descriptor.
 class FileDescriptor {
  private:
   friend class Manager;
@@ -50,16 +50,19 @@ class FileDescriptor {
   // NOTE: this does not *close* the file descriptor.
   ~FileDescriptor() noexcept { release().ignore_ok(); }
 
-  explicit operator bool() const noexcept { return !!ptr_; }
-  bool valid() const noexcept { return !!*this; }
-  void assert_valid() const;
-
+  // Swaps this FileDescriptor event with another.
   void swap(FileDescriptor& x) noexcept {
     using std::swap;
     swap(ptr_, x.ptr_);
     swap(fd_, x.fd_);
     swap(t_, x.t_);
   }
+
+  // Returns true iff this FileDescriptor event is non-empty.
+  explicit operator bool() const noexcept { return !!ptr_; }
+
+  // Asserts that this FileDescriptor event is non-empty.
+  void assert_valid() const;
 
   // Gets the set of events which the Handler is interested in.
   base::Result get(Set* out) const;
@@ -79,7 +82,7 @@ class FileDescriptor {
 
 inline void swap(FileDescriptor& a, FileDescriptor& b) noexcept { a.swap(b); }
 
-// An event::Signal binds a Unix signal to an event::Manager.
+// An event::Signal binds an event handler to a Unix signal.
 class Signal {
  private:
   friend class Manager;
@@ -106,16 +109,19 @@ class Signal {
   //       signal behavior is restored.
   ~Signal() noexcept { release().ignore_ok(); }
 
-  explicit operator bool() const noexcept { return !!ptr_; }
-  bool valid() const noexcept { return !!*this; }
-  void assert_valid() const;
-
+  // Swaps this Signal event with another.
   void swap(Signal& x) noexcept {
     using std::swap;
     swap(ptr_, x.ptr_);
     swap(sig_, x.sig_);
     swap(t_, x.t_);
   }
+
+  // Returns true iff this Signal event is non-empty.
+  explicit operator bool() const noexcept { return !!ptr_; }
+
+  // Asserts that this Signal event is non-empty.
+  void assert_valid() const;
 
   // Unbinds the Handler from the signal.
   // NOTE: If this was the last Handler bound to the signal, then the default
@@ -130,7 +136,7 @@ class Signal {
 
 inline void swap(Signal& a, Signal& b) noexcept { a.swap(b); }
 
-// An event::Timer binds a timer of some kind to an event::Manager.
+// An event::Timer binds an event handler to a timer of some kind.
 // The timer is initially unarmed; use the Timer::set_* methods to arm.
 class Timer {
  private:
@@ -153,15 +159,18 @@ class Timer {
   // The destructor unbinds the Handler from the timer and frees the timer.
   ~Timer() noexcept { release().ignore_ok(); }
 
-  explicit operator bool() const noexcept { return !!ptr_; }
-  bool valid() const noexcept { return !!*this; }
-  void assert_valid() const;
-
+  // Swaps this Timer event with another.
   void swap(Timer& x) noexcept {
     using std::swap;
     swap(ptr_, x.ptr_);
     swap(t_, x.t_);
   }
+
+  // Returns true iff this Timer event is non-empty.
+  explicit operator bool() const noexcept { return !!ptr_; }
+
+  // Asserts that this Timer event is non-empty.
+  void assert_valid() const;
 
   // Arms the timer as a one-shot timer for the given absolute time.
   // The time is specified in terms of the |base::system_monotonic_clock()|.
@@ -202,7 +211,7 @@ class Timer {
 
 inline void swap(Timer& a, Timer& b) noexcept { a.swap(b); }
 
-// An event::Generic binds an arbitrary event to an event::Manager.
+// An event::Generic binds an event handler to an arbitrary event.
 class Generic {
  private:
   friend class Manager;
@@ -224,15 +233,18 @@ class Generic {
   // The destructor unbinds the Handler from the event and frees any resources.
   ~Generic() noexcept { release().ignore_ok(); }
 
-  explicit operator bool() const noexcept { return !!ptr_; }
-  bool valid() const noexcept { return !!*this; }
-  void assert_valid() const;
-
+  // Swaps this Generic event with another.
   void swap(Generic& x) noexcept {
     using std::swap;
     swap(ptr_, x.ptr_);
     swap(t_, x.t_);
   }
+
+  // Returns true iff this Generic event is non-empty.
+  explicit operator bool() const noexcept { return !!ptr_; }
+
+  // Asserts that this Generic event is non-empty.
+  void assert_valid() const;
 
   // Fires the event, triggering the associated Handler.
   // |value| will be available as |data.int_value| in the Handler.
@@ -319,6 +331,32 @@ class ManagerOptions {
   }
   void set_num_pollers(std::size_t n) noexcept { set_num_pollers(n, n); }
 
+  // Convenience method for a single-threaded Manager with inline dispatching.
+  void set_inline_mode() noexcept {
+    set_num_pollers(0, 1);
+    dispatcher().set_type(DispatcherType::inline_dispatcher);
+  }
+
+  // Convenience method for a single-threaded Manager with async dispatching.
+  void set_async_mode() noexcept {
+    set_num_pollers(0, 1);
+    dispatcher().set_type(DispatcherType::async_dispatcher);
+  }
+
+  // Convenience method for a minimal multi-threaded Manager.
+  void set_minimal_threaded_mode() noexcept {
+    set_num_pollers(1);
+    dispatcher().set_type(DispatcherType::threaded_dispatcher);
+    dispatcher().set_num_workers(1);
+  }
+
+  // Convenience method for a standard multi-threaded Manager.
+  void set_threaded_mode() noexcept {
+    reset_num_pollers();
+    dispatcher().set_type(DispatcherType::threaded_dispatcher);
+    dispatcher().reset_num_workers();
+  }
+
  private:
   PollerOptions poller_;
   DispatcherOptions dispatcher_;
@@ -360,22 +398,34 @@ class ManagerOptions {
 //
 class Manager {
  public:
+  // INTERNAL USE. Manager is constructible from an implementation.
   Manager(std::shared_ptr<ManagerImpl> ptr) noexcept : ptr_(std::move(ptr)) {}
+
+  // Manager is default constructible.  It begins in the empty state.
   Manager() noexcept : ptr_() {}
 
-  // Managers are copyable and moveable.
+  // Manager is copyable and moveable.
+  // - These copy and move the handle, not the implementation.
+  //   A copy of a Manager is not a separate Manager, it is a new
+  //   refcounted handle to the same Manager.
   Manager(const Manager&) noexcept = default;
   Manager(Manager&&) noexcept = default;
   Manager& operator=(const Manager&) noexcept = default;
   Manager& operator=(Manager&&) noexcept = default;
 
+  // Resets this Manager to the empty state.
   void reset() noexcept { ptr_.reset(); }
+
+  // Swaps this Manager with another.
   void swap(Manager& x) noexcept { ptr_.swap(x.ptr_); }
+
+  // Returns true iff this Manager is non-empty.
   explicit operator bool() const noexcept { return !!ptr_; }
-  bool valid() const noexcept { return !!*this; }
+
+  // Asserts that this Manager is non-empty.
   void assert_valid() const;
 
-  // Returns this Manager, if valid, or else returns the system_manager().
+  // Returns this Manager, if non-empty, or else returns the system_manager().
   Manager or_system_manager() const;
 
   // Returns this Manager's Poller implementation.
@@ -385,7 +435,8 @@ class Manager {
   std::shared_ptr<Dispatcher> dispatcher() const;
 
   // Forwards the given <Task, Callback> to this Manager's Dispatcher.
-  void dispatch(Task* task, std::unique_ptr<Callback> callback) const {
+  void dispatch(Task* /*nullable*/ task,
+                std::unique_ptr<Callback> callback) const {
     dispatcher()->dispatch(task, std::move(callback));
   }
   void dispatch(std::unique_ptr<Callback> callback) const {

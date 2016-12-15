@@ -998,9 +998,7 @@ FileDescriptor& FileDescriptor::operator=(FileDescriptor&& other) noexcept {
 }
 
 void FileDescriptor::assert_valid() const {
-  if (!valid()) {
-    LOG(FATAL) << "BUG: event::FileDescriptor is empty!";
-  }
+  CHECK(ptr_) << ": event::FileDescriptor is empty!";
 }
 
 base::Result FileDescriptor::get(Set* out) const {
@@ -1028,9 +1026,7 @@ Signal& Signal::operator=(Signal&& other) noexcept {
 }
 
 void Signal::assert_valid() const {
-  if (!valid()) {
-    LOG(FATAL) << "BUG: event::Signal is empty!";
-  }
+  CHECK(ptr_) << ": event::Signal is empty!";
 }
 
 base::Result Signal::release() {
@@ -1047,9 +1043,7 @@ Timer& Timer::operator=(Timer&& other) noexcept {
 }
 
 void Timer::assert_valid() const {
-  if (!valid()) {
-    LOG(FATAL) << "BUG: event::Timer is empty!";
-  }
+  CHECK(ptr_) << ": event::Timer is empty!";
 }
 
 base::Result Timer::set_at(base::MonotonicTime at) {
@@ -1121,9 +1115,7 @@ Generic& Generic::operator=(Generic&& other) noexcept {
 }
 
 void Generic::assert_valid() const {
-  if (!valid()) {
-    LOG(FATAL) << "BUG: event::Generic is empty!";
-  }
+  CHECK(ptr_) << ": event::Generic is empty!";
 }
 
 base::Result Generic::fire(int value) const {
@@ -1139,9 +1131,7 @@ base::Result Generic::release() {
 }
 
 void Manager::assert_valid() const {
-  if (!ptr_) {
-    LOG(FATAL) << "BUG: event::Manager is empty!";
-  }
+  CHECK(ptr_) << ": event::Manager is empty!";
 }
 
 std::shared_ptr<Poller> Manager::poller() const {

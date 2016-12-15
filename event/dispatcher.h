@@ -75,7 +75,8 @@ class Dispatcher {
   // - If |task| is provided and |callback| runs, then |callback|'s
   //   base::Result return value will be stored in |task->finish()|.
   //
-  virtual void dispatch(Task* task, std::unique_ptr<Callback> callback) = 0;
+  virtual void dispatch(Task* /*nullable*/ task,
+                        std::unique_ptr<Callback> callback) = 0;
 
   // Runs the provided Callback on the Dispatcher.
   //
