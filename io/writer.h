@@ -178,7 +178,7 @@ class Writer {
 
   // Returns the io::Options that were assigned to the Writer implementation at
   // the time it was created.
-  const Options& options() const {
+  Options options() const {
     if (ptr_) return ptr_->options();
     return default_options();
   }

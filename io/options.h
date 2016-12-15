@@ -98,10 +98,10 @@ class Options {
 };
 
 // Returns the default Options. Thread-safe.
-const Options& default_options() noexcept;
+Options default_options() noexcept;
 
-// Changes the default Options. THREAD-HOSTILE.
-Options& mutable_default_options() noexcept;
+// Changes the default Options. Thread-safe.
+void set_default_options(Options opts) noexcept;
 
 }  // namespace io
 

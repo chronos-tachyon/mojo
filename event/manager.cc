@@ -1368,7 +1368,7 @@ static std::mutex g_sysmgr_mu;
 
 static Manager* g_sysmgr_ptr = nullptr;
 
-Manager& system_manager() {
+Manager system_manager() {
   auto lock = base::acquire_lock(g_sysmgr_mu);
   if (g_sysmgr_ptr == nullptr) {
     ManagerOptions o;

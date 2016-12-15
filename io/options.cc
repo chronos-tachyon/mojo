@@ -3,15 +3,25 @@
 
 #include "io/options.h"
 
+#include <mutex>
+
+#include "base/util.h"
+
 namespace io {
 
-const Options& default_options() noexcept {
-  return mutable_default_options();
+static std::mutex g_mu;
+static Options* g_ptr = nullptr;
+
+Options default_options() noexcept {
+  auto lock = base::acquire_lock(g_mu);
+  if (!g_ptr) g_ptr = new Options;
+  return *g_ptr;
 }
 
-Options& mutable_default_options() noexcept {
-  static Options& ref = *new Options;
-  return ref;
+void set_default_options(Options opts) noexcept {
+  auto lock = base::acquire_lock(g_mu);
+  if (!g_ptr) g_ptr = new Options;
+  *g_ptr = std::move(opts);
 }
 
 }  // namespace io

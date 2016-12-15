@@ -376,8 +376,7 @@ class Manager {
   void assert_valid() const;
 
   // Returns this Manager, if valid, or else returns the system_manager().
-  Manager& or_system_manager();
-  const Manager& or_system_manager() const;
+  Manager or_system_manager() const;
 
   // Returns this Manager's Poller implementation.
   std::shared_ptr<Poller> poller() const;
@@ -436,7 +435,7 @@ base::Result new_manager(Manager* out, const ManagerOptions& opts);
 //
 // THREAD SAFETY: This function is thread-safe.
 //
-Manager& system_manager();
+Manager system_manager();
 
 // Replaces the shared instance of Manager.
 //
@@ -463,14 +462,7 @@ inline void wait_all(std::vector<Manager> mv, std::vector<Task*> tv) {
 // Blocks until the given Task has finished.
 inline void wait(Manager m, Task* task) { wait_n({m}, {task}, 1); }
 
-inline Manager& Manager::or_system_manager() {
-  if (ptr_)
-    return *this;
-  else
-    return system_manager();
-}
-
-inline const Manager& Manager::or_system_manager() const {
+inline Manager Manager::or_system_manager() const {
   if (ptr_)
     return *this;
   else
