@@ -147,7 +147,18 @@ class ReaderImpl {
   Options o_;
 };
 
-// Reader implements the user-facing portion of the Reader API.
+// Reader is a handle to a readable I/O stream.
+//
+// A Reader typically points at an I/O stream, and therefore exists in the
+// "non-empty" state.  In contrast, a Reader without a stream exists in the
+// "empty" state.  A default-constructed Reader is empty, as is a Reader on
+// which the |reset()| method is called.
+//
+// I/O streams are reference counted.  When the last Reader referencing a
+// stream is destroyed or becomes empty, then the stream is closed.
+//
+// Most method calls are illegal to call on an empty Reader.
+//
 class Reader {
  private:
   static constexpr std::size_t computed_min(std::size_t len) noexcept {
@@ -155,46 +166,52 @@ class Reader {
   }
 
  public:
-  // Readers can be directly constructed from an implementation.
-  Reader(std::shared_ptr<ReaderImpl> ptr) noexcept : ptr_(std::move(ptr)) {}
+  using Pointer = std::shared_ptr<ReaderImpl>;
 
-  // Readers are default constructible, copyable, and moveable.
+  // Reader is constructible from an implementation.
+  Reader(Pointer ptr) noexcept : ptr_(std::move(ptr)) {}
+
+  // Reader is default constructible, starting in the empty state.
   Reader() noexcept : ptr_() {}
+
+  // Reader is copyable and moveable.
+  // - These copy or move the handle, not the stream itself.
   Reader(const Reader&) = default;
   Reader(Reader&&) noexcept = default;
   Reader& operator=(const Reader&) = default;
   Reader& operator=(Reader&&) noexcept = default;
 
-  // Invalidates this Reader.
+  // Resets this Reader to the empty state.
   void reset() noexcept { ptr_.reset(); }
 
   // Swaps this Reader with another.
   void swap(Reader& other) noexcept { ptr_.swap(other.ptr_); }
 
-  // Determines if this Reader has an implementation associated with it.
+  // Returns true iff this Reader is non-empty.
   explicit operator bool() const noexcept { return !!ptr_; }
-  bool valid() const noexcept { return !!*this; }
+
+  // Asserts that this Reader is non-empty.
   void assert_valid() const;
 
-  // Obtains a pointer directly to the implementation.
-  ReaderImpl* implementation() const { return ptr_.get(); }
+  // Returns this Reader's I/O stream implementation.
+  const Pointer& implementation() const { return ptr_; }
+  Pointer& implementation() { return ptr_; }
 
-  // Returns the io::Options that were assigned to the Reader implementation at
-  // the time it was created.
-  Options options() const {
-    if (ptr_) return ptr_->options();
-    return default_options();
+  // Returns the io::Options for this Reader.
+  const Options& options() const {
+    assert_valid();
+    return ptr_->options();
   }
 
-  // Returns the event::Manager to use for this Reader's async I/O.
+  // Returns the event::Manager for this Reader.
   event::Manager manager() const {
-    if (ptr_) return ptr_->options().manager();
-    return event::system_manager();
+    assert_valid();
+    return ptr_->options().manager();
   }
 
-  // Returns the preferred block size for I/O involving this Reader.
+  // Returns the preferred block size for this Reader's I/O.
   std::size_t block_size() const {
-    if (!ptr_) return 1;
+    assert_valid();
     std::size_t blksz;
     bool has_blksz;
     std::tie(has_blksz, blksz) = ptr_->options().block_size();
@@ -296,7 +313,7 @@ class Reader {
   // }}}
 
  private:
-  std::shared_ptr<ReaderImpl> ptr_;
+  Pointer ptr_;
 };
 
 inline void swap(Reader& a, Reader& b) noexcept { a.swap(b); }

@@ -149,49 +149,66 @@ class WriterImpl {
   Options o_;
 };
 
-// Writer implements the user-facing portion of the Writer API.
+// Writer is a handle to a writable I/O stream.
+//
+// A Writer typically points at an I/O stream, and therefore exists in the
+// "non-empty" state.  In contrast, a Writer without a stream exists in the
+// "empty" state.  A default-constructed Writer is empty, as is a Writer on
+// which the |reset()| method is called.
+//
+// I/O streams are reference counted.  When the last Writer referencing a
+// stream is destroyed or becomes empty, then the stream is closed.
+//
+// Most method calls are illegal to call on an empty Writer.
+//
 class Writer {
  public:
-  // Writers can be directly constructed from an implementation.
-  Writer(std::shared_ptr<WriterImpl> ptr) noexcept : ptr_(std::move(ptr)) {}
+  using Pointer = std::shared_ptr<WriterImpl>;
 
-  // Writers are default constructible, copyable, and moveable.
+  // Writer is constructible from an implementation.
+  Writer(Pointer ptr) noexcept : ptr_(std::move(ptr)) {}
+
+  // Writer is default constructible, starting in the empty state.
   Writer() noexcept : ptr_() {}
+
+  // Writer is copyable and moveable.
+  // - These copy or move the handle, not the stream itself.
   Writer(const Writer&) = default;
   Writer(Writer&&) noexcept = default;
   Writer& operator=(const Writer&) = default;
   Writer& operator=(Writer&&) noexcept = default;
 
-  // Invalidates this Writer.
+  // Resets this Writer to the empty state.
   void reset() noexcept { ptr_.reset(); }
 
   // Swaps this Writer with another.
   void swap(Writer& other) noexcept { ptr_.swap(other.ptr_); }
 
-  // Determines if this Writer has an implementation associated with it.
+  // Returns true iff this Writer is non-empty.
   explicit operator bool() const noexcept { return !!ptr_; }
-  bool valid() const noexcept { return !!*this; }
+
+  // Asserts that this Writer is non-empty.
   void assert_valid() const;
 
-  // Obtains a pointer directly to the implementation.
-  WriterImpl* implementation() const { return ptr_.get(); }
+  // Returns this Writer's I/O stream implementation.
+  const Pointer& implementation() const { return ptr_; }
+  Pointer& implementation() { return ptr_; }
 
-  // Returns the io::Options that were assigned to the Writer implementation at
-  // the time it was created.
-  Options options() const {
-    if (ptr_) return ptr_->options();
-    return default_options();
+  // Returns the io::Options for this Writer.
+  const Options& options() const {
+    assert_valid();
+    return ptr_->options();
   }
 
-  // Returns the event::Manager to use for this Writer's async I/O.
+  // Returns the event::Manager for this Writer.
   event::Manager manager() const {
-    if (ptr_) return ptr_->options().manager();
-    return event::system_manager();
+    assert_valid();
+    return ptr_->options().manager();
   }
 
-  // Returns the preferred block size for I/O involving this Writer.
+  // Returns the preferred block size for this Writer's I/O.
   std::size_t block_size() const {
-    if (!ptr_) return 1;
+    assert_valid();
     std::size_t blksz;
     bool has_blksz;
     std::tie(has_blksz, blksz) = ptr_->options().block_size();
@@ -251,7 +268,7 @@ class Writer {
   // }}}
 
  private:
-  std::shared_ptr<WriterImpl> ptr_;
+  Pointer ptr_;
 };
 
 inline void swap(Writer& a, Writer& b) noexcept { a.swap(b); }
