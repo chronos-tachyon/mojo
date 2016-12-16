@@ -3,8 +3,9 @@
 
 #include "gtest/gtest.h"
 
-#include <fcntl.h>
 #include <unistd.h>
+
+#include <vector>
 
 #include "base/debug.h"
 #include "base/fd.h"
@@ -24,7 +25,9 @@ static int my_gettimeofday(struct timeval* tv, struct timezone* unused) {
 namespace {
 class LogCapture : public base::LogTarget {
  public:
-  explicit LogCapture(std::string* out) noexcept : out_(out) {}
+  explicit LogCapture(std::string* out) noexcept : out_(out) {
+    CHECK_OK(base::make_pipe(&pipe_));
+  }
 
   bool want(const char* file, unsigned int line,
             base::level_t level) const noexcept override {
@@ -32,13 +35,27 @@ class LogCapture : public base::LogTarget {
   }
 
   void log(const base::LogEntry& entry) noexcept override {
-    entry.append_to(*out_);
+    auto str = entry.as_string();
+    auto pair = pipe_.write->acquire_fd();
+    ::write(pair.first, str.data(), str.size());
+  }
+
+  void finish() {
+    CHECK_OK(pipe_.write->close());
+    auto pair = pipe_.read->acquire_fd();
+    std::vector<char> buf(4096);
+    while (true) {
+      ssize_t n = ::read(pair.first, buf.data(), buf.size());
+      if (n <= 0) break;
+      out_->append(buf.data(), n);
+    }
   }
 
   std::string* string() noexcept { return out_; }
 
  private:
-  std::string* out_;
+  std::string* const out_;
+  base::Pipe pipe_;
 };
 }  // anonymous namespace
 
@@ -50,6 +67,7 @@ static void setup(LogCapture* target) {
 
 static void teardown(LogCapture* target) {
   base::log_target_remove(target);
+  target->finish();
   re2::RE2::GlobalReplace(target->string(), ":[0-9]+\\] ", ":XX] ");
 }
 
@@ -62,7 +80,7 @@ TEST(Logger, EndToEnd) {
   LOG(INFO) << "hello";
   LOG(WARN) << "uh oh";
   LOG(ERROR) << "oh no!";
-  EXPECT_THROW(LOG(FATAL) << "aaaah!", base::fatal_error);
+  EXPECT_DEATH(LOG(FATAL) << "aaaah!", "aaaah!");
 
   teardown(&target);
 
@@ -114,15 +132,15 @@ TEST(Check, Wrong) {
 
   const int p = 1, q = 2, r = 3, s = 5;
 
-  EXPECT_THROW(CHECK(false) << ": error #0", base::fatal_error);
-  EXPECT_THROW(CHECK_NE(p, p) << ": error #1", base::fatal_error);
-  EXPECT_THROW(CHECK_LE(s, r) << ": error #2", base::fatal_error);
-  EXPECT_THROW(CHECK_LT(s, r) << ": error #3", base::fatal_error);
-  EXPECT_THROW(CHECK_LT(r, r) << ": error #4", base::fatal_error);
-  EXPECT_THROW(CHECK_EQ(p, r) << ": error #5", base::fatal_error);
-  EXPECT_THROW(CHECK_GT(r, r) << ": error #6", base::fatal_error);
-  EXPECT_THROW(CHECK_GT(q, r) << ": error #7", base::fatal_error);
-  EXPECT_THROW(CHECK_GE(q, r) << ": error #8", base::fatal_error);
+  EXPECT_DEATH(CHECK(false) << ": error #0", "error #0");
+  EXPECT_DEATH(CHECK_NE(p, p) << ": error #1", "error #1");
+  EXPECT_DEATH(CHECK_LE(s, r) << ": error #2", "error #2");
+  EXPECT_DEATH(CHECK_LT(s, r) << ": error #3", "error #3");
+  EXPECT_DEATH(CHECK_LT(r, r) << ": error #4", "error #4");
+  EXPECT_DEATH(CHECK_EQ(p, r) << ": error #5", "error #5");
+  EXPECT_DEATH(CHECK_GT(r, r) << ": error #6", "error #6");
+  EXPECT_DEATH(CHECK_GT(q, r) << ": error #7", "error #7");
+  EXPECT_DEATH(CHECK_GE(q, r) << ": error #8", "error #8");
 
   teardown(&target);
 
@@ -162,3 +180,6 @@ TEST(Check, WrongNDEBUG) {
   EXPECT_NO_THROW(CHECK_GT(q, r) << ": error #7");
   EXPECT_NO_THROW(CHECK_GE(q, r) << ": error #8");
 }
+
+static void init() __attribute__((constructor));
+static void init() { base::log_single_threaded(); }

@@ -58,6 +58,8 @@ static std::once_flag g_once;
 static level_t g_stderr = LOG_LEVEL_INFO;
 static GetTidFunc g_gtid = nullptr;
 static GetTimeOfDayFunc g_gtod = nullptr;
+static bool g_single_threaded = false;
+static bool g_thread_started = false;
 
 static base::LogTarget* make_stderr();
 
@@ -79,6 +81,15 @@ static Queue& queue_get(std::unique_lock<std::mutex>& lock) {
   return q;
 }
 
+static void process(base::Lock& lock, LogEntry entry) {
+  auto& v = vec_get(lock);
+  for (LogTarget* target : v) {
+    if (target->want(entry.file, entry.line, entry.level)) {
+      target->log(entry);
+    }
+  }
+}
+
 static void thread_body() {
   auto lock0 = base::acquire_lock(g_queue_mu);
   auto& q = queue_get(lock0);
@@ -87,11 +98,7 @@ static void thread_body() {
     auto entry = std::move(q.front());
     q.pop();
     auto lock1 = base::acquire_lock(g_mu);
-    auto& v = vec_get(lock1);
-    for (const auto& target : v) {
-      if (target->want(entry.file, entry.line, entry.level))
-        target->log(entry);
-    }
+    process(lock1, std::move(entry));
     if (q.empty()) g_queue_empty_cv.notify_all();
   }
 }
@@ -117,11 +124,17 @@ static bool want(const char* file, unsigned int line, unsigned int n,
 }
 
 static void log(LogEntry entry) {
-  std::call_once(g_once, [] { std::thread(thread_body).detach(); });
-  auto lock = base::acquire_lock(g_queue_mu);
-  auto& q = queue_get(lock);
-  q.push(std::move(entry));
-  g_queue_put_cv.notify_one();
+  auto lock = base::acquire_lock(g_mu);
+  if (g_single_threaded) {
+    process(lock, std::move(entry));
+  } else {
+    g_thread_started = true;
+    std::call_once(g_once, [] { std::thread(thread_body).detach(); });
+    auto lock = base::acquire_lock(g_queue_mu);
+    auto& q = queue_get(lock);
+    q.push(std::move(entry));
+    g_queue_put_cv.notify_one();
+  }
 }
 
 namespace {
@@ -220,8 +233,9 @@ Logger::~Logger() noexcept(false) {
   if (ss_) {
     log(LogEntry(file_, line_, level_, ss_->str()));
     if (level_ >= LOG_LEVEL_DFATAL) {
+      log_flush();
       if (level_ >= LOG_LEVEL_FATAL || debug()) {
-        throw fatal_error();
+        std::terminate();
       }
     }
   }
@@ -235,6 +249,13 @@ void log_set_gettid(GetTidFunc func) {
 void log_set_gettimeofday(GetTimeOfDayFunc func) {
   auto lock = acquire_lock(g_mu);
   g_gtod = func;
+}
+
+void log_single_threaded() {
+  auto lock = acquire_lock(g_mu);
+  if (g_thread_started)
+    throw std::logic_error("logging thread is already running!");
+  g_single_threaded = true;
 }
 
 void log_flush() {
@@ -273,11 +294,6 @@ void log_exception(const char* file, unsigned int line, std::exception_ptr e) {
   Logger logger(file, line, 1, LOG_LEVEL_ERROR);
   try {
     std::rethrow_exception(e);
-  } catch (const fatal_error& e) {
-    logger << "caught base::fatal_error";
-  } catch (const null_pointer& e) {
-    logger << "caught base::null_pointer\n"
-           << "\t" << e.what();
   } catch (const std::system_error& e) {
     const auto& ecode = e.code();
     logger << "caught std::system_error\n"

@@ -28,31 +28,6 @@ using level_t = signed char;
 #define LOG_LEVEL(name) LOG_LEVEL_##name
 #define VLOG_LEVEL(vlevel) (-(vlevel))
 
-// Exception class thrown by LOG(FATAL) errors.
-class fatal_error {
- public:
-  fatal_error() noexcept = default;
-  fatal_error(const fatal_error&) noexcept = default;
-  fatal_error(fatal_error&&) noexcept = default;
-  fatal_error& operator=(const fatal_error&) noexcept = default;
-  fatal_error& operator=(fatal_error&&) noexcept = default;
-};
-
-// Exception class thrown by CHECK_NOTNULL errors.
-class null_pointer {
- public:
-  null_pointer() noexcept : what_("") {}
-  null_pointer(const char* what) noexcept : what_(what ? what : "") {}
-  null_pointer(const null_pointer&) noexcept = default;
-  null_pointer(null_pointer&&) noexcept = default;
-  null_pointer& operator=(const null_pointer&) noexcept = default;
-  null_pointer& operator=(null_pointer&&) noexcept = default;
-  const char* what() const noexcept { return what_; }
-
- private:
-  const char* what_;
-};
-
 // LogEntry represents a single log message.
 struct LogEntry {
   struct timeval time;
@@ -128,6 +103,9 @@ class LogTarget {
       noexcept = 0;
   virtual void log(const LogEntry& entry) noexcept = 0;
 };
+
+// Force logs to be written synchronously or asynchronously.
+void log_single_threaded();
 
 // Wait for all pending logs to reach disk.
 void log_flush();
@@ -216,39 +194,27 @@ template <typename T>
 T* log_check_notnull(const char* file, unsigned int line, const char* expr,
                      T* ptr) {
   if (ptr) return ptr;
-  try {
-    Logger logger(file, line, 1, LOG_LEVEL_FATAL);
-    logger << "CHECK FAILED: " << expr << " != nullptr";
-  } catch (const fatal_error& e) {
-    // pass
-  }
-  throw null_pointer(expr);
+  Logger logger(file, line, 1, LOG_LEVEL_FATAL);
+  logger << "CHECK FAILED: " << expr << " != nullptr";
+  std::terminate();
 }
 
 template <typename T>
 std::unique_ptr<T> log_check_notnull(const char* file, unsigned int line,
                                      const char* expr, std::unique_ptr<T> ptr) {
   if (ptr) return std::move(ptr);
-  try {
-    Logger logger(file, line, 1, LOG_LEVEL_FATAL);
-    logger << "CHECK FAILED: " << expr << " != nullptr";
-  } catch (const fatal_error& e) {
-    // pass
-  }
-  throw null_pointer(expr);
+  Logger logger(file, line, 1, LOG_LEVEL_FATAL);
+  logger << "CHECK FAILED: " << expr << " != nullptr";
+  std::terminate();
 }
 
 template <typename T>
 std::shared_ptr<T> log_check_notnull(const char* file, unsigned int line,
                                      const char* expr, std::shared_ptr<T> ptr) {
   if (ptr) return std::move(ptr);
-  try {
-    Logger logger(file, line, 1, LOG_LEVEL_FATAL);
-    logger << "CHECK FAILED: " << expr << " != nullptr";
-  } catch (const fatal_error& e) {
-    // pass
-  }
-  throw null_pointer(expr);
+  Logger logger(file, line, 1, LOG_LEVEL_FATAL);
+  logger << "CHECK FAILED: " << expr << " != nullptr";
+  std::terminate();
 }
 
 Logger force_eval(bool);
