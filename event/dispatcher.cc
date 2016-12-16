@@ -22,10 +22,6 @@
 
 namespace {
 
-static std::size_t num_cores() {
-  return 4;  // TODO: actually look up the core count
-}
-
 struct Work {
   event::Task* task;
   event::CallbackPtr callback;

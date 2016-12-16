@@ -351,6 +351,8 @@ DispatcherPtr system_dispatcher();
 //
 void set_system_dispatcher(DispatcherPtr ptr);
 
+std::size_t num_cores();
+
 }  // namespace event
 
 #endif  // EVENT_DISPATCHER_H
