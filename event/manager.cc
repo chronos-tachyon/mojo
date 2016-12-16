@@ -27,10 +27,17 @@ using TeeMap = std::unordered_map<int, TeeVec>;
 using CallbackVec = std::vector<event::CallbackPtr>;
 using base::token_t;
 
+namespace event {
+
 namespace {
 
 static bool donate_ok(const base::Result& r) {
   return r || r.code() == base::Result::Code::NOT_IMPLEMENTED;
+}
+
+template <typename T, typename... Args>
+static std::unique_ptr<T> make_unique(Args&&... args) {
+  return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
 }
 
 template <typename T>
@@ -119,6 +126,7 @@ static void signal_thread_body() {
   base::Result r;
   while (true) {
     r = base::read_exactly(*g_sig_pipe_rfd, &si, sizeof(si), "signal pipe");
+    if (r.code() == base::Result::Code::END_OF_FILE) break;
     r.expect_ok(__FILE__, __LINE__);
     if (!r) continue;
 
@@ -147,13 +155,16 @@ static base::Result sig_tee_add(base::FD fd, int signo) {
   auto lock = base::acquire_lock(g_sig_mu);
 
   // Bootstrap the signal handler thread, if needed.
-  if (!g_sig_tee) {
+  if (!g_sig_pipe_rfd) {
     base::Pipe pipe;
     base::Result r = base::make_pipe(&pipe);
     if (!r) return r;
-    g_sig_pipe_rfd = new base::FD;
-    *g_sig_pipe_rfd = std::move(pipe.read);
+    r = base::set_blocking(pipe.read, true);
+    if (!r) return r;
+    g_sig_pipe_rfd = new base::FD(std::move(pipe.read));
     g_sig_pipe_wfd = pipe.write->release_fd();
+  }
+  if (!g_sig_tee) {
     g_sig_tee = new TeeMap;
     std::thread(signal_thread_body).detach();
   }
@@ -233,10 +244,74 @@ static void sig_tee_remove_all(base::FD fd) noexcept {
 }
 
 // }}}
+// Record definition {{{
+
+enum class SourceType : uint8_t {
+  undefined = 0,
+  fd = 1,
+  signal = 2,
+  timer = 3,
+  generic = 4,
+};
+
+struct Record {
+  mutable std::mutex mu;       // protects outstanding
+  std::condition_variable cv;  // notified when outstanding == 0
+  unsigned int outstanding;    // # of pending event handler invocations
+  token_t t;
+  HandlerPtr h;
+  Set set;
+
+  Record(token_t t, Set set, HandlerPtr h) noexcept : outstanding(0),
+                                                      t(t),
+                                                      h(std::move(h)),
+                                                      set(set) {}
+};
+
+using RecordPtr = std::unique_ptr<Record>;
+
+struct Source {
+  std::vector<RecordPtr> records;
+  base::FD fd;
+  int signo;
+  token_t gt;
+  SourceType type;
+
+  Source() noexcept : signo(0), type(SourceType::undefined) {}
+};
+
+// }}}
+// HandlerCallback implementation {{{
+
+class HandlerCallback : public Callback {
+ public:
+  HandlerCallback(Record* rec, Data data) noexcept : rec_(rec),
+                                                     data_(std::move(data)) {
+    auto lock = base::acquire_lock(rec_->mu);
+    ++rec_->outstanding;
+  }
+
+  base::Result run() override {
+    auto cleanup = base::cleanup([this] {
+      auto lock = base::acquire_lock(rec_->mu);
+      --rec_->outstanding;
+      if (!rec_->outstanding) rec_->cv.notify_all();
+    });
+    return rec_->h->run(data_);
+  }
+
+ private:
+  Record* rec_;
+  Data data_;
+};
+
+static CallbackPtr handler_callback(Record* rec, Data data) {
+  return CallbackPtr(new HandlerCallback(rec, std::move(data)));
+}
+
+// }}}
 
 }  // anonymous namespace
-
-namespace event {
 
 class ManagerImpl {
  public:
@@ -281,45 +356,16 @@ class ManagerImpl {
   base::Result shutdown() noexcept;
 
  private:
-  enum class Type : uint8_t {
-    undefined = 0,
-    fd = 1,
-    signal = 2,
-    timer = 3,
-    generic = 4,
-  };
-
-  struct Record {
-    HandlerPtr h;
-    token_t t;
-    Set set;
-
-    Record(token_t t, Set set, HandlerPtr h) noexcept : h(std::move(h)),
-                                                        t(t),
-                                                        set(set) {}
-    Record() noexcept : Record(token_t(), Set(), nullptr) {}
-  };
-
-  struct Source {
-    std::vector<Record> records;
-    base::FD fd;
-    int signo;
-    token_t gt;
-    Type type;
-
-    Source() noexcept : signo(0), type(Type::undefined) {}
-    explicit operator bool() const noexcept { return !records.empty(); }
-  };
-
   base::Result donate_as_poller(base::Lock lock, bool forever);
   base::Result donate_as_mixed(base::Lock lock, bool forever);
   base::Result donate_as_worker(base::Lock lock, bool forever);
 
   void handle_event(CallbackVec* cbvec, token_t gt, Set set);
   void handle_pipe_event(CallbackVec* cbvec);
-  void handle_timer_event(CallbackVec* cbvec, const ManagerImpl::Source& src);
-  void handle_fd_event(CallbackVec* cbvec, const ManagerImpl::Source& src,
-                       Set set);
+  void handle_timer_event(CallbackVec* cbvec, const Source& src);
+  void handle_fd_event(CallbackVec* cbvec, const Source& src, Set set);
+
+  void wait_on_record(base::Lock lock, Record* rec) const;
 
   mutable std::mutex mu_;
   std::condition_variable curr_cv_;
@@ -330,10 +376,10 @@ class ManagerImpl {
   PollerPtr p_;
   DispatcherPtr d_;
   base::Pipe pipe_;
-  std::size_t min_;
-  std::size_t max_;
-  std::size_t current_;
-  bool running_;
+  std::size_t min_;      // min # of poller threads
+  std::size_t max_;      // max # of poller threads
+  std::size_t current_;  // current # of poller threads
+  bool running_;         // true iff not shut down
 };
 
 ManagerImpl::ManagerImpl(PollerPtr p, DispatcherPtr d, base::Pipe pipe,
@@ -395,14 +441,14 @@ base::Result ManagerImpl::fd_add(base::token_t* out, base::FD fd, Set set,
   auto cleanup1 = base::cleanup([this, t] { ltmap_.erase(t); });
 
   auto& src = sources_[gt];
-  if (src) {
-    fd = nullptr;
-  } else {
-    src.type = Type::fd;
+  if (src.records.empty()) {
+    src.type = SourceType::fd;
     src.fd = std::move(fd);
     src.gt = gt;
+  } else {
+    fd = nullptr;
   }
-  src.records.emplace_back(t, set, std::move(handler));
+  src.records.push_back(make_unique<Record>(t, set, std::move(handler)));
   auto cleanup2 = base::cleanup([this, gt, &src] {
     src.records.pop_back();
     if (src.records.empty()) sources_.erase(gt);
@@ -414,7 +460,7 @@ base::Result ManagerImpl::fd_add(base::token_t* out, base::FD fd, Set set,
   } else {
     Set before;
     for (const auto& rec : src.records) {
-      if (rec.t != t) before |= rec.set;
+      if (rec->t != t) before |= rec->set;
     }
     Set after = before | set;
     if (before != after) {
@@ -440,12 +486,12 @@ base::Result ManagerImpl::fd_get(Set* out, base::token_t t) {
 
   auto srcit = sources_.find(gt);
   if (srcit == sources_.end()) return base::Result::not_found();
-  if (srcit->second.type != Type::fd) return base::Result::wrong_type();
+  if (srcit->second.type != SourceType::fd) return base::Result::wrong_type();
   const auto& src = srcit->second;
 
   for (const auto& rec : src.records) {
-    if (rec.t == t) {
-      *out = rec.set;
+    if (rec->t == t) {
+      *out = rec->set;
       return base::Result();
     }
   }
@@ -462,18 +508,18 @@ base::Result ManagerImpl::fd_modify(base::token_t t, Set set) {
 
   auto srcit = sources_.find(gt);
   if (srcit == sources_.end()) return base::Result::not_found();
-  if (srcit->second.type != Type::fd) return base::Result::wrong_type();
+  if (srcit->second.type != SourceType::fd) return base::Result::wrong_type();
   auto& src = srcit->second;
 
   Record* myrec = nullptr;
   Set before, after;
-  for (auto& rec : src.records) {
-    before |= rec.set;
-    if (rec.t == t) {
+  for (const auto& rec : src.records) {
+    before |= rec->set;
+    if (rec->t == t) {
+      myrec = rec.get();
       after |= set;
-      myrec = &rec;
     } else {
-      after |= rec.set;
+      after |= rec->set;
     }
   }
   if (myrec == nullptr) return base::Result::not_found();
@@ -497,36 +543,39 @@ base::Result ManagerImpl::fd_remove(base::token_t t) {
 
   auto srcit = sources_.find(gt);
   if (srcit == sources_.end()) return base::Result::not_found();
-  if (srcit->second.type != Type::fd) return base::Result::wrong_type();
+  if (srcit->second.type != SourceType::fd) return base::Result::wrong_type();
   auto& src = srcit->second;
 
+  RecordPtr myrec;
   Set before, after;
   auto rit = src.records.begin();
   while (rit != src.records.end()) {
     auto& rec = *rit;
-    before |= rec.set;
-    if (rec.t == t) {
+    before |= rec->set;
+    if (rec->t == t) {
+      myrec = std::move(rec);
       src.records.erase(rit);
     } else {
-      after |= rec.set;
+      after |= rec->set;
       ++rit;
     }
   }
+  if (!myrec) return base::Result::not_found();
 
   base::Result r;
   ltmap_.erase(t);
   if (src.records.empty()) {
     auto fd = std::move(src.fd);
-    const int fdnum = ([&fd] {
-      auto pair = fd->acquire_fd();
-      return pair.first;
-    })();
+    auto pair = fd->acquire_fd();
     sources_.erase(gt);
-    fdmap_.erase(fdnum);
+    fdmap_.erase(pair.first);
     r = p->remove(fd);
   } else if (before != after) {
     r = p->modify(src.fd, gt, after);
   }
+
+  wait_on_record(std::move(lock), myrec.get());
+
   return r;
 }
 
@@ -560,12 +609,12 @@ base::Result ManagerImpl::signal_add(base::token_t* out, int signo,
   auto cleanup1 = base::cleanup([this, t] { ltmap_.erase(t); });
 
   auto& src = sources_[gt];
-  if (!src) {
-    src.type = Type::signal;
+  if (src.records.empty()) {
+    src.type = SourceType::signal;
     src.signo = signo;
     src.gt = gt;
   }
-  src.records.emplace_back(t, Set(), std::move(handler));
+  src.records.push_back(make_unique<Record>(t, Set(), std::move(handler)));
   auto cleanup2 = base::cleanup([this, gt, &src] {
     src.records.pop_back();
     if (src.records.empty()) sources_.erase(gt);
@@ -594,18 +643,22 @@ base::Result ManagerImpl::signal_remove(base::token_t t) {
 
   auto srcit = sources_.find(gt);
   if (srcit == sources_.end()) return base::Result::not_found();
-  if (srcit->second.type != Type::signal) return base::Result::wrong_type();
+  if (srcit->second.type != SourceType::signal)
+    return base::Result::wrong_type();
   auto& src = srcit->second;
 
+  RecordPtr myrec;
   auto rit = src.records.begin();
   while (rit != src.records.end()) {
     auto& rec = *rit;
-    if (rec.t == t) {
+    if (rec->t == t) {
+      myrec = std::move(rec);
       src.records.erase(rit);
-    } else {
-      ++rit;
+      break;
     }
+    ++rit;
   }
+  if (!myrec) return base::Result::not_found();
 
   base::Result r;
   ltmap_.erase(t);
@@ -615,6 +668,9 @@ base::Result ManagerImpl::signal_remove(base::token_t t) {
     sources_.erase(gt);
     r = sig_tee_remove(pipe_.write, signo);
   }
+
+  wait_on_record(std::move(lock), myrec.get());
+
   return r;
 }
 
@@ -634,10 +690,10 @@ base::Result ManagerImpl::timer_add(base::token_t* out, HandlerPtr handler) {
 
   token_t t = base::next_token();
   auto& src = sources_[t];
-  src.type = Type::timer;
+  src.type = SourceType::timer;
   src.fd = std::move(fd);
   src.gt = t;
-  src.records.emplace_back(t, Set(), std::move(handler));
+  src.records.push_back(make_unique<Record>(t, Set(), std::move(handler)));
   auto cleanup = base::cleanup([this, t] { sources_.erase(t); });
 
   base::Result r = p->add(src.fd, t, Set::readable_bit());
@@ -653,7 +709,8 @@ base::Result ManagerImpl::timer_arm(base::token_t t, base::Duration delay,
   auto lock = base::acquire_lock(mu_);
   auto srcit = sources_.find(t);
   if (srcit == sources_.end()) return base::Result::not_found();
-  if (srcit->second.type != Type::timer) return base::Result::wrong_type();
+  if (srcit->second.type != SourceType::timer)
+    return base::Result::wrong_type();
   auto& src = srcit->second;
 
   int flags = 0;
@@ -678,15 +735,24 @@ base::Result ManagerImpl::timer_arm(base::token_t t, base::Duration delay,
 base::Result ManagerImpl::timer_remove(base::token_t t) {
   auto lock = base::acquire_lock(mu_);
   if (!running_) return base::Result();
+  PollerPtr p = DCHECK_NOTNULL(p_);
 
   auto srcit = sources_.find(t);
   if (srcit == sources_.end()) return base::Result::not_found();
-  if (srcit->second.type != Type::timer) return base::Result::wrong_type();
+  if (srcit->second.type != SourceType::timer)
+    return base::Result::wrong_type();
   auto& src = srcit->second;
 
-  base::Result r = src.fd->close();
+  CHECK_EQ(src.records.size(), 1U);
+  RecordPtr myrec(std::move(src.records.back()));
+  base::FD fd(std::move(src.fd));
   sources_.erase(srcit);
-  return r;
+  base::Result r0 = p->remove(fd);
+  base::Result r1 = fd->close();
+
+  wait_on_record(std::move(lock), myrec.get());
+
+  return r0.and_then(r1);
 }
 
 base::Result ManagerImpl::generic_add(base::token_t* out, HandlerPtr handler) {
@@ -696,9 +762,9 @@ base::Result ManagerImpl::generic_add(base::token_t* out, HandlerPtr handler) {
   auto lock = base::acquire_lock(mu_);
   token_t t = base::next_token();
   auto& src = sources_[t];
-  src.type = Type::generic;
+  src.type = SourceType::generic;
   src.gt = t;
-  src.records.emplace_back(t, Set(), std::move(handler));
+  src.records.push_back(make_unique<Record>(t, Set(), std::move(handler)));
   *out = t;
   return base::Result();
 }
@@ -711,7 +777,8 @@ base::Result ManagerImpl::generic_fire(base::token_t t, int value) {
   auto lock = base::acquire_lock(mu_);
   auto srcit = sources_.find(t);
   if (srcit == sources_.end()) return base::Result::not_found();
-  if (srcit->second.type != Type::generic) return base::Result::wrong_type();
+  if (srcit->second.type != SourceType::generic)
+    return base::Result::wrong_type();
   return base::write_exactly(pipe_.write, &data, sizeof(data), "event pipe");
 }
 
@@ -721,9 +788,16 @@ base::Result ManagerImpl::generic_remove(base::token_t t) {
 
   auto srcit = sources_.find(t);
   if (srcit == sources_.end()) return base::Result::not_found();
-  if (srcit->second.type != Type::generic) return base::Result::wrong_type();
+  if (srcit->second.type != SourceType::generic)
+    return base::Result::wrong_type();
+  auto& src = srcit->second;
 
+  CHECK_EQ(src.records.size(), 1U);
+  RecordPtr myrec(std::move(src.records.back()));
   sources_.erase(srcit);
+
+  wait_on_record(std::move(lock), myrec.get());
+
   return base::Result();
 }
 
@@ -852,11 +926,11 @@ void ManagerImpl::handle_event(CallbackVec* cbvec, base::token_t gt, Set set) {
   const auto& src = srcit->second;
 
   switch (src.type) {
-    case Type::fd:
+    case SourceType::fd:
       handle_fd_event(cbvec, src, set);
       break;
 
-    case Type::timer:
+    case SourceType::timer:
       handle_timer_event(cbvec, src);
       break;
 
@@ -884,31 +958,30 @@ void ManagerImpl::handle_pipe_event(CallbackVec* cbvec) {
 
       auto srcit = sources_.find(gt);
       if (srcit == sources_.end()) continue;
-      if (srcit->second.type != Type::signal) continue;
+      if (srcit->second.type != SourceType::signal) continue;
       if (srcit->second.signo != data.signal_number) continue;
       const auto& src = srcit->second;
 
       for (const auto& rec : src.records) {
-        data.token = rec.t;
-        cbvec->push_back(handler_callback(rec.h, data));
+        data.token = rec->t;
+        cbvec->push_back(handler_callback(rec.get(), data));
       }
     }
 
     if (data.events.event()) {
       auto srcit = sources_.find(data.token);
       if (srcit == sources_.end()) continue;
-      if (srcit->second.type != Type::generic) continue;
+      if (srcit->second.type != SourceType::generic) continue;
       const auto& src = srcit->second;
 
       for (const auto& rec : src.records) {
-        cbvec->push_back(handler_callback(rec.h, data));
+        cbvec->push_back(handler_callback(rec.get(), data));
       }
     }
   }
 }
 
-void ManagerImpl::handle_timer_event(CallbackVec* cbvec,
-                                     const ManagerImpl::Source& src) {
+void ManagerImpl::handle_timer_event(CallbackVec* cbvec, const Source& src) {
   static constexpr uint64_t INTMAX = std::numeric_limits<int>::max();
   DCHECK_NOTNULL(cbvec);
 
@@ -919,15 +992,15 @@ void ManagerImpl::handle_timer_event(CallbackVec* cbvec,
 
   for (const auto& rec : src.records) {
     Data data;
-    data.token = rec.t;
+    data.token = rec->t;
     data.int_value = x;
     data.events = Set::timer_bit();
-    cbvec->push_back(handler_callback(rec.h, data));
+    cbvec->push_back(handler_callback(rec.get(), data));
   }
 }
 
-void ManagerImpl::handle_fd_event(CallbackVec* cbvec,
-                                  const ManagerImpl::Source& src, Set set) {
+void ManagerImpl::handle_fd_event(CallbackVec* cbvec, const Source& src,
+                                  Set set) {
   DCHECK_NOTNULL(cbvec);
 
   const int fdnum = ([&src] {
@@ -935,13 +1008,27 @@ void ManagerImpl::handle_fd_event(CallbackVec* cbvec,
     return pair.first;
   })();
   for (const auto& rec : src.records) {
-    auto realset = rec.set & set;
-    if (realset) {
+    auto intersection = rec->set & set;
+    if (intersection) {
       Data data;
-      data.token = rec.t;
+      data.token = rec->t;
       data.fd = fdnum;
-      data.events = realset;
-      cbvec->push_back(handler_callback(rec.h, data));
+      data.events = intersection;
+      cbvec->push_back(handler_callback(rec.get(), data));
+    }
+  }
+}
+
+void ManagerImpl::wait_on_record(base::Lock lock, Record* rec) const {
+  using MS = std::chrono::milliseconds;
+  DispatcherPtr d = DCHECK_NOTNULL(d_);
+  lock.unlock();
+  auto lock1 = base::acquire_lock(rec->mu);
+  while (rec->outstanding) {
+    if (rec->cv.wait_for(lock1, MS(1)) == std::cv_status::timeout) {
+      lock1.unlock();
+      d->donate(false);
+      lock1.lock();
     }
   }
 }

@@ -160,11 +160,12 @@ static void TestManagerImplementation_Timers(event::Manager m) {
 
   auto timer_closure = [&task, &mu, &counter, &predicate](event::Data data) {
     LOG(INFO) << "hello from timer handler, int_value = " << data.int_value;
+    if (task.is_finished()) return base::Result();
     auto lock = base::acquire_lock(mu);
     counter += data.int_value;
     bool done = predicate(counter);
     lock.unlock();
-    if (done && !task.is_finished()) {
+    if (done) {
       task.finish_ok();
       LOG(INFO) << "task: finished";
     }
@@ -172,23 +173,28 @@ static void TestManagerImplementation_Timers(event::Manager m) {
   };
 
   EXPECT_TRUE(task.start());
-  auto lock = base::acquire_lock(mu);
 
-  LOG(INFO) << "registering timer";
+  LOG(INFO) << "creating timer";
   event::Timer t;
   EXPECT_OK(m.timer(&t, event::handler(timer_closure)));
 
   LOG(INFO) << "setting timer to period 1ms";
   EXPECT_OK(t.set_periodic(base::milliseconds(1)));
 
-  lock.unlock();
   LOG(INFO) << "task: waiting for finish";
   event::wait(m, &task);
-  LOG(INFO) << "task: got finish";
-  lock.lock();
+  auto lock = base::acquire_lock(mu);
+  LOG(INFO) << "got: counter = " << counter;
   EXPECT_GE(counter, 5);
   EXPECT_OK(task.result());
-  EXPECT_OK(t.cancel());
+  lock.unlock();
+
+  LOG(INFO) << "before release";
+  EXPECT_OK(t.release());
+  LOG(INFO) << "after release";
+
+  LOG(INFO) << "creating timer";
+  EXPECT_OK(m.timer(&t, event::handler(timer_closure)));
 
   task.reset();
   EXPECT_TRUE(task.start());
@@ -198,13 +204,13 @@ static void TestManagerImplementation_Timers(event::Manager m) {
   LOG(INFO) << "setting timer to oneshot now+5ms";
   EXPECT_OK(t.set_at(base::monotonic_now() + base::milliseconds(5)));
 
-  lock.unlock();
   LOG(INFO) << "task: waiting for finish";
   event::wait(m, &task);
-  LOG(INFO) << "got: counter = " << counter;
   lock.lock();
+  LOG(INFO) << "got: counter = " << counter;
+  EXPECT_EQ(counter, 1);
   EXPECT_OK(task.result());
-  EXPECT_GE(counter, 1);
+  lock.unlock();
 
   LOG(INFO) << "before release";
   EXPECT_OK(t.release());
@@ -219,7 +225,7 @@ static void TestManagerImplementation_Events(event::Manager m) {
 
   auto handler = [&task](event::Data data) {
     LOG(INFO) << "hello from generic event handler, int_value = "
-            << data.int_value;
+              << data.int_value;
     if (data.int_value == 42)
       task.finish_ok();
     else
@@ -266,36 +272,43 @@ static void TestManagerImplementation_TaskTimeouts(event::Manager m) {
   unsigned int a = 1;
   unsigned int b = 1;
   event::Task task;
-  event::Timer t;
 
-  auto closure = [&mu, &a, &b, &task, &t](event::Data data) {
-    if (task.is_running()) {
-      auto lock = base::acquire_lock(mu);
-      auto i = data.int_value;
-      while (i > 0) {
-        unsigned int c = a + b;
-        LOG(INFO) << "a(" << a << ") + b(" << b << ") = c(" << c << ")";
-        a = b;
-        b = c;
-        --i;
-      }
-    } else {
-      EXPECT_EQ(event::Task::State::expiring, task.state());
-      EXPECT_OK(t.release());
-      EXPECT_TRUE(task.finish_cancel());
+  auto closure = [&mu, &a, &b, &task](event::Data data) {
+    if (!task.is_running()) {
+      LOG(INFO) << "boop from the grave!";
+      task.finish_cancel();
+      return base::Result();
+    }
+    LOG(INFO) << "boop!";
+    auto lock = base::acquire_lock(mu);
+    auto i = data.int_value;
+    while (i > 0) {
+      unsigned int c = a + b;
+      LOG(INFO) << "a(" << a << ") + b(" << b << ") = c(" << c << ")";
+      a = b;
+      b = c;
+      --i;
     }
     return base::Result();
   };
 
+  EXPECT_TRUE(task.start());
+
+  LOG(INFO) << "creating timer at interval 1ms";
+  event::Timer t;
+  EXPECT_OK(m.timer(&t, event::handler(closure)));
+  EXPECT_OK(t.set_periodic(base::milliseconds(1)));
+
+  LOG(INFO) << "setting deadline";
   base::MonotonicTime at = base::monotonic_now() + base::milliseconds(3);
   EXPECT_OK(m.set_deadline(&task, at));
 
-  EXPECT_TRUE(task.start());
-  EXPECT_TRUE(task.is_running());
-  EXPECT_OK(m.timer(&t, event::handler(closure)));
-  EXPECT_OK(t.set_periodic(base::milliseconds(1)));
+  LOG(INFO) << "waiting for task";
   event::wait(m, &task);
   EXPECT_DEADLINE_EXCEEDED(task.result());
+
+  LOG(INFO) << "releasing timer";
+  EXPECT_OK(t.release());
 }
 
 static void TestManagerImplementation(event::Manager m, std::string name) {
@@ -312,6 +325,7 @@ static void TestManagerImplementation(event::Manager m, std::string name) {
   LOG(INFO) << "[" << name << ":shutdown]";
   EXPECT_OK(m.shutdown());
   LOG(INFO) << "OK";
+  base::log_flush();
 }
 
 TEST(Manager, DefaultDefault) {
@@ -348,4 +362,4 @@ TEST(Manager, AsyncInline) {
 }
 
 static void init() __attribute__((constructor));
-static void init() { base::log_stderr_set_level(VLOG_LEVEL(0)); }
+static void init() { base::log_stderr_set_level(VLOG_LEVEL(6)); }

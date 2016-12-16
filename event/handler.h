@@ -86,13 +86,6 @@ HandlerPtr handler(Function&& f, Args&&... args) {
       std::forward_as_tuple<Args...>(std::forward<Args>(args)...));
 }
 
-// Converts a <Handler, Data> pair into a Callback for future execution.
-//
-// - If the std::shared_ptr reference count on the Handler goes to 0 before the
-//   Callback executes, then the Callback will politely do nothing.
-//
-CallbackPtr handler_callback(std::weak_ptr<Handler> h, Data d);
-
 }  // namespace event
 
 #endif  // EVENT_HANDLER_H

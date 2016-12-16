@@ -17,31 +17,10 @@ class FunctionHandler : public Handler {
 };
 
 base::Result FunctionHandler::run(Data data) const { return f_(data); }
-
-class HandlerCallback : public Callback {
- public:
-  HandlerCallback(std::weak_ptr<Handler> handler, Data data)
-      : handler_(std::move(handler)), data_(std::move(data)) {}
-  base::Result run() override;
-
- private:
-  std::weak_ptr<Handler> handler_;
-  Data data_;
-};
-
-base::Result HandlerCallback::run() {
-  auto strong = handler_.lock();
-  if (strong) return strong->run(data_);
-  return base::Result::cancelled();
-}
 }  // namespace internal
 
 HandlerPtr handler(std::function<base::Result(Data)> f) {
   return std::make_shared<internal::FunctionHandler>(std::move(f));
-}
-
-CallbackPtr handler_callback(std::weak_ptr<Handler> h, Data d) {
-  return CallbackPtr(new internal::HandlerCallback(std::move(h), std::move(d)));
 }
 
 }  // namespace event
