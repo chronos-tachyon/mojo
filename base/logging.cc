@@ -124,14 +124,15 @@ static bool want(const char* file, unsigned int line, unsigned int n,
 }
 
 static void log(LogEntry entry) {
-  auto lock = base::acquire_lock(g_mu);
+  auto lock0 = base::acquire_lock(g_mu);
   if (g_single_threaded) {
-    process(lock, std::move(entry));
+    process(lock0, std::move(entry));
   } else {
     g_thread_started = true;
+    lock0.unlock();
     std::call_once(g_once, [] { std::thread(thread_body).detach(); });
-    auto lock = base::acquire_lock(g_queue_mu);
-    auto& q = queue_get(lock);
+    auto lock1 = base::acquire_lock(g_queue_mu);
+    auto& q = queue_get(lock1);
     q.push(std::move(entry));
     g_queue_put_cv.notify_one();
   }
