@@ -9,6 +9,7 @@
 #include <exception>
 #include <memory>
 #include <mutex>
+#include <ostream>
 #include <vector>
 
 #include "base/result.h"
@@ -186,6 +187,8 @@ class Task {
   std::vector<CallbackPtr> callbacks_;
   std::vector<Task*> subtasks_;
 };
+
+std::ostream& operator<<(std::ostream& o, Task::State state);
 
 }  // namespace event
 

@@ -9,15 +9,6 @@
 #include "base/result_testing.h"
 #include "event/task.h"
 
-static const char* const kStateNames[] = {
-    "ready",     "running",   "expiring",  "cancelling", "unknown#4",
-    "unknown#5", "unknown#6", "unknown#7", "done",
-};
-
-static std::ostream& operator<<(std::ostream& os, event::Task::State s) {
-  return (os << kStateNames[static_cast<uint8_t>(s)]);
-}
-
 TEST(Task, Inline) {
   int n = 0;
   auto inc = [&n] {

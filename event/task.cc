@@ -8,7 +8,16 @@
 #include "base/logging.h"
 #include "event/dispatcher.h"
 
+static const char* const kTaskStateNames[] = {
+    "ready",      "running",    "expiring",   "cancelling", "reserved#4",
+    "reserved#5", "reserved#6", "reserved#7", "done",
+};
+
 namespace event {
+
+static void assert_finished(Task::State state) {
+  CHECK_GE(state, Task::State::done) << ": event::Task is not yet finished!";
+}
 
 base::Result Task::incomplete_result() {
   return base::Result::internal(
@@ -22,25 +31,13 @@ base::Result Task::exception_result() {
 
 void Task::reset() {
   auto lock = base::acquire_lock(mu_);
-  switch (state_) {
-    case State::ready:
-    case State::done:
-      result_ = incomplete_result();
-      eptr_ = nullptr;
-      callbacks_.clear();
-      subtasks_.clear();
-      state_ = State::ready;
-      break;
-
-    default:
-      LOG(DFATAL) << "BUG: event::Task: reset() on running task!";
-  }
-}
-
-static void assert_finished(Task::State state) {
-  if (state < Task::State::done) {
-    LOG(DFATAL) << "BUG: event::Task is not yet finished!";
-  }
+  if (state_ == State::ready) return;
+  assert_finished(state_);
+  result_ = incomplete_result();
+  eptr_ = nullptr;
+  callbacks_.clear();
+  subtasks_.clear();
+  state_ = State::ready;
 }
 
 base::Result Task::result() const {
@@ -113,18 +110,14 @@ bool Task::start() {
     state_ = State::running;
     return true;
   }
-  if (state_ < State::done) {
-    LOG(DFATAL) << "BUG: event::Task: start() on running task!";
-  }
+  CHECK_GE(state_, State::done) << ": event::Task: start() on running task!";
   return false;
 }
 
 bool Task::finish(base::Result result) {
   auto lock = base::acquire_lock(mu_);
-  if (state_ < State::running) {
-    LOG(DFATAL) << "BUG: event::Task: finish() without start()!";
-    state_ = State::running;
-  }
+  CHECK_GE(state_, State::running)
+      << ": event::Task: finish() without start()!";
   if (state_ < State::done) {
     finish_impl(std::move(lock), std::move(result), nullptr);
     return true;
@@ -134,10 +127,8 @@ bool Task::finish(base::Result result) {
 
 bool Task::finish_cancel() {
   auto lock = base::acquire_lock(mu_);
-  if (state_ < State::running) {
-    LOG(DFATAL) << "BUG: event::Task: finish_cancel() without start()";
-    state_ = State::running;
-  }
+  CHECK_GE(state_, State::running)
+      << ": event::Task: finish_cancel() without start()";
   if (state_ < State::done) {
     auto r = base::Result::cancelled();
     if (state_ == State::expiring) r = base::Result::deadline_exceeded();
@@ -149,10 +140,8 @@ bool Task::finish_cancel() {
 
 bool Task::finish_exception(std::exception_ptr eptr) {
   auto lock = base::acquire_lock(mu_);
-  if (state_ < State::running) {
-    LOG(DFATAL) << "BUG: event::Task: finish_exception() without start()";
-    state_ = State::running;
-  }
+  CHECK_GE(state_, State::running)
+      << ": event::Task: finish_exception() without start()";
   if (state_ < State::done) {
     finish_impl(std::move(lock), exception_result(), eptr);
     return true;
@@ -177,6 +166,10 @@ void Task::finish_impl(std::unique_lock<std::mutex> lock, base::Result result,
   for (auto& cb : callbacks) {
     d->dispatch(nullptr, std::move(cb));
   }
+}
+
+std::ostream& operator<<(std::ostream& o, Task::State state) {
+  return (o << kTaskStateNames[static_cast<uint8_t>(state)]);
 }
 
 }  // namespace event
