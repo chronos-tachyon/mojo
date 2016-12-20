@@ -33,6 +33,7 @@ cc_library(
     "token.h",
     "util.h",
   ],
+  linkopts = ["-pthread"],
   visibility = ["//visibility:public"],
 )
 

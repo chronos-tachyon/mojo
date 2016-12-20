@@ -25,6 +25,7 @@ cc_library(
     "task.h",
   ],
   deps = ["//base"],
+  linkopts = ["-pthread"],
   visibility = ["//visibility:public"],
 )
 
