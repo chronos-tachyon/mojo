@@ -8,6 +8,8 @@
 #include "base/logging.h"
 #include "event/dispatcher.h"
 
+using RC = base::Result::Code;
+
 static const char* const kTaskStateNames[] = {
     "ready",      "running",    "expiring",   "cancelling", "reserved#4",
     "reserved#5", "reserved#6", "reserved#7", "done",
@@ -35,7 +37,8 @@ void Task::reset() {
   assert_finished(state_);
   result_ = incomplete_result();
   eptr_ = nullptr;
-  callbacks_.clear();
+  on_finish_.clear();
+  on_cancel_.clear();
   subtasks_.clear();
   state_ = State::ready;
 }
@@ -68,13 +71,31 @@ void Task::add_subtask(Task* subtask) {
   }
 }
 
+void Task::on_cancelled(CallbackPtr cb) {
+  auto lock = base::acquire_lock(mu_);
+  bool run;
+  if (state_ >= State::done) {
+    RC rc = result_.code();
+    run = (rc == RC::DEADLINE_EXCEEDED || rc == RC::CANCELLED);
+  } else if (state_ > State::running) {
+    run = true;
+  } else {
+    run = false;
+    on_cancel_.push_back(std::move(cb));
+  }
+  if (run) {
+    lock.unlock();
+    system_inline_dispatcher()->dispatch(nullptr, std::move(cb));
+  }
+}
+
 void Task::on_finished(CallbackPtr cb) {
   auto lock = base::acquire_lock(mu_);
   if (state_ >= State::done) {
     lock.unlock();
     system_inline_dispatcher()->dispatch(nullptr, std::move(cb));
   } else {
-    callbacks_.push_back(std::move(cb));
+    on_finish_.push_back(std::move(cb));
   }
 }
 
@@ -88,15 +109,21 @@ bool Task::cancel() noexcept {
 
 bool Task::cancel_impl(State next, base::Result result) noexcept {
   auto lock = base::acquire_lock(mu_);
-  std::vector<Task*> subtasks;
   if (state_ == State::ready) {
     finish_impl(std::move(lock), std::move(result), nullptr);
     return true;
   }
   if (state_ >= State::running && state_ < next) {
     state_ = next;
-    subtasks = std::move(subtasks_);
+    auto on_cancel = std::move(on_cancel_);
+    auto subtasks = std::move(subtasks_);
     lock.unlock();
+
+    auto d = system_inline_dispatcher();
+    for (auto& cb : on_cancel) {
+      d->dispatch(nullptr, std::move(cb));
+    }
+
     for (Task* subtask : subtasks) {
       subtask->cancel();
     }
@@ -154,16 +181,24 @@ void Task::finish_impl(std::unique_lock<std::mutex> lock, base::Result result,
   state_ = State::done;
   result_ = std::move(result);
   eptr_ = eptr;
+  auto on_finish = std::move(on_finish_);
+  auto on_cancel = std::move(on_cancel_);
   auto subtasks = std::move(subtasks_);
-  auto callbacks = std::move(callbacks_);
   lock.unlock();
+
+  auto d = system_inline_dispatcher();
+  RC rc = result_.code();
+  if (rc == RC::DEADLINE_EXCEEDED || rc == RC::CANCELLED) {
+    for (auto& cb : on_cancel) {
+      d->dispatch(nullptr, std::move(cb));
+    }
+  }
 
   for (Task* subtask : subtasks) {
     subtask->cancel();
   }
 
-  auto d = system_inline_dispatcher();
-  for (auto& cb : callbacks) {
+  for (auto& cb : on_finish) {
     d->dispatch(nullptr, std::move(cb));
   }
 }

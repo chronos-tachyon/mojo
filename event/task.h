@@ -126,6 +126,11 @@ class Task {
   // - Will cancel |task| immediately if this Task is already |done|.
   void add_subtask(Task* task);
 
+  // Registers a Callback to execute when the Task reaches |expiring|,
+  // |cancelling|, or |done| with result DEADLINE_EXCEEDED or CANCELLED.
+  // - Will execute |callback| immediately if this Task is already cancelled
+  void on_cancelled(CallbackPtr callback);
+
   // Registers a Callback to execute when the Task reaches the |done| state.
   // - Will execute |callback| immediately if this Task is already |done|.
   void on_finished(CallbackPtr callback);
@@ -184,7 +189,8 @@ class Task {
   State state_;
   base::Result result_;
   std::exception_ptr eptr_;
-  std::vector<CallbackPtr> callbacks_;
+  std::vector<CallbackPtr> on_finish_;
+  std::vector<CallbackPtr> on_cancel_;
   std::vector<Task*> subtasks_;
 };
 
