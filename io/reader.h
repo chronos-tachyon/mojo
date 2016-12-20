@@ -157,7 +157,7 @@ class ReaderImpl {
 // I/O streams are reference counted.  When the last Reader referencing a
 // stream is destroyed or becomes empty, then the stream is closed.
 //
-// Most method calls are illegal to call on an empty Reader.
+// Most methods are illegal to call on an empty Reader.
 //
 class Reader {
  private:
@@ -197,19 +197,19 @@ class Reader {
   const Pointer& implementation() const { return ptr_; }
   Pointer& implementation() { return ptr_; }
 
-  // Returns the io::Options for this Reader.
+  // Returns the io::Options for the I/O stream.
   const Options& options() const {
     assert_valid();
     return ptr_->options();
   }
 
-  // Returns the event::Manager for this Reader.
+  // Returns the event::Manager for the I/O stream.
   event::Manager manager() const {
     assert_valid();
     return ptr_->options().manager();
   }
 
-  // Returns the preferred block size for this Reader's I/O.
+  // Returns the preferred block size for the I/O stream.
   std::size_t block_size() const {
     assert_valid();
     std::size_t blksz;
