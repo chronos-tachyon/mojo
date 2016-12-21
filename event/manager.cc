@@ -31,6 +31,11 @@ namespace event {
 
 namespace {
 
+static int get_fdnum(const base::FD& fd) {
+  auto pair = fd->acquire_fd();
+  return pair.first;
+}
+
 static bool donate_ok(const base::Result& r) {
   return r || r.code() == base::Result::Code::NOT_IMPLEMENTED;
 }
@@ -412,10 +417,7 @@ base::Result ManagerImpl::fd_add(base::token_t* out, base::FD fd, Set set,
   DCHECK_NOTNULL(handler);
 
   *out = token_t();
-  const int fdnum = ([&fd] {
-    auto pair = fd->acquire_fd();
-    return pair.first;
-  })();
+  const int fdnum = get_fdnum(fd);
   if (fdnum == -1)
     return base::Result::invalid_argument("file descriptor is closed");
 
@@ -566,9 +568,9 @@ base::Result ManagerImpl::fd_remove(base::token_t t) {
   ltmap_.erase(t);
   if (src.records.empty()) {
     auto fd = std::move(src.fd);
-    auto pair = fd->acquire_fd();
+    const int fdnum = get_fdnum(fd);
     sources_.erase(gt);
-    fdmap_.erase(pair.first);
+    fdmap_.erase(fdnum);
     r = p->remove(fd);
   } else if (before != after) {
     r = p->modify(src.fd, gt, after);
@@ -1374,16 +1376,15 @@ void wait_n(std::vector<Manager> mv, std::vector<Task*> tv, std::size_t n) {
     // Async? Just donate.
     // Threaded? Don't be so eager to join the fray.
     if (all_threaded) {
-      using MS = std::chrono::milliseconds;
-      VLOG(5) << "event::wait_n: blocking for 1ms";
-      data->cv.wait_for(lock, MS(1));
-      if (data->done >= n) return;
+      VLOG(5) << "event::wait_n: blocking";
+      data->cv.wait(lock);
+    } else {
+      lock.unlock();
+      for (const Manager& m : mv) {
+        CHECK_OK(m.donate(false));
+      }
+      lock.lock();
     }
-    lock.unlock();
-    for (const Manager& m : mv) {
-      CHECK_OK(m.donate(false));
-    }
-    lock.lock();
   }
 }
 
