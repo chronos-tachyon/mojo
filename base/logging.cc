@@ -11,10 +11,10 @@
 #include <condition_variable>
 #include <cstdint>
 #include <cstring>
+#include <deque>
 #include <map>
 #include <memory>
 #include <mutex>
-#include <queue>
 #include <thread>
 #include <vector>
 
@@ -25,7 +25,7 @@
 
 namespace base {
 
-static pid_t gettid() { return syscall(SYS_gettid); }
+static pid_t my_gettid() { return syscall(SYS_gettid); }
 
 namespace {
 struct Key {
@@ -48,42 +48,50 @@ static bool operator<(Key a, Key b) noexcept {
 
 using Map = std::map<Key, std::size_t>;
 using Vec = std::vector<LogTarget*>;
-using Queue = std::queue<LogEntry>;
+using Queue = std::deque<LogEntry>;
 
+enum ThreadState {
+  kThreadNotStarted = 0,
+  kThreadStarted = 1,
+  kSingleThreaded = 2,
+};
+
+static std::once_flag g_once;
 static std::mutex g_mu;
 static std::mutex g_queue_mu;
-static std::condition_variable g_queue_put_cv;
-static std::condition_variable g_queue_empty_cv;
-static std::once_flag g_once;
-static level_t g_stderr = LOG_LEVEL_INFO;
-static GetTidFunc g_gtid = nullptr;
-static GetTimeOfDayFunc g_gtod = nullptr;
-static bool g_single_threaded = false;
-static bool g_thread_started = false;
+static level_t g_stderr = 0;                      // protected by g_mu
+static GetTidFunc g_gtid = nullptr;               // protected by g_mu
+static GetTimeOfDayFunc g_gtod = nullptr;         // protected by g_mu
+static Map* g_map = nullptr;                      // protected by g_mu
+static Vec* g_vec = nullptr;                      // protected by g_mu
+static int g_thread_state = kThreadNotStarted;    // protected by g_queue_mu
+static std::condition_variable g_queue_put_cv;    // protected by g_queue_mu
+static std::condition_variable g_queue_empty_cv;  // protected by g_queue_mu
+static Queue* g_queue = nullptr;                  // protected by g_queue_mu
 
 static base::LogTarget* make_stderr();
 
-static Map& map_get(std::unique_lock<std::mutex>& lock) {
-  static Map& m = *new Map;
-  return m;
-}
+static void thread_body();
 
-static Vec& vec_get(std::unique_lock<std::mutex>& lock) {
-  static Vec& v = *new Vec;
-  if (v.empty()) {
-    v.push_back(make_stderr());
+static void init() {
+  auto queue_lock = acquire_lock(g_queue_mu);
+  auto main_lock = acquire_lock(g_mu);
+
+  if (!g_stderr) g_stderr = LOG_LEVEL_INFO;
+  if (!g_gtid) g_gtid = my_gettid;
+  if (!g_gtod) g_gtod = gettimeofday;
+  if (!g_map) g_map = new Map;
+  if (!g_vec) g_vec = new Vec{make_stderr()};
+  if (!g_queue) g_queue = new Queue;
+
+  if (g_thread_state == kThreadNotStarted) {
+    g_thread_state = kThreadStarted;
+    std::thread(thread_body).detach();
   }
-  return v;
 }
 
-static Queue& queue_get(std::unique_lock<std::mutex>& lock) {
-  static Queue& q = *new Queue;
-  return q;
-}
-
-static void process(base::Lock& lock, LogEntry entry) {
-  auto& v = vec_get(lock);
-  for (LogTarget* target : v) {
+static void process(base::Lock& main_lock, LogEntry entry) {
+  for (LogTarget* target : *g_vec) {
     if (target->want(entry.file, entry.line, entry.level)) {
       target->log(entry);
     }
@@ -91,58 +99,56 @@ static void process(base::Lock& lock, LogEntry entry) {
 }
 
 static void thread_body() {
-  auto lock0 = base::acquire_lock(g_queue_mu);
-  auto& q = queue_get(lock0);
+  auto queue_lock = base::acquire_lock(g_queue_mu);
   while (true) {
-    while (q.empty()) g_queue_put_cv.wait(lock0);
-    auto entry = std::move(q.front());
-    q.pop();
-    auto lock1 = base::acquire_lock(g_mu);
-    process(lock1, std::move(entry));
-    if (q.empty()) g_queue_empty_cv.notify_all();
+    if (g_queue->empty()) {
+      g_queue_empty_cv.notify_all();
+      while (g_queue->empty()) g_queue_put_cv.wait(queue_lock);
+    }
+    auto entry = std::move(g_queue->front());
+    g_queue->pop_front();
+    auto main_lock = base::acquire_lock(g_mu);
+    process(main_lock, std::move(entry));
   }
 }
 
 static bool want(const char* file, unsigned int line, unsigned int n,
                  level_t level) {
+  std::call_once(g_once, [] { init(); });
   if (level >= LOG_LEVEL_DFATAL) return true;
-  auto lock = base::acquire_lock(g_mu);
+  auto main_lock = base::acquire_lock(g_mu);
   if (n > 1) {
-    auto& m = map_get(lock);
     Key key(file, line);
-    auto pair = m.insert(std::make_pair(key, 0));
+    auto pair = g_map->insert(std::make_pair(key, 0));
     auto& count = pair.first->second;
     bool x = (count == 0);
     count = (count + 1) % n;
     if (!x) return false;
   }
-  auto& v = vec_get(lock);
-  for (const auto& target : v) {
+  for (const auto& target : *g_vec) {
     if (target->want(file, line, level)) return true;
   }
   return false;
 }
 
 static void log(LogEntry entry) {
-  auto lock0 = base::acquire_lock(g_mu);
-  if (g_single_threaded) {
-    process(lock0, std::move(entry));
-  } else {
-    g_thread_started = true;
-    lock0.unlock();
-    std::call_once(g_once, [] { std::thread(thread_body).detach(); });
-    auto lock1 = base::acquire_lock(g_queue_mu);
-    auto& q = queue_get(lock1);
-    q.push(std::move(entry));
-    g_queue_put_cv.notify_one();
+  std::call_once(g_once, [] { init(); });
+  auto queue_lock = base::acquire_lock(g_queue_mu);
+  if (g_thread_state == kSingleThreaded) {
+    auto main_lock = base::acquire_lock(g_mu);
+    process(main_lock, std::move(entry));
+    return;
   }
+  g_queue->push_back(std::move(entry));
+  g_queue_put_cv.notify_one();
 }
 
 namespace {
 class LogSTDERR : public LogTarget {
  public:
   LogSTDERR() noexcept = default;
-  bool want(const char* file, unsigned int line, level_t level) const noexcept override {
+  bool want(const char* file, unsigned int line, level_t level) const
+      noexcept override {
     // g_mu held by base::want()
     return level >= g_stderr;
   }
@@ -164,18 +170,11 @@ LogEntry::LogEntry(const char* file, unsigned int line, level_t level,
                                                    line(line),
                                                    level(level),
                                                    message(std::move(message)) {
-  auto lock = acquire_lock(g_mu);
+  std::call_once(g_once, [] { init(); });
+  auto main_lock = acquire_lock(g_mu);
   ::bzero(&time, sizeof(time));
-  if (g_gtod) {
-    (*g_gtod)(&time, nullptr);
-  } else {
-    ::gettimeofday(&time, nullptr);
-  }
-  if (g_gtid) {
-    tid = (*g_gtid)();
-  } else {
-    tid = gettid();
-  }
+  (*g_gtod)(&time, nullptr);
+  tid = (*g_gtid)();
 }
 
 void LogEntry::append_to(std::string& out) const {
@@ -201,7 +200,8 @@ void LogEntry::append_to(std::string& out) const {
   ::snprintf(buf.data(), buf.size(), "%c%02u%02u %02u:%02u:%02u.%06lu  ", ch,
              tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec,
              time.tv_usec);
-  concat_to(out, std::string(buf.data()), tid, ' ', file, ':', line, "] ", message, '\n');
+  concat_to(out, std::string(buf.data()), tid, ' ', file, ':', line, "] ",
+            message, '\n');
 }
 
 std::string LogEntry::as_string() const {
@@ -243,50 +243,52 @@ Logger::~Logger() noexcept(false) {
 }
 
 void log_set_gettid(GetTidFunc func) {
-  auto lock = acquire_lock(g_mu);
-  g_gtid = func;
+  auto main_lock = acquire_lock(g_mu);
+  if (func)
+    g_gtid = func;
+  else
+    g_gtid = my_gettid;
 }
 
 void log_set_gettimeofday(GetTimeOfDayFunc func) {
-  auto lock = acquire_lock(g_mu);
-  g_gtod = func;
+  auto main_lock = acquire_lock(g_mu);
+  if (func)
+    g_gtod = func;
+  else
+    g_gtod = gettimeofday;
 }
 
 void log_single_threaded() {
-  auto lock = acquire_lock(g_mu);
-  if (g_thread_started)
+  auto queue_lock = acquire_lock(g_queue_mu);
+  if (g_thread_state == kThreadStarted)
     throw std::logic_error("logging thread is already running!");
-  g_single_threaded = true;
+  g_thread_state = kSingleThreaded;
 }
 
 void log_flush() {
-  auto lock = base::acquire_lock(g_queue_mu);
-  auto& q = queue_get(lock);
-  while (!q.empty()) g_queue_empty_cv.wait(lock);
+  auto queue_lock = base::acquire_lock(g_queue_mu);
+  while (!g_queue->empty()) g_queue_empty_cv.wait(queue_lock);
 }
 
 void log_stderr_set_level(level_t level) {
-  auto lock = acquire_lock(g_mu);
+  auto main_lock = acquire_lock(g_mu);
   g_stderr = level;
 }
 
 void log_target_add(LogTarget* target) {
-  auto lock = acquire_lock(g_mu);
-  auto& v = vec_get(lock);
-  v.push_back(target);
+  auto main_lock = acquire_lock(g_mu);
+  g_vec->push_back(target);
 }
 
 void log_target_remove(LogTarget* target) {
-  auto lock0 = base::acquire_lock(g_queue_mu);
-  auto& q = queue_get(lock0);
-  while (!q.empty()) g_queue_empty_cv.wait(lock0);
-  auto lock1 = acquire_lock(g_mu);
-  auto& v = vec_get(lock1);
-  auto begin = v.begin(), it = v.end();
-  while (it != begin) {
-    --it;
+  auto queue_lock = base::acquire_lock(g_queue_mu);
+  while (!g_queue->empty()) g_queue_empty_cv.wait(queue_lock);
+  auto main_lock = acquire_lock(g_mu);
+  auto& v = *g_vec;
+  for (auto it = v.begin(), end = v.end(); it != end; ++it) {
     if (*it == target) {
       v.erase(it);
+      break;
     }
   }
 }
