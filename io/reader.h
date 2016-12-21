@@ -363,6 +363,9 @@ Reader zeroreader();
 // Returns a Reader that reads bytes from a file descriptor.
 Reader fdreader(base::FD fd, Options o = default_options());
 
+// Returns a Reader that concatenates multiple streams into one.
+Reader multireader(std::vector<Reader> readers, Options o = default_options());
+
 }  // namespace io
 
 #endif  // IO_READER_H

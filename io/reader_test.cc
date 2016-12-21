@@ -18,8 +18,8 @@
 #include "base/result_testing.h"
 #include "event/task.h"
 #include "io/reader.h"
-#include "io/writer.h"
 #include "io/util.h"
+#include "io/writer.h"
 
 // StringReader {{{
 
@@ -768,6 +768,191 @@ TEST(FDReader, WriteToSplice) {
   io::Options o;
   o.set_transfer_mode(io::TransferMode::splice);
   TestFDReader_WriteTo(std::move(mo), std::move(o));
+}
+
+// }}}
+// MultiReader {{{
+
+void TestMultiReader_LineUp(io::Options opts) {
+  std::string a = "01234567";
+  std::string b = "abcdefgh";
+  std::string c = "ABCDEFGH";
+  std::string d = "!@#$%^&*";
+
+  std::string expected;
+  expected.reserve(8 * 4);
+  expected.append(a);
+  expected.append(b);
+  expected.append(c);
+  expected.append(d);
+
+  io::Reader r = io::multireader({
+      io::stringreader(a), io::stringreader(b), io::stringreader(c),
+      io::stringreader(d),
+  });
+
+  event::Task task;
+  char buf[8];
+  std::size_t n;
+  std::string actual;
+
+  while (true) {
+    r.read(&task, buf, &n, 8, 8);
+    event::wait(r.manager(), &task);
+    actual.append(buf, n);
+    if (!task.result()) break;
+    task.reset();
+  }
+  EXPECT_EOF(task.result());
+  EXPECT_EQ(expected, actual);
+}
+
+void TestMultiReader_Half(io::Options opts) {
+  std::string a = "01234567";
+  std::string b = "abcdefgh";
+
+  std::string expected;
+  expected.reserve(8 * 2);
+  expected.append(a);
+  expected.append(b);
+
+  io::Reader r = io::multireader({
+      io::stringreader(a), io::stringreader(b),
+  });
+
+  event::Task task;
+  char buf[4];
+  std::size_t n;
+  std::string actual;
+
+  while (true) {
+    r.read(&task, buf, &n, 4, 4);
+    event::wait(r.manager(), &task);
+    actual.append(buf, n);
+    if (!task.result()) break;
+    task.reset();
+  }
+  EXPECT_EOF(task.result());
+  EXPECT_EQ(expected, actual);
+}
+
+void TestMultiReader_Double(io::Options opts) {
+  std::string a = "01234567";
+  std::string b = "abcdefgh";
+  std::string c = "ABCDEFGH";
+  std::string d = "!@#$%^&*";
+
+  std::string expected;
+  expected.reserve(8 * 4);
+  expected.append(a);
+  expected.append(b);
+  expected.append(c);
+  expected.append(d);
+
+  io::Reader r = io::multireader({
+      io::stringreader(a), io::stringreader(b), io::stringreader(c),
+      io::stringreader(d),
+  });
+
+  event::Task task;
+  char buf[16];
+  std::size_t n;
+  std::string actual;
+
+  while (true) {
+    r.read(&task, buf, &n, 16, 16);
+    event::wait(r.manager(), &task);
+    actual.append(buf, n);
+    if (!task.result()) break;
+    task.reset();
+  }
+  EXPECT_EOF(task.result());
+  EXPECT_EQ(expected, actual);
+}
+
+void TestMultiReader_OffAxis(io::Options opts) {
+  std::string a = "01234";
+  std::string b = "abcde";
+  std::string c = "ABCDE";
+  std::string d = "!@#$%";
+
+  std::string expected;
+  expected.reserve(5 * 4);
+  expected.append(a);
+  expected.append(b);
+  expected.append(c);
+  expected.append(d);
+
+  io::Reader r = io::multireader({
+      io::stringreader(a), io::stringreader(b), io::stringreader(c),
+      io::stringreader(d),
+  });
+
+  event::Task task;
+  char buf[8];
+  std::size_t n;
+  std::string actual;
+
+  while (true) {
+    r.read(&task, buf, &n, 8, 8);
+    event::wait(r.manager(), &task);
+    actual.append(buf, n);
+    if (!task.result()) break;
+    task.reset();
+  }
+  EXPECT_EOF(task.result());
+  EXPECT_EQ(expected, actual);
+}
+
+void TestMultiReader(io::Options opts, const char* what) {
+  LOG(INFO) << "[TestMultiReader_LineUp:" << what << "]";
+  TestMultiReader_LineUp(opts);
+  LOG(INFO) << "[TestMultiReader_Half:" << what << "]";
+  TestMultiReader_Half(opts);
+  LOG(INFO) << "[TestMultiReader_Double:" << what << "]";
+  TestMultiReader_Double(opts);
+  LOG(INFO) << "[TestMultiReader_OffAxis:" << what << "]";
+  TestMultiReader_OffAxis(opts);
+  LOG(INFO) << "[Done:" << what << "]";
+  base::log_flush();
+}
+
+TEST(MultiReader, AsyncInline) {
+  event::ManagerOptions mo;
+  mo.set_inline_mode();
+  event::Manager m;
+  ASSERT_OK(event::new_manager(&m, mo));
+
+  io::Options o;
+  o.set_manager(m);
+  TestMultiReader(o, "async/inline");
+  EXPECT_OK(m.shutdown());
+}
+
+TEST(MultiReader, AsyncAsync) {
+  event::ManagerOptions mo;
+  mo.set_async_mode();
+  event::Manager m;
+  ASSERT_OK(event::new_manager(&m, mo));
+
+  io::Options o;
+  o.set_manager(m);
+  TestMultiReader(o, "async/async");
+  EXPECT_OK(m.shutdown());
+}
+
+TEST(MultiReader, Threaded) {
+  event::ManagerOptions mo;
+  mo.set_threaded_mode();
+  mo.set_num_pollers(2);
+  mo.dispatcher().set_num_workers(2);
+  event::Manager m;
+  ASSERT_OK(event::new_manager(&m, mo));
+
+  io::Options o;
+  o.set_manager(m);
+  TestMultiReader(o, "threaded/threaded");
+  EXPECT_OK(m.shutdown());
 }
 
 // }}}

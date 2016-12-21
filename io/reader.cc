@@ -30,6 +30,8 @@
 #include "base/util.h"
 #include "io/writer.h"
 
+using RC = base::Result::Code;
+
 static constexpr std::size_t kSendfileMax = 4U << 20;  // 4 MiB
 static constexpr std::size_t kSpliceMax = 4U << 20;    // 4 MiB
 
@@ -774,6 +776,178 @@ finish:
   task->finish(std::move(r));
   return true;
 }
+
+class MultiReader : public ReaderImpl {
+ public:
+  struct Op {
+    event::Task* const task;
+    char* const out;
+    std::size_t* const n;
+    const std::size_t min;
+    const std::size_t max;
+    event::Task subtask;
+    std::size_t subn;
+
+    Op(event::Task* t, char* o, std::size_t* n, std::size_t mn,
+       std::size_t mx) noexcept : task(t),
+                                  out(o),
+                                  n(n),
+                                  min(mn),
+                                  max(mx),
+                                  subn(0) {}
+    bool process(MultiReader* reader);
+  };
+
+  struct CloseHelper {
+    event::Task* const task;
+    const std::size_t size;
+    const std::unique_ptr<event::Task[]> subtasks;
+    mutable std::mutex mu;
+    std::size_t pending;
+
+    CloseHelper(event::Task* t, std::size_t sz) noexcept
+        : task(t),
+          size(sz),
+          subtasks(new event::Task[size]),
+          pending(size) {
+      for (std::size_t i = 0; i < size; ++i) {
+        task->add_subtask(&subtasks[i]);
+      }
+    }
+
+    base::Result run() {
+      auto lock = base::acquire_lock(mu);
+      --pending;
+      if (pending > 0) return base::Result();
+      lock.unlock();
+      bool propagated = false;
+      for (std::size_t i = 0; i < size; ++i) {
+        if (!propagate_failure(task, &subtasks[i])) {
+          propagated = true;
+          break;
+        }
+      }
+      if (!propagated) task->finish_ok();
+      delete this;
+      return base::Result();
+    }
+  };
+
+  explicit MultiReader(std::vector<Reader> vec, Options o) noexcept
+      : ReaderImpl(std::move(o)),
+        vec_(std::move(vec)),
+        pass_(0),
+        curr_(0) {}
+
+  void read(event::Task* task, char* out, std::size_t* n, std::size_t min,
+            std::size_t max) override {
+    if (!prologue(task, out, n, min, max)) return;
+    auto lock = base::acquire_lock(mu_);
+    q_.emplace_back(new Op(task, out, n, min, max));
+    VLOG(6) << "io::MultiReader::read";
+    process(lock);
+  }
+
+  void close(event::Task* task) override {
+    std::size_t size = vec_.size();
+    auto* helper = new CloseHelper(task, size);
+    auto closure = [helper] { return helper->run(); };
+    event::Task* st = helper->subtasks.get();
+    for (std::size_t i = 0; i < size; ++i) {
+      vec_[i].close(&st[i]);
+      st[i].on_finished(event::callback(closure));
+    }
+  }
+
+  void process(base::Lock& lock) {
+    ++pass_;
+    if (pass_ > 1) return;
+    auto cleanup0 = base::cleanup([this] { --pass_; });
+
+    VLOG(4) << "io::MultiReader::process: q.size()=" << q_.size();
+    while (!q_.empty()) {
+      std::unique_ptr<Op> op = std::move(q_.front());
+      q_.pop_front();
+
+      bool complete = false;
+      while (pass_ > 0) {
+        lock.unlock();
+        auto cleanup1 = base::cleanup([&lock] { lock.lock(); });
+        complete = op->process(this);
+        cleanup1.run();
+        if (complete) break;
+        --pass_;
+      }
+      pass_ = 1;
+      if (!complete) {
+        q_.push_front(std::move(op));
+        break;
+      }
+
+      VLOG(5) << "io::MultiReader::process: consumed";
+    }
+  }
+
+ private:
+  const std::vector<Reader> vec_;
+  mutable std::mutex mu_;
+  std::deque<std::unique_ptr<Op>> q_;  // protected by mu_
+  std::size_t pass_;                   // protected by mu_
+  std::size_t curr_;                   // protected by pass_
+};
+
+bool MultiReader::Op::process(MultiReader* reader) {
+  *n += subn;
+
+  VLOG(6) << "io::MultiReader::Op::process: *n=" << *n << ", subn=" << subn;
+
+  RC code;
+  if (subtask.is_finished()) {
+    try {
+      code = subtask.result().code();
+    } catch (...) {
+      code = RC::UNKNOWN;
+    }
+  } else {
+    code = RC::OK;
+  }
+
+  if (code != RC::OK && code != RC::END_OF_FILE) {
+    propagate_result(task, &subtask);
+    return true;
+  }
+
+  if (*n >= min) {
+    task->finish_ok();
+    return true;
+  }
+
+  if (code == RC::END_OF_FILE) {
+    ++reader->curr_;
+  }
+  if (reader->curr_ >= reader->vec_.size()) {
+    task->finish(base::Result::eof());
+    return true;
+  }
+
+  char* subout = out + *n;
+  std::size_t submin = min - *n;
+  std::size_t submax = max - *n;
+  if (submin == 0 && submax > 0) submin = 1;
+
+  auto& r = reader->vec_[reader->curr_];
+  subtask.reset();
+  task->add_subtask(&subtask);
+  r.read(&subtask, subout, &subn, submin, submax);
+
+  auto closure = [reader] {
+    auto lock = base::acquire_lock(reader->mu_);
+    reader->process(lock);
+    return base::Result();
+  };
+  subtask.on_finished(event::callback(closure));
+  return false;
+}
 }  // anonymous namespace
 
 Reader reader(ReadFn rfn, CloseFn cfn) {
@@ -808,6 +982,11 @@ Reader zeroreader() { return Reader(std::make_shared<ZeroReader>()); }
 
 Reader fdreader(base::FD fd, Options o) {
   return Reader(std::make_shared<FDReader>(std::move(fd), std::move(o)));
+}
+
+Reader multireader(std::vector<Reader> readers, Options o) {
+  return Reader(
+      std::make_shared<MultiReader>(std::move(readers), std::move(o)));
 }
 
 }  // namespace io
