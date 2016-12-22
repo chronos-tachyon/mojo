@@ -5,8 +5,11 @@
 #ifndef EVENT_MANAGER_H
 #define EVENT_MANAGER_H
 
+#include <condition_variable>
 #include <functional>
 #include <memory>
+#include <mutex>
+#include <unordered_map>
 #include <vector>
 
 #include "base/clock.h"
@@ -15,6 +18,7 @@
 #include "base/result.h"
 #include "base/time.h"
 #include "base/token.h"
+#include "event/callback.h"
 #include "event/data.h"
 #include "event/dispatcher.h"
 #include "event/handler.h"
@@ -24,44 +28,145 @@
 
 namespace event {
 
-class ManagerImpl;  // forward declaration
+namespace internal {
 
-using ManagerPtr = std::shared_ptr<ManagerImpl>;
+using CallbackVec = std::vector<CallbackPtr>;
+
+enum class SourceType : uint8_t {
+  undefined = 0,
+  fd = 1,
+  signal = 2,
+  timer = 3,
+  generic = 4,
+};
+
+struct Record {
+  mutable std::mutex mu;       // protects outstanding
+  std::condition_variable cv;  // notified when disabled && outstanding == 0
+  unsigned int outstanding;    // # of pending event handler invocations
+  bool disabled;               // true iff no new handler invocations may happen
+  bool waited;                 // true iff someone called wait()
+  base::token_t gt;
+  HandlerPtr h;
+  Set set;
+
+  Record(base::token_t gt, HandlerPtr h, Set set = Set()) noexcept
+      : outstanding(0),
+        disabled(false),
+        waited(false),
+        gt(gt),
+        h(std::move(h)),
+        set(set) {}
+
+  ~Record() noexcept;
+
+  void wait(DispatcherPtr d);
+};
+
+struct Source {
+  std::vector<Record*> records;
+  base::FD fd;
+  int signo;
+  SourceType type;
+
+  Source() noexcept : signo(0), type(SourceType::undefined) {}
+};
+
+class ManagerImpl {
+ public:
+  ManagerImpl(PollerPtr p, DispatcherPtr d, base::Pipe pipe,
+              std::size_t min_pollers, std::size_t max_pollers);
+  ~ManagerImpl() noexcept;
+
+  bool is_running() const noexcept {
+    auto lock = base::acquire_lock(mu_);
+    return running_;
+  }
+
+  PollerPtr poller() const noexcept;
+  DispatcherPtr dispatcher() const noexcept;
+
+  base::Result fd_add(std::unique_ptr<Record>* out, base::FD fd, Set set,
+                      HandlerPtr handler);
+  base::Result fd_modify(Record* myrec, Set set);
+  base::Result fd_remove(Record* myrec);
+
+  base::Result signal_add(std::unique_ptr<Record>* out, int signo,
+                          HandlerPtr handler);
+  base::Result signal_remove(Record* myrec);
+
+  base::Result timer_add(std::unique_ptr<Record>* out, HandlerPtr handler);
+  base::Result timer_arm(Record* myrec, base::Duration delay,
+                         base::Duration period, bool delay_abs);
+  base::Result timer_remove(Record* myrec);
+
+  base::Result generic_add(std::unique_ptr<Record>* out, HandlerPtr handler);
+  base::Result generic_fire(Record* myrec, int value);
+  base::Result generic_remove(Record* myrec);
+
+  base::Result donate(bool forever);
+
+  base::Result shutdown() noexcept;
+
+ private:
+  base::Result donate_as_poller(base::Lock lock, bool forever);
+  base::Result donate_as_mixed(base::Lock lock, bool forever);
+  base::Result donate_as_worker(base::Lock lock, bool forever);
+
+  void handle_event(CallbackVec* cbvec, base::token_t gt, Set set);
+  void handle_pipe_event(CallbackVec* cbvec);
+  void handle_timer_event(CallbackVec* cbvec, const Source& src);
+  void handle_fd_event(CallbackVec* cbvec, const Source& src, Set set);
+
+  mutable std::mutex mu_;
+  std::condition_variable curr_cv_;
+  std::unordered_map<int, base::token_t> fdmap_;
+  std::unordered_map<int, base::token_t> sigmap_;
+  std::unordered_map<base::token_t, Source> sources_;
+  PollerPtr p_;
+  DispatcherPtr d_;
+  base::Pipe pipe_;
+  std::size_t min_;      // min # of poller threads
+  std::size_t max_;      // max # of poller threads
+  std::size_t current_;  // current # of poller threads
+  bool running_;         // true iff not shut down
+};
+
+}  // namespace internal
+
+using ManagerPtr = std::shared_ptr<internal::ManagerImpl>;
+using RecordPtr = std::unique_ptr<internal::Record>;
 
 // An event::FileDescriptor binds an event handler to a file descriptor.
 class FileDescriptor {
- private:
-  friend class Manager;
-
-  FileDescriptor(ManagerPtr ptr, base::FD fd, base::token_t t) noexcept
-      : ptr_(std::move(ptr)),
-        fd_(std::move(fd)),
-        t_(t) {}
-
  public:
-  // The default constructor produces an invalid (unbound) FileDescriptor.
-  FileDescriptor() : ptr_(), fd_(), t_() {}
+  // FileDescriptor is constructible in the non-empty state.
+  // - Normally only |Manager::fd()| calls this.
+  FileDescriptor(ManagerPtr ptr, RecordPtr rec) noexcept
+      : ptr_(std::move(ptr)),
+        rec_(std::move(rec)) {}
 
-  // FileDescriptors are move-only objects.
+  // FileDescriptor is default constructible in the empty state.
+  FileDescriptor() noexcept = default;
+
+  // FileDescriptor is moveable but not copyable.
   FileDescriptor(const FileDescriptor&) = delete;
   FileDescriptor(FileDescriptor&& x) noexcept = default;
   FileDescriptor& operator=(const FileDescriptor&) = delete;
-  FileDescriptor& operator=(FileDescriptor&&) noexcept;
+  FileDescriptor& operator=(FileDescriptor&&) noexcept = default;
 
   // The destructor unbinds the Handler from the file descriptor.
   // NOTE: this does not *close* the file descriptor.
   ~FileDescriptor() noexcept { release().ignore_ok(); }
 
-  // Swaps this FileDescriptor event with another.
+  // Swaps this FileDescriptor with another.
   void swap(FileDescriptor& x) noexcept {
-    using std::swap;
-    swap(ptr_, x.ptr_);
-    swap(fd_, x.fd_);
-    swap(t_, x.t_);
+    ptr_.swap(x.ptr_);
+    rec_.swap(x.rec_);
   }
 
   // Returns true iff this FileDescriptor event is non-empty.
-  explicit operator bool() const noexcept { return !!ptr_; }
+  explicit operator bool() const noexcept { return !!rec_; }
 
   // Asserts that this FileDescriptor event is non-empty.
   void assert_valid() const;
@@ -72,39 +177,38 @@ class FileDescriptor {
   // Replaces the set of events which the Handler is interested in.
   base::Result modify(Set set);
 
-  // Unbinds the Handler from the file descriptor.
-  // NOTE: this does NOT close the file descriptor.
+  // Unbinds the Handler from future file descriptor events.
+  base::Result disable();
+
+  // Waits for all Handler calls to complete.
+  void wait();
+
+  // Combines the effects of the |disable()| and |wait()| methods.
   base::Result release();
 
  private:
   ManagerPtr ptr_;
-  base::FD fd_;
-  base::token_t t_;
+  RecordPtr rec_;
 };
 
 inline void swap(FileDescriptor& a, FileDescriptor& b) noexcept { a.swap(b); }
 
 // An event::Signal binds an event handler to a Unix signal.
 class Signal {
- private:
-  friend class Manager;
-
-  Signal(ManagerPtr ptr, int signo, base::token_t t) noexcept
-      : ptr_(std::move(ptr)),
-        sig_(signo),
-        t_(t) {}
-
  public:
-  // The default constructor produces an invalid (unbound) Signal.
-  Signal() noexcept : Signal(nullptr, -1, base::token_t()) {}
+  // Signal is constructible in the non-empty state.
+  // - Normally only |Manager::signal()| calls this.
+  Signal(ManagerPtr ptr, RecordPtr rec) noexcept : ptr_(std::move(ptr)),
+                                                   rec_(std::move(rec)) {}
 
-  // Signals are move-only objects.
+  // Signal is default constructible in the empty state.
+  Signal() noexcept = default;
+
+  // Signal is moveable but not copyable.
   Signal(const Signal&) = delete;
-  Signal(Signal&& x) noexcept : ptr_(std::move(x.ptr_)),
-                                sig_(x.sig_),
-                                t_(x.t_) {}
+  Signal(Signal&& x) noexcept = default;
   Signal& operator=(const Signal&) = delete;
-  Signal& operator=(Signal&&) noexcept;
+  Signal& operator=(Signal&&) noexcept = default;
 
   // The destructor unbinds the Handler from the signal.
   // NOTE: If this was the last Handler bound to the signal, then the default
@@ -113,27 +217,30 @@ class Signal {
 
   // Swaps this Signal event with another.
   void swap(Signal& x) noexcept {
-    using std::swap;
-    swap(ptr_, x.ptr_);
-    swap(sig_, x.sig_);
-    swap(t_, x.t_);
+    ptr_.swap(x.ptr_);
+    rec_.swap(x.rec_);
   }
 
   // Returns true iff this Signal event is non-empty.
-  explicit operator bool() const noexcept { return !!ptr_; }
+  explicit operator bool() const noexcept { return !!rec_; }
 
   // Asserts that this Signal event is non-empty.
   void assert_valid() const;
 
-  // Unbinds the Handler from the signal.
+  // Unbinds the Handler from future signal events.
   // NOTE: If this was the last Handler bound to the signal, then the default
   //       signal behavior is restored.
+  base::Result disable();
+
+  // Waits for all Handler calls to complete.
+  void wait();
+
+  // Combines the effects of the |disable()| and |wait()| methods.
   base::Result release();
 
  private:
   ManagerPtr ptr_;
-  int sig_;
-  base::token_t t_;
+  RecordPtr rec_;
 };
 
 inline void swap(Signal& a, Signal& b) noexcept { a.swap(b); }
@@ -141,34 +248,32 @@ inline void swap(Signal& a, Signal& b) noexcept { a.swap(b); }
 // An event::Timer binds an event handler to a timer of some kind.
 // The timer is initially unarmed; use the Timer::set_* methods to arm.
 class Timer {
- private:
-  friend class Manager;
-
-  Timer(ManagerPtr ptr, base::token_t t) noexcept : ptr_(std::move(ptr)),
-                                                    t_(t) {}
-
  public:
-  // The default constructor produces an invalid (unbound) Timer.
-  Timer() noexcept : Timer(nullptr, base::token_t()) {}
+  // Timer is constructible in the non-empty state.
+  // - Normally only |Manager::timer()| calls this.
+  Timer(ManagerPtr ptr, RecordPtr rec) noexcept : ptr_(std::move(ptr)),
+                                                  rec_(std::move(rec)) {}
 
-  // Timers are move-only objects.
+  // Timer is default constructible in the empty state.
+  Timer() noexcept = default;
+
+  // Timer is moveable but not copyable.
   Timer(const Timer&) = delete;
-  Timer(Timer&& x) noexcept : ptr_(std::move(x.ptr_)), t_(x.t_) {}
+  Timer(Timer&& x) noexcept = default;
   Timer& operator=(const Timer&) = delete;
-  Timer& operator=(Timer&&) noexcept;
+  Timer& operator=(Timer&&) noexcept = default;
 
   // The destructor unbinds the Handler from the timer and frees the timer.
   ~Timer() noexcept { release().ignore_ok(); }
 
   // Swaps this Timer event with another.
   void swap(Timer& x) noexcept {
-    using std::swap;
-    swap(ptr_, x.ptr_);
-    swap(t_, x.t_);
+    ptr_.swap(x.ptr_);
+    rec_.swap(x.rec_);
   }
 
   // Returns true iff this Timer event is non-empty.
-  explicit operator bool() const noexcept { return !!ptr_; }
+  explicit operator bool() const noexcept { return !!rec_; }
 
   // Asserts that this Timer event is non-empty.
   void assert_valid() const;
@@ -202,46 +307,50 @@ class Timer {
   // events until it is armed again.
   base::Result cancel();
 
-  // Unbinds the Handler from the timer and frees the timer.
+  // Unbinds the Handler from future timer events and frees the timer.
+  base::Result disable();
+
+  // Waits for all Handler calls to complete.
+  void wait();
+
+  // Combines the effects of the |disable()| and |wait()| methods.
   base::Result release();
 
  private:
   ManagerPtr ptr_;
-  base::token_t t_;
+  RecordPtr rec_;
 };
 
 inline void swap(Timer& a, Timer& b) noexcept { a.swap(b); }
 
 // An event::Generic binds an event handler to an arbitrary event.
 class Generic {
- private:
-  friend class Manager;
-
-  Generic(ManagerPtr ptr, base::token_t t) noexcept : ptr_(std::move(ptr)),
-                                                      t_(t) {}
-
  public:
-  // The default constructor produces an invalid (unbound) Generic.
-  Generic() noexcept : Generic(nullptr, base::token_t()) {}
+  // Generic is constructible in the non-empty state.
+  // - Normally only |Manager::generic()| calls this.
+  Generic(ManagerPtr ptr, RecordPtr rec) noexcept : ptr_(std::move(ptr)),
+                                                    rec_(std::move(rec)) {}
 
-  // Generics are move-only objects.
+  // Generic is default constructible in the empty state.
+  Generic() noexcept = default;
+
+  // Generic is moveable but not copyable.
   Generic(const Generic&) = delete;
-  Generic(Generic&& x) noexcept : ptr_(std::move(x.ptr_)), t_(x.t_) {}
+  Generic(Generic&& x) noexcept = default;
   Generic& operator=(const Generic&) = delete;
-  Generic& operator=(Generic&&) noexcept;
+  Generic& operator=(Generic&&) noexcept = default;
 
   // The destructor unbinds the Handler from the event and frees any resources.
   ~Generic() noexcept { release().ignore_ok(); }
 
   // Swaps this Generic event with another.
   void swap(Generic& x) noexcept {
-    using std::swap;
-    swap(ptr_, x.ptr_);
-    swap(t_, x.t_);
+    ptr_.swap(x.ptr_);
+    rec_.swap(x.rec_);
   }
 
   // Returns true iff this Generic event is non-empty.
-  explicit operator bool() const noexcept { return !!ptr_; }
+  explicit operator bool() const noexcept { return !!rec_; }
 
   // Asserts that this Generic event is non-empty.
   void assert_valid() const;
@@ -250,12 +359,18 @@ class Generic {
   // |value| will be available as |data.int_value| in the Handler.
   base::Result fire(int value = 0) const;
 
-  // Unbinds the Handler from the event and frees any resources.
+  // Unbinds the Handler from future events and frees any resources.
+  base::Result disable();
+
+  // Waits for all Handler calls to complete.
+  void wait();
+
+  // Combines the effects of the |disable()| and |wait()| methods.
   base::Result release();
 
  private:
   ManagerPtr ptr_;
-  base::token_t t_;
+  RecordPtr rec_;
 };
 
 inline void swap(Generic& a, Generic& b) noexcept { a.swap(b); }
