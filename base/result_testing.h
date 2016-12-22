@@ -13,9 +13,10 @@ namespace testing {
 
 // Implementation {{{
 
-::testing::AssertionResult ResultCodeEQ(const char* code_text,
-                                        const char* expr_text,
-                                        Result::Code code, const Result& expr) {
+inline ::testing::AssertionResult ResultCodeEQ(const char* code_text,
+                                               const char* expr_text,
+                                               Result::Code code,
+                                               const Result& expr) {
   auto cast = [](Result::Code code) {
     return static_cast<uint16_t>(static_cast<uint8_t>(code));
   };
