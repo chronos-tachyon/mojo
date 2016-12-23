@@ -542,21 +542,25 @@ static void TestFDReader_Read(const io::Options& o) {
   std::condition_variable cv;
   std::size_t x = 0, y = 0;
 
-  std::thread t([&pipe, &mu, &cv, &x, &y] {
-    std::unique_lock<std::mutex> lock(mu);
+  std::thread t1([&pipe, &mu, &cv, &x, &y] {
+    auto lock = base::acquire_lock(mu);
 
     while (x < 1) cv.wait(lock);
+    LOG(INFO) << "T1 awoken: x = " << x;
     EXPECT_OK(base::write_exactly(pipe.write, "abcd", 4, "pipe"));
     LOG(INFO) << "wrote: abcd";
 
     while (x < 2) cv.wait(lock);
+    LOG(INFO) << "T1 awoken: x = " << x;
     EXPECT_OK(base::write_exactly(pipe.write, "efgh", 4, "pipe"));
     LOG(INFO) << "wrote: efgh";
 
     ++y;
     cv.notify_all();
+    LOG(INFO) << "woke T0: y = " << y;
 
     while (x < 3) cv.wait(lock);
+    LOG(INFO) << "T1 awoken: x = " << x;
     EXPECT_OK(base::write_exactly(pipe.write, "ijkl", 4, "pipe"));
     LOG(INFO) << "wrote: ijkl";
   });
@@ -574,41 +578,43 @@ static void TestFDReader_Read(const io::Options& o) {
   EXPECT_EQ(0U, n);
   LOG(INFO) << "read zero bytes";
 
-  std::unique_lock<std::mutex> lock(mu);
+  auto lock = base::acquire_lock(mu);
   ++x;
   cv.notify_all();
-  LOG(INFO) << "woke thread";
+  LOG(INFO) << "woke T1: x = " << x;
   lock.unlock();
 
+  LOG(INFO) << "initiating read #1";
   EXPECT_OK(r.read(buf, &n, 1, 8, o));
+  LOG(INFO) << "read #1 complete";
   EXPECT_EQ(4U, n);
   EXPECT_EQ("abcd", std::string(buf, n));
-  LOG(INFO) << "read four bytes";
 
   lock.lock();
   ++x;
   cv.notify_all();
-  LOG(INFO) << "woke thread";
+  LOG(INFO) << "woke T1: x = " << x;
   while (y < 1) cv.wait(lock);
+  LOG(INFO) << "T0 awoken: y = " << y;
   lock.unlock();
 
   event::Task task;
+  LOG(INFO) << "initiating read #2";
   r.read(&task, buf, &n, 8, 8, o);
-  LOG(INFO) << "initiated read";
 
   lock.lock();
   ++x;
   cv.notify_all();
-  LOG(INFO) << "woke thread";
+  LOG(INFO) << "woke T1: x = " << x;
   lock.unlock();
 
   event::wait(o.manager(), &task);
+  LOG(INFO) << "read #2 complete";
   EXPECT_OK(task.result());
   EXPECT_EQ(8U, n);
   EXPECT_EQ("efghijkl", std::string(buf, n));
-  LOG(INFO) << "read eight bytes";
 
-  t.join();
+  t1.join();
   base::log_flush();
 }
 
