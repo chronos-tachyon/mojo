@@ -931,19 +931,12 @@ void ManagerImpl::handle_fd_event(CallbackVec* cbvec, const Source& src,
 
 base::Result ManagerImpl::shutdown() noexcept {
   auto lock = base::acquire_lock(mu_);
-
-  if (!running_) return base::Result();
+  if (!running_) return not_running();
 
   // Mark ourselves as no longer running.
   running_ = false;
 
-  // Throw away all handlers and ancilliary data.
-  sources_.clear();
-  sigmap_.clear();
-  fdmap_.clear();
-  sig_tee_remove_all(pipe_.write);
-
-  // Wait for the pollers to notice.
+  // Wait for the poller threads to notice.
   while (current_ > 0) {
     std::size_t x = current_;
     event::Data data;
@@ -958,12 +951,35 @@ base::Result ManagerImpl::shutdown() noexcept {
   // Close the event pipe read fd.
   base::Result rr = pipe_.read->close();
 
-  // Free the dispatcher and poller.
-  d_ = nullptr;
+  // Free the poller.
   p_ = nullptr;
 
-  if (!wr) return wr;
-  return rr;
+  // Keep records (for now). Throw away all handlers and ancilliary data.
+  std::vector<Record*> records;
+  for (auto& pair : sources_) {
+    auto& v = pair.second.records;
+    records.insert(records.end(), v.begin(), v.end());
+  }
+  sources_.clear();
+  sigmap_.clear();
+  fdmap_.clear();
+  sig_tee_remove_all(pipe_.write);
+
+  // Mark all records disabled.
+  for (Record* rec : records) {
+    auto lock1 = base::acquire_lock(rec->mu);
+    rec->disabled = true;
+  }
+
+  // Wait on all records.
+  for (Record* rec : records) {
+    rec->wait(d_);
+  }
+
+  // Free the dispatcher.
+  d_ = nullptr;
+
+  return wr.and_then(rr);
 }
 
 }  // namespace internal
