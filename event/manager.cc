@@ -944,15 +944,17 @@ void ManagerImpl::schedule(CallbackVec* cbvec, Record* rec, Data data) {
 void ManagerImpl::wait_locked(base::Lock& lock) {
   DispatcherPtr d = DCHECK_NOTNULL(d_);
   VLOG(6) << outstanding_ << " callback(s) to wait on";
+  using MS = std::chrono::milliseconds;
+  MS timeout = MS(1);
   while (outstanding_ != 0) {
     if (d->type() == DispatcherType::threaded_dispatcher) {
       VLOG(6) << "Blocking on CV";
-      using MS = std::chrono::milliseconds;
-      if (call_cv_.wait_for(lock, MS(1)) == std::cv_status::timeout) {
+      if (call_cv_.wait_for(lock, timeout) == std::cv_status::timeout) {
         VLOG(6) << "Gave up waiting; donating this thread to the dispatcher";
         lock.unlock();
         d->donate(false).expect_ok(__FILE__, __LINE__);
         lock.lock();
+        timeout *= 2;
       }
     } else {
       VLOG(6) << "Donating this thread to the dispatcher";
