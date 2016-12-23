@@ -17,6 +17,13 @@ static const char* const kTaskStateNames[] = {
 
 namespace event {
 
+static void lifo_callbacks(DispatcherPtr d, std::vector<CallbackPtr> vec) {
+  while (!vec.empty()) {
+    d->dispatch(nullptr, std::move(vec.back()));
+    vec.pop_back();
+  }
+}
+
 static void assert_finished(Task::State state) {
   CHECK_GE(state, Task::State::done) << ": event::Task is not yet finished!";
 }
@@ -120,9 +127,7 @@ bool Task::cancel_impl(State next, base::Result result) noexcept {
     lock.unlock();
 
     auto d = system_inline_dispatcher();
-    for (auto& cb : on_cancel) {
-      d->dispatch(nullptr, std::move(cb));
-    }
+    lifo_callbacks(d, std::move(on_cancel));
 
     for (Task* subtask : subtasks) {
       subtask->cancel();
@@ -189,18 +194,14 @@ void Task::finish_impl(std::unique_lock<std::mutex> lock, base::Result result,
   auto d = system_inline_dispatcher();
   RC rc = result_.code();
   if (rc == RC::DEADLINE_EXCEEDED || rc == RC::CANCELLED) {
-    for (auto& cb : on_cancel) {
-      d->dispatch(nullptr, std::move(cb));
-    }
+    lifo_callbacks(d, std::move(on_cancel));
   }
 
   for (Task* subtask : subtasks) {
     subtask->cancel();
   }
 
-  for (auto& cb : on_finish) {
-    d->dispatch(nullptr, std::move(cb));
-  }
+  lifo_callbacks(d, std::move(on_finish));
 }
 
 std::ostream& operator<<(std::ostream& o, Task::State state) {
