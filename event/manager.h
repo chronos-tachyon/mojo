@@ -52,7 +52,8 @@ struct Record {
       : gt(gt),
         handler(std::move(h)),
         set(set),
-        disabled(false) {}
+        disabled(false),
+        waited(false) {}
   ~Record() noexcept;
 };
 
