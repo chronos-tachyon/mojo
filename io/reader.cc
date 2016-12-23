@@ -19,6 +19,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <condition_variable>
 #include <cstring>
 #include <deque>
 #include <exception>
@@ -493,6 +494,7 @@ class FDReader : public ReaderImpl {
 
   const base::FD fd_;
   mutable std::mutex mu_;
+  std::condition_variable cv_;                // protected by mu_
   std::deque<std::unique_ptr<Op>> q_;         // protected by mu_
   std::vector<event::FileDescriptor> purge_;  // protected by mu_
   std::size_t depth_;                         // protected by mu_
@@ -501,6 +503,7 @@ class FDReader : public ReaderImpl {
 FDReader::~FDReader() noexcept {
   VLOG(6) << "io::FDReader::~FDReader";
   auto lock = base::acquire_lock(mu_);
+  while (depth_ != 0) cv_.wait(lock);
   auto q = std::move(q_);
   lock.unlock();
   for (auto& op : q) {
@@ -565,7 +568,10 @@ base::Result FDReader::wake(event::Set set) {
   VLOG(6) << "woke io::FDReader, set=" << set;
   auto lock = base::acquire_lock(mu_);
   ++depth_;
-  auto cleanup = base::cleanup([this] { --depth_; });
+  auto cleanup = base::cleanup([this] {
+    --depth_;
+    if (depth_ == 0) cv_.notify_all();
+  });
   process(lock);
   return base::Result();
 }

@@ -5,6 +5,7 @@
 
 #include <unistd.h>
 
+#include <condition_variable>
 #include <cstring>
 #include <deque>
 #include <mutex>
@@ -352,6 +353,7 @@ class FDWriter : public WriterImpl {
 
   const base::FD fd_;
   mutable std::mutex mu_;
+  std::condition_variable cv_;
   std::deque<std::unique_ptr<Op>> q_;         // protected by mu_
   std::vector<event::FileDescriptor> purge_;  // protected by mu_
   std::size_t depth_;                         // protected by mu_
@@ -360,6 +362,7 @@ class FDWriter : public WriterImpl {
 FDWriter::~FDWriter() noexcept {
   VLOG(6) << "io::FDWriter::~FDWriter";
   auto lock = base::acquire_lock(mu_);
+  while (depth_ != 0) cv_.wait(lock);
   auto q = std::move(q_);
   lock.unlock();
   for (auto& op : q) {
@@ -415,7 +418,10 @@ base::Result FDWriter::wake(event::Set set) {
   VLOG(6) << "woke io::FDWriter, set=" << set;
   auto lock = base::acquire_lock(mu_);
   ++depth_;
-  auto cleanup = base::cleanup([this] { --depth_; });
+  auto cleanup = base::cleanup([this] {
+    --depth_;
+    if (depth_ == 0) cv_.notify_all();
+  });
   process(lock);
   return base::Result();
 }
