@@ -77,6 +77,8 @@ static void invoke(base::Lock& lock, event::IdleFunction idle) {
   }
 }
 
+static thread_local std::size_t l_depth = 0;
+
 }  // anonymous namespace
 
 namespace event {
@@ -159,6 +161,10 @@ class AsyncDispatcher : public Dispatcher {
   }
 
   base::Result donate(bool forever) override {
+    CHECK_EQ(l_depth, 0U);
+    ++l_depth;
+    auto cleanup = base::cleanup([] { --l_depth; });
+
     auto lock = base::acquire_lock(mu_);
     Work item;
     while (!work_.empty()) {
@@ -297,6 +303,10 @@ class ThreadPoolDispatcher : public Dispatcher {
   }
 
   base::Result donate(bool forever) override {
+    CHECK_EQ(l_depth, 0U);
+    ++l_depth;
+    auto cleanup0 = base::cleanup([] { --l_depth; });
+
     using MS = std::chrono::milliseconds;
     static constexpr MS kInitialTimeout = MS(125);
     static constexpr MS kMaximumTimeout = MS(8000);
@@ -306,7 +316,7 @@ class ThreadPoolDispatcher : public Dispatcher {
     auto lock = base::acquire_lock(mu_);
     ++current_;
     curr_cv_.notify_all();
-    auto cleanup = base::cleanup([this] {
+    auto cleanup1 = base::cleanup([this] {
       --current_;
       curr_cv_.notify_all();
     });
