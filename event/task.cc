@@ -3,10 +3,10 @@
 
 #include "event/task.h"
 
+#include <exception>
 #include <stdexcept>
 
 #include "base/logging.h"
-#include "event/dispatcher.h"
 
 using RC = base::Result::Code;
 
@@ -17,10 +17,28 @@ static const char* const kTaskStateNames[] = {
 
 namespace event {
 
-static void lifo_callbacks(DispatcherPtr d, std::vector<CallbackPtr> vec) {
+static void invoke(CallbackPtr cb) {
+  try {
+    cb->run();
+    cb.reset();
+  } catch(...) {
+    LOG_EXCEPTION(std::current_exception());
+  }
+}
+
+static void lifo_callbacks(std::vector<CallbackPtr> vec) {
   while (!vec.empty()) {
-    d->dispatch(nullptr, std::move(vec.back()));
+    auto cb = std::move(vec.back());
     vec.pop_back();
+    invoke(std::move(cb));
+  }
+}
+
+static void lifo_subtasks(std::vector<Task*> vec) {
+  while (!vec.empty()) {
+    Task* subtask = vec.back();
+    vec.pop_back();
+    subtask->cancel();
   }
 }
 
@@ -92,7 +110,7 @@ void Task::on_cancelled(CallbackPtr cb) {
   }
   if (run) {
     lock.unlock();
-    system_inline_dispatcher()->dispatch(nullptr, std::move(cb));
+    invoke(std::move(cb));
   }
 }
 
@@ -100,7 +118,7 @@ void Task::on_finished(CallbackPtr cb) {
   auto lock = base::acquire_lock(mu_);
   if (state_ >= State::done) {
     lock.unlock();
-    system_inline_dispatcher()->dispatch(nullptr, std::move(cb));
+    invoke(std::move(cb));
   } else {
     on_finish_.push_back(std::move(cb));
   }
@@ -126,12 +144,8 @@ bool Task::cancel_impl(State next, base::Result result) noexcept {
     auto subtasks = std::move(subtasks_);
     lock.unlock();
 
-    auto d = system_inline_dispatcher();
-    lifo_callbacks(d, std::move(on_cancel));
-
-    for (Task* subtask : subtasks) {
-      subtask->cancel();
-    }
+    lifo_callbacks(std::move(on_cancel));
+    lifo_subtasks(std::move(subtasks));
   }
   return false;
 }
@@ -191,17 +205,12 @@ void Task::finish_impl(std::unique_lock<std::mutex> lock, base::Result result,
   auto subtasks = std::move(subtasks_);
   lock.unlock();
 
-  auto d = system_inline_dispatcher();
   RC rc = result_.code();
   if (rc == RC::DEADLINE_EXCEEDED || rc == RC::CANCELLED) {
-    lifo_callbacks(d, std::move(on_cancel));
+    lifo_callbacks(std::move(on_cancel));
   }
-
-  for (Task* subtask : subtasks) {
-    subtask->cancel();
-  }
-
-  lifo_callbacks(d, std::move(on_finish));
+  lifo_subtasks(std::move(subtasks));
+  lifo_callbacks(std::move(on_finish));
 }
 
 std::ostream& operator<<(std::ostream& o, Task::State state) {
