@@ -176,10 +176,10 @@ static void TestManagerImplementation_Timers(event::Manager m) {
 
   LOG(INFO) << "creating timer";
   event::Timer t;
-  EXPECT_OK(m.timer(&t, event::handler(timer_closure)));
+  ASSERT_OK(m.timer(&t, event::handler(timer_closure)));
 
   LOG(INFO) << "setting timer to period 1ms";
-  EXPECT_OK(t.set_periodic(base::milliseconds(1)));
+  ASSERT_OK(t.set_periodic(base::milliseconds(1)));
 
   LOG(INFO) << "task: waiting for finish";
   event::wait(m, &task);
@@ -190,7 +190,7 @@ static void TestManagerImplementation_Timers(event::Manager m) {
   lock.unlock();
 
   LOG(INFO) << "before release";
-  EXPECT_OK(t.release());
+  ASSERT_OK(t.release());
   LOG(INFO) << "after release";
 
   LOG(INFO) << "creating timer";
@@ -198,11 +198,13 @@ static void TestManagerImplementation_Timers(event::Manager m) {
 
   task.reset();
   EXPECT_TRUE(task.start());
+  lock.lock();
   counter = 0;
   predicate = [](int counter) { return counter != 0; };
+  lock.unlock();
 
   LOG(INFO) << "setting timer to oneshot now+5ms";
-  EXPECT_OK(t.set_at(base::monotonic_now() + base::milliseconds(5)));
+  ASSERT_OK(t.set_at(base::monotonic_now() + base::milliseconds(5)));
 
   LOG(INFO) << "task: waiting for finish";
   event::wait(m, &task);
@@ -268,12 +270,12 @@ static void TestManagerImplementation_Events(event::Manager m) {
 }
 
 static void TestManagerImplementation_TaskTimeouts(event::Manager m) {
+  event::Task task;
   std::mutex mu;
   unsigned int a = 1;
   unsigned int b = 1;
-  event::Task task;
 
-  auto closure = [&mu, &a, &b, &task](event::Data data) {
+  auto closure = [&task, &mu, &a, &b](event::Data data) {
     if (!task.is_running()) {
       LOG(INFO) << "boop from the grave!";
       task.finish_cancel();
@@ -305,60 +307,71 @@ static void TestManagerImplementation_TaskTimeouts(event::Manager m) {
 
   LOG(INFO) << "waiting for task";
   event::wait(m, &task);
+  LOG(INFO) << "task complete";
   EXPECT_DEADLINE_EXCEEDED(task.result());
 
-  LOG(INFO) << "releasing timer";
+  LOG(INFO) << "before release";
   EXPECT_OK(t.release());
+  LOG(INFO) << "after release";
 }
 
 static void TestManagerImplementation(event::Manager m, std::string name) {
-  LOG(INFO) << "[" << name << ":TestManagerImplementation_FDs]";
+  LOG(INFO) << "[TestManagerImplementation_FDs:" << name << "]";
   TestManagerImplementation_FDs(m);
-  LOG(INFO) << "[" << name << ":TestManagerImplementation_Signals]";
+  LOG(INFO) << "[TestManagerImplementation_Signals:" << name << "]";
   TestManagerImplementation_Signals(m);
-  LOG(INFO) << "[" << name << ":TestManagerImplementation_Timers]";
+  LOG(INFO) << "[TestManagerImplementation_Timers:" << name << "]";
   TestManagerImplementation_Timers(m);
-  LOG(INFO) << "[" << name << ":TestManagerImplementation_Events]";
+  LOG(INFO) << "[TestManagerImplementation_Events:" << name << "]";
   TestManagerImplementation_Events(m);
-  LOG(INFO) << "[" << name << ":TestManagerImplementation_TaskTimeouts]";
+  LOG(INFO) << "[TestManagerImplementation_TaskTimeouts:" << name << "]";
   TestManagerImplementation_TaskTimeouts(m);
-  LOG(INFO) << "[" << name << ":shutdown]";
+  LOG(INFO) << "[shutdown:" << name << "]";
   EXPECT_OK(m.shutdown());
-  LOG(INFO) << "OK";
+  LOG(INFO) << "[OK:" << name << "]";
   base::log_flush();
 }
 
-TEST(Manager, DefaultDefault) {
+TEST(Manager, Inline) {
+  event::ManagerOptions mo;
+  mo.set_inline_mode();
+
   event::Manager m;
-  event::ManagerOptions o;
-  EXPECT_OK(event::new_manager(&m, o));
-  TestManagerImplementation(m, "default/default");
+  ASSERT_OK(event::new_manager(&m, mo));
+
+  TestManagerImplementation(m, "inline");
 }
 
-TEST(Manager, DefaultAsync) {
+TEST(Manager, Async) {
+  event::ManagerOptions mo;
+  mo.set_async_mode();
+
   event::Manager m;
-  event::ManagerOptions o;
-  o.dispatcher().set_type(event::DispatcherType::async_dispatcher);
-  EXPECT_OK(event::new_manager(&m, o));
-  TestManagerImplementation(m, "default/async");
+  ASSERT_OK(event::new_manager(&m, mo));
+
+  TestManagerImplementation(m, "async");
 }
 
-TEST(Manager, AsyncAsync) {
+TEST(Manager, SingleThreaded) {
+  event::ManagerOptions mo;
+  mo.set_minimal_threaded_mode();
+
   event::Manager m;
-  event::ManagerOptions o;
-  o.set_num_pollers(0, 1);
-  o.dispatcher().set_type(event::DispatcherType::async_dispatcher);
-  EXPECT_OK(event::new_manager(&m, o));
-  TestManagerImplementation(m, "async/async");
+  ASSERT_OK(event::new_manager(&m, mo));
+
+  TestManagerImplementation(m, "threaded");
 }
 
-TEST(Manager, AsyncInline) {
+TEST(Manager, MultiThreaded) {
+  event::ManagerOptions mo;
+  mo.set_threaded_mode();
+  mo.set_num_pollers(2);
+  mo.dispatcher().set_num_workers(2);
+
   event::Manager m;
-  event::ManagerOptions o;
-  o.set_num_pollers(0, 1);
-  o.dispatcher().set_type(event::DispatcherType::inline_dispatcher);
-  EXPECT_OK(event::new_manager(&m, o));
-  TestManagerImplementation(m, "async/inline");
+  ASSERT_OK(event::new_manager(&m, mo));
+
+  TestManagerImplementation(m, "threaded");
 }
 
 static void init() __attribute__((constructor));

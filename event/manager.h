@@ -41,26 +41,19 @@ enum class SourceType : uint8_t {
 };
 
 struct Record {
-  mutable std::mutex mu;       // protects outstanding
-  std::condition_variable cv;  // notified when disabled && outstanding == 0
-  unsigned int outstanding;    // # of pending event handler invocations
-  bool disabled;               // true iff no new handler invocations may happen
-  bool waited;                 // true iff someone called wait()
+  mutable std::mutex mu;
   base::token_t gt;
-  HandlerPtr h;
+  HandlerPtr handler;
   Set set;
+  bool disabled;  // true iff new calls forbidden
+  bool waited;    // true iff ManagerImpl::wait() was called after disabled
 
   Record(base::token_t gt, HandlerPtr h, Set set = Set()) noexcept
-      : outstanding(0),
-        disabled(false),
-        waited(false),
-        gt(gt),
-        h(std::move(h)),
-        set(set) {}
-
+      : gt(gt),
+        handler(std::move(h)),
+        set(set),
+        disabled(false) {}
   ~Record() noexcept;
-
-  void wait(DispatcherPtr d);
 };
 
 struct Source {
@@ -70,6 +63,18 @@ struct Source {
   SourceType type;
 
   Source() noexcept : signo(0), type(SourceType::undefined) {}
+};
+
+class ManagerImpl;
+
+struct HandlerCallback : public Callback {
+  ManagerImpl* ptr;
+  Record* rec;
+  Data data;
+
+  HandlerCallback(ManagerImpl* ptr, Record* rec, Data data) noexcept;
+  ~HandlerCallback() noexcept override;
+  base::Result run() override;
 };
 
 class ManagerImpl {
@@ -106,30 +111,43 @@ class ManagerImpl {
 
   base::Result donate(bool forever);
 
+  void dispose(std::unique_ptr<internal::Record> rec);
+  void wait();
+
   base::Result shutdown() noexcept;
 
  private:
+  friend struct Record;
+  friend struct HandlerCallback;
+
   base::Result donate_as_poller(base::Lock lock, bool forever);
   base::Result donate_as_mixed(base::Lock lock, bool forever);
   base::Result donate_as_worker(base::Lock lock, bool forever);
 
+  void schedule(CallbackVec* cbvec, Record* rec, Data data);
+  void wait_locked(base::Lock& lock);
   void handle_event(CallbackVec* cbvec, base::token_t gt, Set set);
   void handle_pipe_event(CallbackVec* cbvec);
-  void handle_timer_event(CallbackVec* cbvec, const Source& src);
-  void handle_fd_event(CallbackVec* cbvec, const Source& src, Set set);
+  void handle_fd_event(CallbackVec* cbvec, base::token_t gt, const Source& src,
+                       Set set);
+  void handle_timer_event(CallbackVec* cbvec, base::token_t gt,
+                          const Source& src);
 
   mutable std::mutex mu_;
-  std::condition_variable curr_cv_;
+  std::condition_variable curr_cv_;  // all changes to current_
+  std::condition_variable call_cv_;  // outstanding_ == 0
   std::unordered_map<int, base::token_t> fdmap_;
   std::unordered_map<int, base::token_t> sigmap_;
   std::unordered_map<base::token_t, Source> sources_;
+  std::vector<std::unique_ptr<internal::Record>> trash_;
   PollerPtr p_;
   DispatcherPtr d_;
   base::Pipe pipe_;
-  std::size_t min_;      // min # of poller threads
-  std::size_t max_;      // max # of poller threads
-  std::size_t current_;  // current # of poller threads
-  bool running_;         // true iff not shut down
+  std::size_t min_;          // min # of poller threads
+  std::size_t max_;          // max # of poller threads
+  std::size_t current_;      // current # of poller threads
+  std::size_t outstanding_;  // # of pending event handler invocations
+  bool running_;             // true iff not shut down
 };
 
 }  // namespace internal
@@ -155,10 +173,6 @@ class FileDescriptor {
   FileDescriptor& operator=(const FileDescriptor&) = delete;
   FileDescriptor& operator=(FileDescriptor&&) noexcept = default;
 
-  // The destructor unbinds the Handler from the file descriptor.
-  // NOTE: this does not *close* the file descriptor.
-  ~FileDescriptor() noexcept { release().ignore_ok(); }
-
   // Swaps this FileDescriptor with another.
   void swap(FileDescriptor& x) noexcept {
     ptr_.swap(x.ptr_);
@@ -181,7 +195,12 @@ class FileDescriptor {
   base::Result disable();
 
   // Waits for all Handler calls to complete.
+  // PRECONDITION: |disable()| was called
   void wait();
+
+  // Disowns any incomplete Handler calls.
+  // PRECONDITION: |disable()| was called
+  void disown();
 
   // Combines the effects of the |disable()| and |wait()| methods.
   base::Result release();
@@ -210,11 +229,6 @@ class Signal {
   Signal& operator=(const Signal&) = delete;
   Signal& operator=(Signal&&) noexcept = default;
 
-  // The destructor unbinds the Handler from the signal.
-  // NOTE: If this was the last Handler bound to the signal, then the default
-  //       signal behavior is restored.
-  ~Signal() noexcept { release().ignore_ok(); }
-
   // Swaps this Signal event with another.
   void swap(Signal& x) noexcept {
     ptr_.swap(x.ptr_);
@@ -233,7 +247,12 @@ class Signal {
   base::Result disable();
 
   // Waits for all Handler calls to complete.
+  // PRECONDITION: |disable()| was called
   void wait();
+
+  // Disowns any incomplete Handler calls.
+  // PRECONDITION: |disable()| was called
+  void disown();
 
   // Combines the effects of the |disable()| and |wait()| methods.
   base::Result release();
@@ -262,9 +281,6 @@ class Timer {
   Timer(Timer&& x) noexcept = default;
   Timer& operator=(const Timer&) = delete;
   Timer& operator=(Timer&&) noexcept = default;
-
-  // The destructor unbinds the Handler from the timer and frees the timer.
-  ~Timer() noexcept { release().ignore_ok(); }
 
   // Swaps this Timer event with another.
   void swap(Timer& x) noexcept {
@@ -311,7 +327,12 @@ class Timer {
   base::Result disable();
 
   // Waits for all Handler calls to complete.
+  // PRECONDITION: |disable()| was called
   void wait();
+
+  // Disowns any incomplete Handler calls.
+  // PRECONDITION: |disable()| was called
+  void disown();
 
   // Combines the effects of the |disable()| and |wait()| methods.
   base::Result release();
@@ -340,9 +361,6 @@ class Generic {
   Generic& operator=(const Generic&) = delete;
   Generic& operator=(Generic&&) noexcept = default;
 
-  // The destructor unbinds the Handler from the event and frees any resources.
-  ~Generic() noexcept { release().ignore_ok(); }
-
   // Swaps this Generic event with another.
   void swap(Generic& x) noexcept {
     ptr_.swap(x.ptr_);
@@ -363,7 +381,12 @@ class Generic {
   base::Result disable();
 
   // Waits for all Handler calls to complete.
+  // PRECONDITION: |disable()| was called
   void wait();
+
+  // Disowns any incomplete Handler calls.
+  // PRECONDITION: |disable()| was called
+  void disown();
 
   // Combines the effects of the |disable()| and |wait()| methods.
   base::Result release();
