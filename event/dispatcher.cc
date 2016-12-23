@@ -32,8 +32,8 @@ struct Work {
   Work() noexcept : Work(nullptr, nullptr) {}
 };
 
-static void invoke(std::unique_lock<std::mutex>& lock, std::size_t& busy,
-                   std::size_t& done, std::size_t& caught, Work item) {
+static void invoke(base::Lock& lock, std::size_t& busy, std::size_t& done,
+                   std::size_t& caught, Work item) {
   bool threw = true;
   ++busy;
   auto cleanup0 = base::cleanup([&busy, &done, &caught, &threw] {
@@ -41,8 +41,10 @@ static void invoke(std::unique_lock<std::mutex>& lock, std::size_t& busy,
     ++done;
     if (threw) ++caught;
   });
+
   lock.unlock();
   auto cleanup1 = base::cleanup([&lock] { lock.lock(); });
+
   if (item.task == nullptr || item.task->start()) {
     try {
       base::Result result = item.callback->run();
@@ -62,11 +64,12 @@ static void invoke(std::unique_lock<std::mutex>& lock, std::size_t& busy,
   item.callback.reset();
 }
 
-static void invoke(std::unique_lock<std::mutex>& lock,
-                   event::IdleFunction idle) {
+static void invoke(base::Lock& lock, event::IdleFunction idle) {
   if (!idle) return;
+
   lock.unlock();
   auto cleanup = base::cleanup([&lock] { lock.lock(); });
+
   try {
     idle();
   } catch (...) {
@@ -115,9 +118,7 @@ class InlineDispatcher : public Dispatcher {
     // noop
   }
 
-  base::Result donate(bool forever) override {
-    return base::Result();
-  }
+  base::Result donate(bool forever) override { return base::Result(); }
 
  private:
   mutable std::mutex mu_;
@@ -211,6 +212,7 @@ class ThreadPoolDispatcher : public Dispatcher {
     auto lock = base::acquire_lock(mu_);
     work_.emplace(task, std::move(callback));
     if (corked_) return;
+
     std::size_t n = work_.size();
     // HEURISTIC: if queue size is greater than num threads, add a thread.
     //            (Threads that haven't finished starting add to the count.)
