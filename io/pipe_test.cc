@@ -5,10 +5,11 @@
 #include "io/pipe.h"
 
 TEST(Pipe, EndToEnd) {
-  io::Options o;
   io::Reader r;
   io::Writer w;
-  io::make_pipe(&r, o, &w, o);
+  io::make_pipe(&r, &w);
+
+  event::Manager m = io::default_options().manager();
 
   event::Task rd0, rd1, rd2;
   std::size_t n0, n1, n2;
@@ -37,7 +38,7 @@ TEST(Pipe, EndToEnd) {
   r.read(&rd2, buf + 12, &n2, 4, 4);
 
   LOG(INFO) << "waiting for all tasks";
-  event::wait_all({o.manager()}, {&rd0, &rd1, &rd2, &wr0, &wr1, &wr2});
+  event::wait_all({m}, {&rd0, &rd1, &rd2, &wr0, &wr1, &wr2});
 
   EXPECT_OK(wr0.result());
   EXPECT_OK(wr1.result());
@@ -63,7 +64,7 @@ TEST(Pipe, EndToEnd) {
   w.close(&cl);
 
   LOG(INFO) << "waiting for completion";
-  event::wait_all({o.manager()}, {&wr3, &cl});
+  event::wait_all({m}, {&wr3, &cl});
 
   EXPECT_OK(wr3.result());
   EXPECT_EQ(2U, m3);
@@ -73,7 +74,7 @@ TEST(Pipe, EndToEnd) {
   r.read(&rd3, buf, &n3, 4, 4);
 
   LOG(INFO) << "waiting for completion";
-  event::wait(o.manager(), &rd3);
+  event::wait(m, &rd3);
 
   EXPECT_EOF(rd3.result());
   EXPECT_EQ(2U, n3);

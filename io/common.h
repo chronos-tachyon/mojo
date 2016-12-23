@@ -9,17 +9,18 @@
 
 #include "base/result.h"
 #include "event/task.h"
+#include "io/options.h"
 
 namespace io {
 
-using CloseFn = std::function<void(event::Task*)>;
-using SyncCloseFn = std::function<base::Result()>;
+using CloseFn = std::function<void(event::Task*, const io::Options& opts)>;
+using SyncCloseFn = std::function<base::Result(const io::Options& opts)>;
 
 struct NoOpClose {
-  void operator()(event::Task* task) const {
+  void operator()(event::Task* task, const io::Options& opts) const {
     if (task->start()) task->finish_ok();
   }
-  base::Result operator()() const {
+  base::Result operator()(const io::Options& opts) const {
     return base::Result();
   }
 };

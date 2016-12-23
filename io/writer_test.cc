@@ -51,7 +51,7 @@ TEST(StringWriter, ReadFrom) {
   r = io::bufferreader("abcdefg", 7);
   w = io::stringwriter(&out);
   w.read_from(&task, &copied, 16, r);
-  event::wait_all({w.manager(), r.manager()}, {&task});
+  event::wait(io::default_options().manager(), &task);
   EXPECT_NOT_IMPLEMENTED(task.result());
   EXPECT_EQ(0U, copied);
 }
@@ -60,11 +60,8 @@ TEST(StringWriter, Close) {
   event::Task task;
   std::string out;
   io::Writer w = io::stringwriter(&out);
-  w.close(&task);
-  EXPECT_OK(task.result());
-  task.reset();
-  w.close(&task);
-  EXPECT_FAILED_PRECONDITION(task.result());
+  EXPECT_OK(w.close());
+  EXPECT_FAILED_PRECONDITION(w.close());
 }
 
 // }}}
@@ -124,11 +121,8 @@ TEST(BufferWriter, Close) {
   event::Task task;
   std::size_t len = 0;
   io::Writer w = io::bufferwriter(nullptr, 0, &len);
-  w.close(&task);
-  EXPECT_OK(task.result());
-  task.reset();
-  w.close(&task);
-  EXPECT_FAILED_PRECONDITION(task.result());
+  EXPECT_OK(w.close());
+  EXPECT_FAILED_PRECONDITION(w.close());
 }
 
 // }}}
@@ -137,34 +131,28 @@ TEST(BufferWriter, Close) {
 TEST(IgnoreCloseWriter, Close) {
   int n = 0;
   auto wfn = [](event::Task* task, std::size_t* copied, const char* ptr,
-                std::size_t len) {
+                std::size_t len, const io::Options& opts) {
     *copied = 0;
     if (task->start()) task->finish(base::Result::not_implemented());
   };
-  auto cfn = [&n](event::Task* task) {
+  auto cfn = [&n](event::Task* task, const io::Options& opts) {
     ++n;
     if (task->start()) task->finish_ok();
   };
 
   io::Writer w;
-  event::Task task;
 
   w = io::writer(wfn, cfn);
 
-  w.close(&task);
-  EXPECT_OK(task.result());
+  EXPECT_OK(w.close());
   EXPECT_EQ(1, n);
 
-  task.reset();
-  w.close(&task);
-  EXPECT_OK(task.result());
+  EXPECT_OK(w.close());
   EXPECT_EQ(2, n);
 
   w = io::ignore_close(w);
 
-  task.reset();
-  w.close(&task);
-  EXPECT_OK(task.result());
+  EXPECT_OK(w.close());
   EXPECT_EQ(2, n);
 }
 
@@ -176,18 +164,20 @@ TEST(DiscardWriter, Write) {
   io::Writer w = io::discardwriter(&total);
   EXPECT_EQ(0U, total);
 
+  event::Manager m = io::default_options().manager();
+
   event::Task task;
   std::size_t n = 42;
 
   w.write(&task, &n, "abcdefgh", 8);
-  event::wait(w.manager(), &task);
+  event::wait(m, &task);
   EXPECT_OK(task.result());
   EXPECT_EQ(8U, n);
   EXPECT_EQ(8U, total);
 
   task.reset();
   w.write(&task, &n, "ijkl", 4);
-  event::wait(w.manager(), &task);
+  event::wait(m, &task);
   EXPECT_OK(task.result());
   EXPECT_EQ(4U, n);
   EXPECT_EQ(12U, total);
@@ -197,14 +187,14 @@ TEST(DiscardWriter, Write) {
 
   task.reset();
   w.write(&task, &n, "abcdefgh", 8);
-  event::wait(w.manager(), &task);
+  event::wait(m, &task);
   EXPECT_OK(task.result());
   EXPECT_EQ(8U, n);
   EXPECT_EQ(0U, total);
 
   task.reset();
   w.write(&task, &n, "ijkl", 4);
-  event::wait(w.manager(), &task);
+  event::wait(m, &task);
   EXPECT_OK(task.result());
   EXPECT_EQ(4U, n);
   EXPECT_EQ(0U, total);
@@ -214,19 +204,21 @@ TEST(DiscardWriter, Write) {
 // FullWriter {{{
 
 TEST(FullWriter, Write) {
-  io::Writer w = io::fullwriter(io::default_options());
+  io::Writer w = io::fullwriter();
+
+  event::Manager m = io::default_options().manager();
 
   event::Task task;
   std::size_t n = 42;
 
   w.write(&task, &n, "", 0);
-  event::wait(w.manager(), &task);
+  event::wait(m, &task);
   EXPECT_OK(task.result());
   EXPECT_EQ(0U, n);
 
   task.reset();
   w.write(&task, &n, "a", 1);
-  event::wait(w.manager(), &task);
+  event::wait(m, &task);
   EXPECT_RESOURCE_EXHAUSTED(task.result());
   EXPECT_EQ(ENOSPC, task.result().errno_value());
   EXPECT_EQ(0U, n);
@@ -243,13 +235,15 @@ static void FDWriterTest(event::ManagerOptions mo) {
     auto pair = pipe.write->acquire_fd();
     ::fcntl(pair.first, F_SETPIPE_SZ, 4096);
   }
-  EXPECT_OK(base::set_blocking(pipe.read, true));
 
   LOG(INFO) << "made pipes";
 
   event::Manager m;
   ASSERT_OK(event::new_manager(&m, mo));
   ASSERT_TRUE(m);
+
+  io::Options o;
+  o.set_manager(m);
 
   LOG(INFO) << "made manager";
 
@@ -297,9 +291,15 @@ static void FDWriterTest(event::ManagerOptions mo) {
     while (true) {
       auto pair = pipe.read->acquire_fd();
       int n = ::read(pair.first, buf.data(), buf.size());
+      int err_no = errno;
+      pair.second.unlock();
       if (n < 0) {
-        int err_no = errno;
         if (err_no == EINTR) continue;
+        if (err_no == EAGAIN || err_no == EWOULDBLOCK) {
+          using MS = std::chrono::milliseconds;
+          std::this_thread::sleep_for(MS(1));
+          continue;
+        }
         auto result = base::Result::from_errno(err_no, "read(2)");
         EXPECT_OK(result);
         break;
@@ -319,14 +319,12 @@ static void FDWriterTest(event::ManagerOptions mo) {
   event::Task task;
   std::size_t n;
 
-  io::Options o;
-  o.set_manager(m);
-  w = io::fdwriter(pipe.write, o);
+  w = io::fdwriter(pipe.write);
 
   LOG(INFO) << "created fdwriter";
 
   buf.assign(1024, ++ch);
-  w.write(&task, &n, buf.data(), buf.size());
+  w.write(&task, &n, buf.data(), buf.size(), o);
 
   LOG(INFO) << "started write";
 
@@ -335,6 +333,8 @@ static void FDWriterTest(event::ManagerOptions mo) {
   cv.notify_all();
   lock.unlock();
 
+  LOG(INFO) << "unblocked reads";
+
   event::wait(m, &task);
   expected.append(buf.data(), n);
   EXPECT_OK(task.result());
@@ -342,20 +342,15 @@ static void FDWriterTest(event::ManagerOptions mo) {
 
   LOG(INFO) << "wrote additional data";
 
-  EXPECT_OK(pipe.write->close());
+  EXPECT_OK(w.close(o));
 
   LOG(INFO) << "closed pipe";
 
   lock.lock();
   while (!done) cv.wait(lock);
   EXPECT_EQ(expected, out);
-}
 
-TEST(FDWriter, InlineWrite) {
-  event::ManagerOptions mo;
-  mo.set_num_pollers(0, 1);
-  mo.dispatcher().set_type(event::DispatcherType::inline_dispatcher);
-  FDWriterTest(std::move(mo));
+  base::log_flush();
 }
 
 TEST(FDWriter, AsyncWrite) {
@@ -376,4 +371,4 @@ TEST(FDWriter, ThreadedWrite) {
 // }}}
 
 static void init() __attribute__((constructor));
-static void init() { base::log_stderr_set_level(VLOG_LEVEL(0)); }
+static void init() { base::log_stderr_set_level(VLOG_LEVEL(6)); }

@@ -25,7 +25,7 @@ class Writer;  // forward declaration
 // ReaderImpl is the base class for implementations of the Reader API.
 class ReaderImpl {
  protected:
-  ReaderImpl(Options o) noexcept : o_(std::move(o)) {}
+  ReaderImpl() noexcept = default;
 
  public:
   // Sanity-check helper for implementations of |read|.
@@ -33,7 +33,8 @@ class ReaderImpl {
   // Typical usage:
   //
   //    void read(event::Task* task, char* out, std::size_t* n,
-  //              std::size_t min, std::size_t max) override {
+  //              std::size_t min, std::size_t max,
+  //              const io::Options& opts) override {
   //      if (!prologue(task, out, n, min, max)) return;
   //      ...;  // actual implementation
   //      task->finish(result);
@@ -47,7 +48,8 @@ class ReaderImpl {
   // Typical usage:
   //
   //    void write_to(event::Task* task, std::size_t* n,
-  //                  std::size_t max, Writer& w) override {
+  //                  std::size_t max, const io::Writer& w,
+  //                  const io::Options& opts) override {
   //      if (!prologue(task, n, max, w)) return;
   //      ...;  // actual implementation
   //      task->finish(result);
@@ -60,7 +62,8 @@ class ReaderImpl {
   //
   // Typical usage:
   //
-  //    void close(event::Task* task) override {
+  //    void close(event::Task* task,
+  //               const io::Options& opts) override {
   //      if (!prologue(task)) return;
   //      ...;  // actual implementation
   //      task->finish(result);
@@ -106,7 +109,7 @@ class ReaderImpl {
   // THREAD SAFETY: Implementations of this function MUST be thread-safe.
   //
   virtual void read(event::Task* task, char* out, std::size_t* n,
-                    std::size_t min, std::size_t max) = 0;
+                    std::size_t min, std::size_t max, const Options& opts) = 0;
 
   // OPTIONAL. Copies up to |max| bytes of this Reader's data into |w|.
   // - NEVER copies more than |max| bytes
@@ -125,7 +128,7 @@ class ReaderImpl {
   // THREAD SAFETY: Implementations of this function MUST be thread-safe.
   //
   virtual void write_to(event::Task* task, std::size_t* n, std::size_t max,
-                        const Writer& w);
+                        const Writer& w, const Options& opts);
 
   // Closes this Reader, potentially freeing resources.
   // - May be synchronous: implementations may block until the call is complete
@@ -135,16 +138,10 @@ class ReaderImpl {
   //
   // THREAD SAFETY: Implementations of this function MUST be thread-safe.
   //
-  virtual void close(event::Task* task) = 0;
+  virtual void close(event::Task* task, const Options& opts) = 0;
 
   // Returns the minimum size which results in efficient reads.
   virtual std::size_t ideal_block_size() const noexcept { return 4096; }
-
-  // Accesses the io::Options which were provided at construction time.
-  const Options& options() const noexcept { return o_; }
-
- private:
-  Options o_;
 };
 
 // Reader is a handle to a readable I/O stream.
@@ -197,25 +194,9 @@ class Reader {
   const Pointer& implementation() const { return ptr_; }
   Pointer& implementation() { return ptr_; }
 
-  // Returns the io::Options for the I/O stream.
-  const Options& options() const {
-    assert_valid();
-    return ptr_->options();
-  }
-
-  // Returns the event::Manager for the I/O stream.
-  event::Manager manager() const {
-    assert_valid();
-    return ptr_->options().manager();
-  }
-
   // Returns the preferred block size for the I/O stream.
-  std::size_t block_size() const {
+  std::size_t ideal_block_size() const {
     assert_valid();
-    std::size_t blksz;
-    bool has_blksz;
-    std::tie(has_blksz, blksz) = ptr_->options().block_size();
-    if (has_blksz) return blksz;
     return ptr_->ideal_block_size();
   }
 
@@ -224,40 +205,44 @@ class Reader {
   // Reads |min| to |max| bytes into the buffer at |out|, updating |n|.
   // - See |ReaderImpl::read| for details of the API contract.
   void read(event::Task* task, char* out, std::size_t* n, std::size_t min,
-            std::size_t max) const {
+            std::size_t max, const Options& opts = default_options()) const {
     assert_valid();
-    ptr_->read(task, out, n, min, max);
+    ptr_->read(task, out, n, min, max, opts);
   }
 
   // Like |read| above, but reads into a std::string.
   void read(event::Task* task, std::string* out, std::size_t min,
-            std::size_t max) const;
+            std::size_t max, const Options& opts = default_options()) const;
 
   // Synchronous versions of the functions above.
-  base::Result read(char* out, std::size_t* n, std::size_t min,
-                    std::size_t max) const;
-  base::Result read(std::string* out, std::size_t min, std::size_t max) const;
+  base::Result read(char* out, std::size_t* n, std::size_t min, std::size_t max,
+                    const Options& opts = default_options()) const;
+  base::Result read(std::string* out, std::size_t min, std::size_t max,
+                    const Options& opts = default_options()) const;
 
   // }}}
   // Read up to N bytes {{{
 
   // Reads up to |len| bytes into the buffer at |out|, updating |n|.
-  void read(event::Task* task, char* out, std::size_t* n,
-            std::size_t len) const {
-    read(task, out, n, computed_min(len), len);
+  void read(event::Task* task, char* out, std::size_t* n, std::size_t len,
+            const Options& opts = default_options()) const {
+    read(task, out, n, computed_min(len), len, opts);
   }
 
   // Like |read| above, but reads into a std::string.
-  void read(event::Task* task, std::string* out, std::size_t len) const {
-    read(task, out, computed_min(len), len);
+  void read(event::Task* task, std::string* out, std::size_t len,
+            const Options& opts = default_options()) const {
+    read(task, out, computed_min(len), len, opts);
   }
 
   // Synchronous versions of the functions above.
-  base::Result read(char* out, std::size_t* n, std::size_t len) const {
-    return read(out, n, computed_min(len), len);
+  base::Result read(char* out, std::size_t* n, std::size_t len,
+                    const Options& opts = default_options()) const {
+    return read(out, n, computed_min(len), len, opts);
   }
-  base::Result read(std::string* out, std::size_t len) const {
-    return read(out, computed_min(len), len);
+  base::Result read(std::string* out, std::size_t len,
+                    const Options& opts = default_options()) const {
+    return read(out, computed_min(len), len, opts);
   }
 
   // }}}
@@ -265,22 +250,25 @@ class Reader {
 
   // Reads exactly |len| bytes into the buffer at |out|, updating |*n|.
   void read_exactly(event::Task* task, char* out, std::size_t* n,
-                    std::size_t len) const {
-    read(task, out, n, len, len);
+                    std::size_t len,
+                    const Options& opts = default_options()) const {
+    read(task, out, n, len, len, opts);
   }
 
   // Like |read_exactly| above, but reads into a std::string.
-  void read_exactly(event::Task* task, std::string* out,
-                    std::size_t len) const {
-    read(task, out, len, len);
+  void read_exactly(event::Task* task, std::string* out, std::size_t len,
+                    const Options& opts = default_options()) const {
+    read(task, out, len, len, opts);
   }
 
   // Synchronous versions of the functions above.
-  base::Result read_exactly(char* out, std::size_t* n, std::size_t len) const {
-    return read(out, n, len, len);
+  base::Result read_exactly(char* out, std::size_t* n, std::size_t len,
+                            const Options& opts = default_options()) const {
+    return read(out, n, len, len, opts);
   }
-  base::Result read_exactly(std::string* out, std::size_t len) const {
-    return read(out, len, len);
+  base::Result read_exactly(std::string* out, std::size_t len,
+                            const Options& opts = default_options()) const {
+    return read(out, len, len, opts);
   }
 
   // }}}
@@ -290,25 +278,27 @@ class Reader {
   // NOTE: This function is OPTIONAL, i.e. it may return NOT_IMPLEMENTED.
   //       See io::copy in io/util.h for a user-friendly interface.
   void write_to(event::Task* task, std::size_t* n, std::size_t max,
-                const Writer& w) const {
+                const Writer& w,
+                const Options& opts = default_options()) const {
     assert_valid();
-    ptr_->write_to(task, n, max, w);
+    ptr_->write_to(task, n, max, w, opts);
   }
 
   // Synchronous version of |write_to| above.
-  base::Result write_to(std::size_t* n, std::size_t max, const Writer& w) const;
+  base::Result write_to(std::size_t* n, std::size_t max, const Writer& w,
+                        const Options& opts = default_options()) const;
 
   // }}}
   // Close {{{
 
   // Closes this Reader, potentially freeing resources.
-  void close(event::Task* task) const {
+  void close(event::Task* task, const Options& opts = default_options()) const {
     assert_valid();
-    ptr_->close(task);
+    ptr_->close(task, opts);
   }
 
   // Synchronous version of |close| above.
-  base::Result close() const;
+  base::Result close(const Options& opts = default_options()) const;
 
   // }}}
 
@@ -324,10 +314,11 @@ inline bool operator!=(const Reader& a, const Reader& b) noexcept {
   return !(a == b);
 }
 
-using ReadFn = std::function<void(event::Task*, char*, std::size_t*,
-                                  std::size_t, std::size_t)>;
-using SyncReadFn =
-    std::function<base::Result(char*, std::size_t*, std::size_t, std::size_t)>;
+using ReadFn =
+    std::function<void(event::Task*, char*, std::size_t*, std::size_t,
+                       std::size_t, const Options& opts)>;
+using SyncReadFn = std::function<base::Result(
+    char*, std::size_t*, std::size_t, std::size_t, const Options& opts)>;
 
 // Returns a Reader that wraps the given functor(s).
 Reader reader(ReadFn rfn, CloseFn cfn);
@@ -361,10 +352,10 @@ Reader nullreader();
 Reader zeroreader();
 
 // Returns a Reader that reads bytes from a file descriptor.
-Reader fdreader(base::FD fd, Options o = default_options());
+Reader fdreader(base::FD fd);
 
 // Returns a Reader that concatenates multiple streams into one.
-Reader multireader(std::vector<Reader> readers, Options o = default_options());
+Reader multireader(std::vector<Reader> readers);
 
 }  // namespace io
 

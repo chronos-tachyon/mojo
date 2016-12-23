@@ -6,7 +6,7 @@
 
 namespace io {
 
-void make_pipe(Reader* r, Options ro, Writer* w, Options wo);
+void make_pipe(Reader* r, Writer* w);
 
 }  // namespace io
 

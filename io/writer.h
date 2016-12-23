@@ -23,7 +23,7 @@ class Reader;  // forward declaration
 // WriterImpl is the base class for implementations of the Writer API.
 class WriterImpl {
  protected:
-  WriterImpl(Options o) noexcept : o_(std::move(o)) {}
+  WriterImpl() noexcept = default;
 
  public:
   // Sanity-check helper for implementations of |write|.
@@ -31,7 +31,8 @@ class WriterImpl {
   // Typical usage:
   //
   //    void write(event::Task* task, std::size_t* n,
-  //               const char* ptr, std::size_t len) override {
+  //               const char* ptr, std::size_t len,
+  //               const io::Options& opts) override {
   //      if (!prologue(task, n, ptr, len)) return;
   //      ...;  // actual implementation
   //      task->finish(result);
@@ -45,7 +46,8 @@ class WriterImpl {
   // Typical usage:
   //
   //    void read_from(event::Task* task, std::size_t* n,
-  //                   std::size_t max, Reader& r) override {
+  //                   std::size_t max, const io::Reader& r,
+  //                   const io::Options& opts) override {
   //      if (!prologue(task, n, max, r)) return;
   //      ...;  // actual implementation
   //      task->finish(result);
@@ -58,7 +60,8 @@ class WriterImpl {
   //
   // Typical usage:
   //
-  //    void close(event::Task* task) override {
+  //    void close(event::Task* task,
+  //               const io::Options& opts) override {
   //      if (!prologue(task)) return;
   //      ...;  // actual implementation
   //      task->finish(result);
@@ -92,7 +95,7 @@ class WriterImpl {
   // THREAD SAFETY: Implementations of this function MUST be thread-safe.
   //
   virtual void write(event::Task* task, std::size_t* n, const char* ptr,
-                     std::size_t len) = 0;
+                     std::size_t len, const Options& opts) = 0;
 
   // OPTIONAL. Copies up to |max| bytes from |r| into this Writer.
   // - NEVER copies more than |max| bytes
@@ -108,7 +111,7 @@ class WriterImpl {
   // THREAD SAFETY: Implementations of this function MUST be thread-safe.
   //
   virtual void read_from(event::Task* task, std::size_t* n,
-                         std::size_t max, const Reader& r);
+                         std::size_t max, const Reader& r, const Options& opts);
 
   // Closes this Writer, potentially freeing resources.
   // - May be synchronous: implementations may block until the call is complete
@@ -118,7 +121,7 @@ class WriterImpl {
   //
   // THREAD SAFETY: Implementations of this function MUST be thread-safe.
   //
-  virtual void close(event::Task* task) = 0;
+  virtual void close(event::Task* task, const Options& opts) = 0;
 
   // Returns the minimum size which results in efficient writes.
   virtual std::size_t ideal_block_size() const noexcept { return 4096; }
@@ -141,12 +144,6 @@ class WriterImpl {
   // If you do not have a suitable FD on hand, just return |nullptr|.
   //
   virtual base::FD internal_writerfd() const { return nullptr; }
-
-  // Accesses the io::Options which were provided at construction time.
-  const Options& options() const noexcept { return o_; }
-
- private:
-  Options o_;
 };
 
 // Writer is a handle to a writable I/O stream.
@@ -194,25 +191,9 @@ class Writer {
   const Pointer& implementation() const { return ptr_; }
   Pointer& implementation() { return ptr_; }
 
-  // Returns the io::Options for this Writer.
-  const Options& options() const {
-    assert_valid();
-    return ptr_->options();
-  }
-
-  // Returns the event::Manager for this Writer.
-  event::Manager manager() const {
-    assert_valid();
-    return ptr_->options().manager();
-  }
-
   // Returns the preferred block size for this Writer's I/O.
-  std::size_t block_size() const {
+  std::size_t ideal_block_size() const {
     assert_valid();
-    std::size_t blksz;
-    bool has_blksz;
-    std::tie(has_blksz, blksz) = ptr_->options().block_size();
-    if (has_blksz) return blksz;
     return ptr_->ideal_block_size();
   }
 
@@ -221,21 +202,21 @@ class Writer {
   // Writes up to |len| bytes from the buffer at |ptr|.
   // - See |WriterImpl::write| for details of the API contract.
   void write(event::Task* task, std::size_t* n, const char* ptr,
-             std::size_t len) const {
+             std::size_t len, const Options& opts = default_options()) const {
     assert_valid();
-    ptr_->write(task, n, ptr, len);
+    ptr_->write(task, n, ptr, len, opts);
   }
 
   // Like |write| above, but writes from a std::string.
   void write(event::Task* task, std::size_t* n,
-             const std::string& str) const {
-    write(task, n, str.data(), str.size());
+             const std::string& str, const Options& opts = default_options()) const {
+    write(task, n, str.data(), str.size(), opts);
   }
 
   // Synchronous versions of the functions above.
   base::Result write(std::size_t* n, const char* ptr,
-                     std::size_t len) const;
-  base::Result write(std::size_t* n, const std::string& str) const;
+                     std::size_t len, const Options& opts = default_options()) const;
+  base::Result write(std::size_t* n, const std::string& str, const Options& opts = default_options()) const;
 
   // }}}
   // Copy directly from Reader to Writer {{{
@@ -244,26 +225,26 @@ class Writer {
   // NOTE: This function is OPTIONAL, i.e. it may return NOT_IMPLEMENTED.
   //       See io::copy in io/util.h for a user-friendly interface.
   void read_from(event::Task* task, std::size_t* n, std::size_t max,
-                 const Reader& r) const {
+                 const Reader& r, const Options& opts = default_options()) const {
     assert_valid();
-    ptr_->read_from(task, n, max, r);
+    ptr_->read_from(task, n, max, r, opts);
   }
 
   // Synchronous version of |read_from| above.
   base::Result read_from(std::size_t* n, std::size_t max,
-                         const Reader& r) const;
+                         const Reader& r, const Options& opts = default_options()) const;
 
   // }}}
   // Close {{{
 
   // Closes this Writer, potentially freeing resources.
-  void close(event::Task* task) const {
+  void close(event::Task* task, const Options& opts = default_options()) const {
     assert_valid();
-    ptr_->close(task);
+    ptr_->close(task, opts);
   }
 
   // Synchronous version of |close| above.
-  base::Result close() const;
+  base::Result close(const Options& opts = default_options()) const;
 
   // }}}
 
@@ -280,9 +261,9 @@ inline bool operator!=(const Writer& a, const Writer& b) noexcept {
 }
 
 using WriteFn =
-    std::function<void(event::Task*, std::size_t*, const char*, std::size_t)>;
+    std::function<void(event::Task*, std::size_t*, const char*, std::size_t, const Options&)>;
 using SyncWriteFn =
-    std::function<base::Result(std::size_t*, const char*, std::size_t)>;
+    std::function<base::Result(std::size_t*, const char*, std::size_t, const Options&)>;
 
 // Returns a Writer that wraps the given functor(s).
 Writer writer(WriteFn wfn, CloseFn cfn);
@@ -309,13 +290,13 @@ inline Writer bufferwriter(char* ptr, std::size_t len, std::size_t* n) {
 
 // Returns a Writer that throws away everything it receives.
 // Optionally takes a pointer to a size_t, recording the # of bytes discarded.
-Writer discardwriter(std::size_t* n = nullptr, Options o = default_options());
+Writer discardwriter(std::size_t* /*nullable*/ n = nullptr);
 
 // Returns a Writer that simulates a full disk.
-Writer fullwriter(Options o = default_options());
+Writer fullwriter();
 
 // Returns a Writer that writes bytes to a file descriptor.
-Writer fdwriter(base::FD fd, Options o = default_options());
+Writer fdwriter(base::FD fd);
 
 }  // namespace io
 

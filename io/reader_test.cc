@@ -336,11 +336,11 @@ TEST(BufferReader, Close) {
 TEST(IgnoreCloseReader, Close) {
   int n = 0;
   auto rfn = [](event::Task* task, char* ptr, std::size_t* len, std::size_t min,
-                std::size_t max) {
+                std::size_t max, const io::Options& o) {
     *len = 0;
     if (task->start()) task->finish(base::Result::not_implemented());
   };
-  auto cfn = [&n](event::Task* task) {
+  auto cfn = [&n](event::Task* task, const io::Options& o) {
     ++n;
     if (task->start()) task->finish_ok();
   };
@@ -489,21 +489,16 @@ TEST(LimitedReader, WriteTo) {
 
 TEST(NullReader, Read) {
   io::Reader r = io::nullreader();
+  io::Options o;
 
-  event::Task task;
   char buf[16];
   std::size_t n = 42;
 
-  r.read(&task, buf, &n, 0, sizeof(buf));
-  event::wait(r.manager(), &task);
-  EXPECT_OK(task.result());
+  EXPECT_OK(r.read(buf, &n, 0, sizeof(buf), o));
   EXPECT_EQ(0U, n);
 
-  task.reset();
   n = 42;
-  r.read(&task, buf, &n, 1, sizeof(buf));
-  event::wait(r.manager(), &task);
-  EXPECT_EOF(task.result());
+  EXPECT_EOF(r.read(buf, &n, 1, sizeof(buf), o));
   EXPECT_EQ(0U, n);
 }
 
@@ -512,32 +507,24 @@ TEST(NullReader, Read) {
 
 TEST(ZeroReader, Read) {
   io::Reader r = io::zeroreader();
+  io::Options o;
 
-  event::Task task;
   char buf[16];
   std::size_t n = 42;
   std::string expected;
   expected.assign(sizeof(buf), '\0');
 
-  r.read(&task, buf, &n, 0, sizeof(buf));
-  event::wait(r.manager(), &task);
-  EXPECT_OK(task.result());
+  EXPECT_OK(r.read(buf, &n, 0, sizeof(buf), o));
   EXPECT_EQ(sizeof(buf), n);
   EXPECT_EQ(expected, std::string(buf, n));
 
-  task.reset();
   n = 42;
-  r.read(&task, buf, &n, 1, sizeof(buf));
-  event::wait(r.manager(), &task);
-  EXPECT_OK(task.result());
+  EXPECT_OK(r.read(buf, &n, 1, sizeof(buf), o));
   EXPECT_EQ(sizeof(buf), n);
   EXPECT_EQ(expected, std::string(buf, n));
 
-  task.reset();
   n = 42;
-  r.read(&task, buf, &n, sizeof(buf), sizeof(buf));
-  event::wait(r.manager(), &task);
-  EXPECT_OK(task.result());
+  EXPECT_OK(r.read(buf, &n, sizeof(buf), sizeof(buf), o));
   EXPECT_EQ(sizeof(buf), n);
   EXPECT_EQ(expected, std::string(buf, n));
 }
@@ -545,17 +532,11 @@ TEST(ZeroReader, Read) {
 // }}}
 // FDReader {{{
 
-static void TestFDReader_Read(event::ManagerOptions mo) {
+static void TestFDReader_Read(const io::Options& o) {
   base::Pipe pipe;
   ASSERT_OK(base::make_pipe(&pipe));
 
   LOG(INFO) << "made pipes";
-
-  event::Manager m;
-  ASSERT_OK(event::new_manager(&m, mo));
-  ASSERT_TRUE(m);
-
-  LOG(INFO) << "made manager";
 
   std::mutex mu;
   std::condition_variable cv;
@@ -582,20 +563,14 @@ static void TestFDReader_Read(event::ManagerOptions mo) {
 
   LOG(INFO) << "spawned thread";
 
-  io::Reader r;
-  event::Task task;
-  char buf[16];
-  std::size_t n;
-
-  io::Options o;
-  o.set_manager(m);
-  r = io::fdreader(pipe.read, o);
+  io::Reader r = io::fdreader(pipe.read);
 
   LOG(INFO) << "made fdreader";
 
-  r.read(&task, buf, &n, 0, sizeof(buf));
-  event::wait(m, &task);
-  EXPECT_OK(task.result());
+  char buf[8];
+  std::size_t n;
+
+  EXPECT_OK(r.read(buf, &n, 0, 8, o));
   EXPECT_EQ(0U, n);
   LOG(INFO) << "read zero bytes";
 
@@ -605,10 +580,7 @@ static void TestFDReader_Read(event::ManagerOptions mo) {
   LOG(INFO) << "woke thread";
   lock.unlock();
 
-  task.reset();
-  r.read(&task, buf, &n, 1, sizeof(buf));
-  event::wait(m, &task);
-  EXPECT_OK(task.result());
+  EXPECT_OK(r.read(buf, &n, 1, 8, o));
   EXPECT_EQ(4U, n);
   EXPECT_EQ("abcd", std::string(buf, n));
   LOG(INFO) << "read four bytes";
@@ -620,8 +592,8 @@ static void TestFDReader_Read(event::ManagerOptions mo) {
   while (y < 1) cv.wait(lock);
   lock.unlock();
 
-  task.reset();
-  r.read(&task, buf, &n, 8, sizeof(buf));
+  event::Task task;
+  r.read(&task, buf, &n, 8, 8, o);
   LOG(INFO) << "initiated read";
 
   lock.lock();
@@ -630,16 +602,17 @@ static void TestFDReader_Read(event::ManagerOptions mo) {
   LOG(INFO) << "woke thread";
   lock.unlock();
 
-  event::wait(m, &task);
+  event::wait(o.manager(), &task);
   EXPECT_OK(task.result());
   EXPECT_EQ(8U, n);
   EXPECT_EQ("efghijkl", std::string(buf, n));
   LOG(INFO) << "read eight bytes";
 
   t.join();
+  base::log_flush();
 }
 
-static void TestFDReader_WriteTo(event::ManagerOptions mo, io::Options o) {
+static void TestFDReader_WriteTo(const io::Options& o) {
   std::string path;
   base::FD fd;
 
@@ -690,27 +663,21 @@ static void TestFDReader_WriteTo(event::ManagerOptions mo, io::Options o) {
     EXPECT_EOF(r);
   });
 
-  event::Manager m;
-  ASSERT_OK(event::new_manager(&m, mo));
-  ASSERT_TRUE(m);
+  LOG(INFO) << "thread launched";
 
-  LOG(INFO) << "made manager";
-
-  o.set_manager(m);
-
-  io::Reader r = io::fdreader(fd, o);
-  io::Writer w = io::fdwriter(s.left, o);
+  io::Reader r = io::fdreader(fd);
+  io::Writer w = io::fdwriter(s.left);
 
   event::Task task;
   std::size_t n;
-  io::copy(&task, &n, w, r);
+  io::copy(&task, &n, w, r, o);
 
   auto lock = base::acquire_lock(mu);
   ready = true;
   cv.notify_all();
   lock.unlock();
 
-  event::wait(m, &task);
+  event::wait(o.manager(), &task);
   LOG(INFO) << "task done";
   EXPECT_OK(task.result());
   EXPECT_EQ(16U * 4096U, n);
@@ -719,61 +686,92 @@ static void TestFDReader_WriteTo(event::ManagerOptions mo, io::Options o) {
   t.join();
   LOG(INFO) << "thread done";
   EXPECT_EQ(sunk, n);
-}
 
-TEST(FDReader, InlineRead) {
-  event::ManagerOptions mo;
-  mo.set_num_pollers(0, 1);
-  mo.dispatcher().set_type(event::DispatcherType::inline_dispatcher);
-  TestFDReader_Read(std::move(mo));
+  base::log_flush();
 }
 
 TEST(FDReader, AsyncRead) {
   event::ManagerOptions mo;
-  mo.set_num_pollers(0, 1);
-  mo.dispatcher().set_type(event::DispatcherType::async_dispatcher);
-  TestFDReader_Read(std::move(mo));
+  mo.set_async_mode();
+
+  event::Manager m;
+  ASSERT_OK(event::new_manager(&m, mo));
+
+  io::Options o;
+  o.set_manager(m);
+
+  TestFDReader_Read(o);
+
+  EXPECT_OK(m.shutdown());
 }
 
 TEST(FDReader, ThreadedRead) {
   event::ManagerOptions mo;
-  mo.set_num_pollers(1);
-  mo.dispatcher().set_type(event::DispatcherType::threaded_dispatcher);
-  mo.dispatcher().set_num_workers(1);
-  TestFDReader_Read(std::move(mo));
+  mo.set_minimal_threaded_mode();
+
+  event::Manager m;
+  ASSERT_OK(event::new_manager(&m, mo));
+
+  io::Options o;
+  o.set_manager(m);
+
+  TestFDReader_Read(o);
+
+  EXPECT_OK(m.shutdown());
 }
 
 TEST(FDReader, WriteToFallback) {
   event::ManagerOptions mo;
-  mo.set_num_pollers(0, 1);
-  mo.dispatcher().set_type(event::DispatcherType::async_dispatcher);
+  mo.set_async_mode();
+
+  event::Manager m;
+  ASSERT_OK(event::new_manager(&m, mo));
+
   io::Options o;
+  o.set_manager(m);
   o.set_transfer_mode(io::TransferMode::read_write);
-  TestFDReader_WriteTo(std::move(mo), std::move(o));
+
+  TestFDReader_WriteTo(o);
+
+  EXPECT_OK(m.shutdown());
 }
 
 TEST(FDReader, WriteToSendfile) {
   event::ManagerOptions mo;
-  mo.set_num_pollers(0, 1);
-  mo.dispatcher().set_type(event::DispatcherType::async_dispatcher);
+  mo.set_async_mode();
+
+  event::Manager m;
+  ASSERT_OK(event::new_manager(&m, mo));
+
   io::Options o;
+  o.set_manager(m);
   o.set_transfer_mode(io::TransferMode::sendfile);
-  TestFDReader_WriteTo(std::move(mo), std::move(o));
+
+  TestFDReader_WriteTo(o);
+
+  EXPECT_OK(m.shutdown());
 }
 
 TEST(FDReader, WriteToSplice) {
   event::ManagerOptions mo;
-  mo.set_num_pollers(0, 1);
-  mo.dispatcher().set_type(event::DispatcherType::async_dispatcher);
+  mo.set_async_mode();
+
+  event::Manager m;
+  ASSERT_OK(event::new_manager(&m, mo));
+
   io::Options o;
+  o.set_manager(m);
   o.set_transfer_mode(io::TransferMode::splice);
-  TestFDReader_WriteTo(std::move(mo), std::move(o));
+
+  TestFDReader_WriteTo(o);
+
+  EXPECT_OK(m.shutdown());
 }
 
 // }}}
 // MultiReader {{{
 
-void TestMultiReader_LineUp(io::Options opts) {
+void TestMultiReader_LineUp(io::Options o) {
   std::string a = "01234567";
   std::string b = "abcdefgh";
   std::string c = "ABCDEFGH";
@@ -791,23 +789,21 @@ void TestMultiReader_LineUp(io::Options opts) {
       io::stringreader(d),
   });
 
-  event::Task task;
+  base::Result result;
   char buf[8];
   std::size_t n;
   std::string actual;
 
   while (true) {
-    r.read(&task, buf, &n, 8, 8);
-    event::wait(r.manager(), &task);
+    result = r.read(buf, &n, 8, 8, o);
     actual.append(buf, n);
-    if (!task.result()) break;
-    task.reset();
+    if (!result) break;
   }
-  EXPECT_EOF(task.result());
+  EXPECT_EOF(result);
   EXPECT_EQ(expected, actual);
 }
 
-void TestMultiReader_Half(io::Options opts) {
+void TestMultiReader_Half(io::Options o) {
   std::string a = "01234567";
   std::string b = "abcdefgh";
 
@@ -820,23 +816,21 @@ void TestMultiReader_Half(io::Options opts) {
       io::stringreader(a), io::stringreader(b),
   });
 
-  event::Task task;
+  base::Result result;
   char buf[4];
   std::size_t n;
   std::string actual;
 
   while (true) {
-    r.read(&task, buf, &n, 4, 4);
-    event::wait(r.manager(), &task);
+    result = r.read(buf, &n, 4, 4, o);
     actual.append(buf, n);
-    if (!task.result()) break;
-    task.reset();
+    if (!result) break;
   }
-  EXPECT_EOF(task.result());
+  EXPECT_EOF(result);
   EXPECT_EQ(expected, actual);
 }
 
-void TestMultiReader_Double(io::Options opts) {
+void TestMultiReader_Double(io::Options o) {
   std::string a = "01234567";
   std::string b = "abcdefgh";
   std::string c = "ABCDEFGH";
@@ -854,23 +848,21 @@ void TestMultiReader_Double(io::Options opts) {
       io::stringreader(d),
   });
 
-  event::Task task;
+  base::Result result;
   char buf[16];
   std::size_t n;
   std::string actual;
 
   while (true) {
-    r.read(&task, buf, &n, 16, 16);
-    event::wait(r.manager(), &task);
+    result = r.read(buf, &n, 16, 16, o);
     actual.append(buf, n);
-    if (!task.result()) break;
-    task.reset();
+    if (!result) break;
   }
-  EXPECT_EOF(task.result());
+  EXPECT_EOF(result);
   EXPECT_EQ(expected, actual);
 }
 
-void TestMultiReader_OffAxis(io::Options opts) {
+void TestMultiReader_OffAxis(io::Options o) {
   std::string a = "01234";
   std::string b = "abcde";
   std::string c = "ABCDE";
@@ -888,48 +880,34 @@ void TestMultiReader_OffAxis(io::Options opts) {
       io::stringreader(d),
   });
 
-  event::Task task;
+  base::Result result;
   char buf[8];
   std::size_t n;
   std::string actual;
 
   while (true) {
-    r.read(&task, buf, &n, 8, 8);
-    event::wait(r.manager(), &task);
+    result = r.read(buf, &n, 8, 8, o);
     actual.append(buf, n);
-    if (!task.result()) break;
-    task.reset();
+    if (!result) break;
   }
-  EXPECT_EOF(task.result());
+  EXPECT_EOF(result);
   EXPECT_EQ(expected, actual);
 }
 
-void TestMultiReader(io::Options opts, const char* what) {
+void TestMultiReader(io::Options o, const char* what) {
   LOG(INFO) << "[TestMultiReader_LineUp:" << what << "]";
-  TestMultiReader_LineUp(opts);
+  TestMultiReader_LineUp(o);
   LOG(INFO) << "[TestMultiReader_Half:" << what << "]";
-  TestMultiReader_Half(opts);
+  TestMultiReader_Half(o);
   LOG(INFO) << "[TestMultiReader_Double:" << what << "]";
-  TestMultiReader_Double(opts);
+  TestMultiReader_Double(o);
   LOG(INFO) << "[TestMultiReader_OffAxis:" << what << "]";
-  TestMultiReader_OffAxis(opts);
+  TestMultiReader_OffAxis(o);
   LOG(INFO) << "[Done:" << what << "]";
   base::log_flush();
 }
 
-TEST(MultiReader, AsyncInline) {
-  event::ManagerOptions mo;
-  mo.set_inline_mode();
-  event::Manager m;
-  ASSERT_OK(event::new_manager(&m, mo));
-
-  io::Options o;
-  o.set_manager(m);
-  TestMultiReader(o, "async/inline");
-  EXPECT_OK(m.shutdown());
-}
-
-TEST(MultiReader, AsyncAsync) {
+TEST(MultiReader, Async) {
   event::ManagerOptions mo;
   mo.set_async_mode();
   event::Manager m;
@@ -937,7 +915,7 @@ TEST(MultiReader, AsyncAsync) {
 
   io::Options o;
   o.set_manager(m);
-  TestMultiReader(o, "async/async");
+  TestMultiReader(o, "async");
   EXPECT_OK(m.shutdown());
 }
 
@@ -951,11 +929,11 @@ TEST(MultiReader, Threaded) {
 
   io::Options o;
   o.set_manager(m);
-  TestMultiReader(o, "threaded/threaded");
+  TestMultiReader(o, "threaded");
   EXPECT_OK(m.shutdown());
 }
 
 // }}}
 
 static void init() __attribute__((constructor));
-static void init() { base::log_stderr_set_level(VLOG_LEVEL(6)); }
+static void init() { base::log_single_threaded(); base::log_stderr_set_level(VLOG_LEVEL(6)); }

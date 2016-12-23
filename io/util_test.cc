@@ -49,11 +49,12 @@ TEST(Copy, StringReaderStringWriter) {
   std::string out;
   io::Reader r = io::stringreader(in);
   io::Writer w = io::stringwriter(&out);
+  io::Options o;
 
   event::Task task;
   std::size_t n;
-  io::copy(&task, &n, w, r);
-  event::wait_all({w.manager(), r.manager()}, {&task});
+  io::copy(&task, &n, w, r, o);
+  event::wait(o.manager(), &task);
   EXPECT_OK(task.result());
   EXPECT_EQ(12U, n);
   EXPECT_EQ(out, in);
@@ -82,11 +83,9 @@ static void TestFileFileCopy(io::Options o) {
   event::Task task;
   std::size_t n = 42;
 
-  w = io::fdwriter(srcfd, o);
-  w.write(&task, &n, in.data(), N);
-  while (!task.is_finished()) {
-    EXPECT_OK(o.manager().donate(false));
-  }
+  w = io::fdwriter(srcfd);
+  w.write(&task, &n, in.data(), N, o);
+  event::wait(o.manager(), &task);
   EXPECT_OK(task.result());
   EXPECT_EQ(N, n);
 
@@ -95,13 +94,11 @@ static void TestFileFileCopy(io::Options o) {
     EXPECT_EQ(0, ::lseek(pair.first, 0, SEEK_SET));
   }
 
-  r = io::fdreader(srcfd, o);
-  w = io::fdwriter(dstfd, o);
+  r = io::fdreader(srcfd);
+  w = io::fdwriter(dstfd);
   task.reset();
-  io::copy_n(&task, &n, N, w, r);
-  while (!task.is_finished()) {
-    EXPECT_OK(o.manager().donate(false));
-  }
+  io::copy_n(&task, &n, N, w, r, o);
+  event::wait(o.manager(), &task);
   EXPECT_OK(task.result());
   EXPECT_EQ(N, n);
 
@@ -112,12 +109,10 @@ static void TestFileFileCopy(io::Options o) {
 
   std::vector<char> out;
   out.resize(2 * N);
-  r = io::fdreader(dstfd, o);
+  r = io::fdreader(dstfd);
   task.reset();
-  r.read(&task, out.data(), &n, 1, out.size());
-  while (!task.is_finished()) {
-    EXPECT_OK(o.manager().donate(false));
-  }
+  r.read(&task, out.data(), &n, 1, out.size(), o);
+  event::wait(o.manager(), &task);
   EXPECT_OK(task.result());
   EXPECT_EQ(N, n);
   out.resize(n);
@@ -158,16 +153,12 @@ TEST(Copy, FileFileSplice) {
   TestFileFileCopy(o);
 }
 
-TEST(Copy, HeterogenousManagers) {
-  event::Manager rm = make_manager();
-  event::Manager wm = make_manager();
-  io::Options ro, wo;
-  ro.set_manager(rm);
-  ro.set_block_size(4096);
-  ro.set_transfer_mode(io::TransferMode::read_write);
-  wo.set_manager(wm);
-  wo.set_block_size(4096);
-  wo.set_transfer_mode(io::TransferMode::read_write);
+TEST(Copy, SocketShuffle) {
+  event::Manager m = make_manager();
+  io::Options o;
+  o.set_manager(m);
+  o.set_block_size(4096);
+  o.set_transfer_mode(io::TransferMode::read_write);
 
   base::SocketPair rdpair, wrpair;
   ASSERT_OK(base::make_socketpair(&rdpair, AF_UNIX, SOCK_STREAM, 0));
@@ -216,15 +207,15 @@ TEST(Copy, HeterogenousManagers) {
     LOG(INFO) << "got EOF on wrpair";
   });
 
-  io::Reader r = io::fdreader(rdpair.right, ro);
-  io::Writer w = io::fdwriter(wrpair.left, wo);
+  io::Reader r = io::fdreader(rdpair.right);
+  io::Writer w = io::fdwriter(wrpair.left);
 
   event::Task task;
   std::size_t n;
   LOG(INFO) << "starting copy";
-  io::copy(&task, &n, w, r);
+  io::copy(&task, &n, w, r, o);
   LOG(INFO) << "waiting on copy";
-  event::wait_all({rm, wm}, {&task});
+  event::wait(m, &task);
   LOG(INFO) << "copy complete";
   EXPECT_OK(task.result());
   LOG(INFO) << "sending EOF on wrpair";

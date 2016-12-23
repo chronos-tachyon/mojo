@@ -8,6 +8,22 @@
 
 #include "base/logging.h"
 
+__attribute__((const)) static std::size_t gcd(std::size_t a,
+                                              std::size_t b) noexcept {
+  std::size_t t;
+  while (b != 0) {
+    t = b;
+    b = a % b;
+    a = t;
+  }
+  return a;
+}
+
+__attribute__((const)) static std::size_t lcm(std::size_t a,
+                                              std::size_t b) noexcept {
+  return a / gcd(a, b) * b;
+}
+
 namespace io {
 
 namespace {
@@ -17,50 +33,54 @@ struct CopyHelper {
   const std::size_t max;
   const Writer writer;
   const Reader reader;
-  event::Task subtask;
+  const Options options;
+  const std::size_t block_size;
   BufferPool pool;
   OwnedBuffer buffer;
+  event::Task subtask;
   std::size_t n;
   bool eof;
 
-  CopyHelper(event::Task* t, std::size_t* c, std::size_t x, Writer w,
-             Reader r) noexcept : task(t),
-                                  copied(c),
-                                  max(x),
-                                  writer(std::move(w)),
-                                  reader(std::move(r)),
-                                  pool(choose_pool(writer, reader)),
-                                  buffer(pool.take()),
-                                  n(0),
-                                  eof(false) {
+  CopyHelper(event::Task* t, std::size_t* c, std::size_t x, Writer w, Reader r,
+             Options opts) noexcept : task(t),
+                                      copied(c),
+                                      max(x),
+                                      writer(std::move(w)),
+                                      reader(std::move(r)),
+                                      options(std::move(opts)),
+                                      block_size(compute_block_size(writer, reader, options)),
+                                      pool(choose_pool(block_size, options)),
+                                      buffer(pool.take()),
+                                      n(0),
+                                      eof(false) {
     VLOG(6) << "io::CopyHelper::CopyHelper: max=" << max;
   }
 
   ~CopyHelper() noexcept { VLOG(6) << "io::CopyHelper::~CopyHelper"; }
 
-  static std::size_t compute_block_size(const Writer& w, const Reader& r) {
-    std::size_t wbsz = w.block_size();
-    std::size_t rbsz = r.block_size();
-    return (wbsz > rbsz) ? wbsz : rbsz;
+  static std::size_t compute_block_size(const Writer& w, const Reader& r,
+                                        const Options& o) {
+    bool has_blksz;
+    std::size_t blksz;
+    std::tie(has_blksz, blksz) = o.block_size();
+    if (has_blksz) return blksz;
+    std::size_t wblksz = w.ideal_block_size();
+    std::size_t rblksz = r.ideal_block_size();
+    return lcm(wblksz, rblksz);
   }
 
-  static BufferPool choose_pool(const Writer& w, const Reader& r) {
-    BufferPool wpool = w.options().pool();
-    BufferPool rpool = r.options().pool();
-    auto block_size = compute_block_size(w, r);
-    if (wpool.buffer_size() < rpool.buffer_size()) {
-      wpool.swap(rpool);
-    }
-    if (wpool.buffer_size() < block_size) {
-      wpool = BufferPool(block_size, null_pool);
-    }
-    return wpool;
+  static BufferPool choose_pool(std::size_t block_size, const Options& o) {
+    BufferPool pool = o.pool();
+    if (pool.buffer_size() >= block_size)
+      return pool;
+    else
+      return BufferPool(block_size, null_pool);
   }
 
   void begin() {
     VLOG(6) << "io::CopyHelper::begin";
     task->add_subtask(&subtask);
-    reader.write_to(&subtask, &n, max, writer);
+    reader.write_to(&subtask, &n, max, writer, options);
     auto closure = [this] { return write_to_complete(); };
     subtask.on_finished(event::callback(closure));
   }
@@ -79,7 +99,7 @@ struct CopyHelper {
     }
     subtask.reset();
     task->add_subtask(&subtask);
-    writer.read_from(&subtask, &n, max, reader);
+    writer.read_from(&subtask, &n, max, reader, options);
     auto closure = [this] { return read_from_complete(); };
     subtask.on_finished(event::callback(closure));
     return base::Result();
@@ -103,7 +123,7 @@ struct CopyHelper {
     std::size_t len = buffer.size();
     if (len > max - *copied) len = max - *copied;
     if (min > len) min = len;
-    reader.read(&subtask, buffer.data(), &n, min, len);
+    reader.read(&subtask, buffer.data(), &n, min, len, options);
     auto closure = [this] { return fallback_read_complete(); };
     subtask.on_finished(event::callback(closure));
     return base::Result();
@@ -134,7 +154,7 @@ struct CopyHelper {
     const char* ptr = buffer.data();
     std::size_t len = n;
     n = 0;
-    writer.write(&subtask, &n, ptr, len);
+    writer.write(&subtask, &n, ptr, len, options);
     auto closure = [this] { return fallback_write_complete(); };
     subtask.on_finished(event::callback(closure));
     return base::Result();
@@ -159,7 +179,7 @@ struct CopyHelper {
     std::size_t len = buffer.size();
     if (len > max - *copied) len = max - *copied;
     if (min > len) min = len;
-    reader.read(&subtask, buffer.data(), &n, min, len);
+    reader.read(&subtask, buffer.data(), &n, min, len, options);
     auto closure = [this] { return fallback_read_complete(); };
     subtask.on_finished(event::callback(closure));
     return base::Result();
@@ -168,10 +188,11 @@ struct CopyHelper {
 }  // anonymous namespace
 
 void copy_n(event::Task* task, std::size_t* copied, std::size_t max, Writer w,
-            Reader r) {
+            Reader r, const Options& opts) {
   *copied = 0;
   if (!task->start()) return;
-  auto* helper = new CopyHelper(task, copied, max, std::move(w), std::move(r));
+  auto* helper =
+      new CopyHelper(task, copied, max, std::move(w), std::move(r), opts);
   helper->begin();
 }
 
