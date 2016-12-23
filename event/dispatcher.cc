@@ -86,10 +86,6 @@ base::Result Dispatcher::cork() { return base::Result::not_implemented(); }
 
 base::Result Dispatcher::uncork() { return base::Result::not_implemented(); }
 
-base::Result Dispatcher::donate(bool forever) {
-  return base::Result::not_implemented();
-}
-
 namespace {
 
 // The implementation for inline Dispatchers is fairly minimal.
@@ -117,6 +113,10 @@ class InlineDispatcher : public Dispatcher {
 
   void shutdown() override {
     // noop
+  }
+
+  base::Result donate(bool forever) override {
+    return base::Result();
   }
 
  private:

@@ -143,7 +143,7 @@ class Dispatcher {
   //
   // REENTRANCY NOTE: It is NEVER safe to call |donate| from within a Callback.
   //
-  virtual base::Result donate(bool forever);
+  virtual base::Result donate(bool forever) = 0;
 };
 
 // An IdleFunction is a function that Dispatcher instances may choose to call
