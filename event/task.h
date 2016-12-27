@@ -18,6 +18,8 @@
 
 namespace event {
 
+class Dispatcher;  // forward declaration
+
 // A Task is used by asynchronous and/or threaded functions as an output
 // parameter for returning a base::Result, with the side effect of notifying
 // the caller of completion in the process. Task is commonly used in
@@ -71,6 +73,16 @@ class Task {
     //
     // NEXT STATES: N/A (terminal)
     done = 8,
+  };
+
+  using DispatcherPtr = std::shared_ptr<Dispatcher>;
+
+  struct Work {
+    DispatcherPtr dispatcher;
+    CallbackPtr callback;
+
+    Work(DispatcherPtr d, CallbackPtr c) noexcept : dispatcher(std::move(d)),
+                                                    callback(std::move(c)) {}
   };
 
   // Constructs an empty Task, ready for use.
@@ -129,11 +141,18 @@ class Task {
   // Registers a Callback to execute when the Task reaches |expiring|,
   // |cancelling|, or |done| with result DEADLINE_EXCEEDED or CANCELLED.
   // - Will execute |callback| immediately if this Task is already cancelled
-  void on_cancelled(CallbackPtr callback);
+  void on_cancelled(DispatcherPtr /*nullable*/ dispatcher,
+                    CallbackPtr callback);
+  void on_cancelled(CallbackPtr callback) {
+    on_cancelled(nullptr, std::move(callback));
+  }
 
   // Registers a Callback to execute when the Task reaches the |done| state.
   // - Will execute |callback| immediately if this Task is already |done|.
-  void on_finished(CallbackPtr callback);
+  void on_finished(DispatcherPtr /*nullable*/ dispatcher, CallbackPtr callback);
+  void on_finished(CallbackPtr callback) {
+    on_finished(nullptr, std::move(callback));
+  }
 
   // Marks the task as having exceeded its deadline.
   // - Changes |ready| to |done| with result DEADLINE_EXCEEDED and returns true
@@ -189,8 +208,8 @@ class Task {
   State state_;
   base::Result result_;
   std::exception_ptr eptr_;
-  std::vector<CallbackPtr> on_finish_;
-  std::vector<CallbackPtr> on_cancel_;
+  std::vector<Work> on_finish_;
+  std::vector<Work> on_cancel_;
   std::vector<Task*> subtasks_;
 };
 

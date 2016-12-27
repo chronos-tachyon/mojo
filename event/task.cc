@@ -7,8 +7,10 @@
 #include <stdexcept>
 
 #include "base/logging.h"
+#include "event/dispatcher.h"
 
 using RC = base::Result::Code;
+using Work = event::Task::Work;
 
 static const char* const kTaskStateNames[] = {
     "ready",      "running",    "expiring",   "cancelling", "reserved#4",
@@ -17,20 +19,23 @@ static const char* const kTaskStateNames[] = {
 
 namespace event {
 
-static void invoke(CallbackPtr cb) {
+static void invoke(Work work) {
   try {
-    cb->run();
-    cb.reset();
+    if (work.dispatcher) {
+      work.dispatcher->dispatch(nullptr, std::move(work.callback));
+    } else {
+      work.callback->run();
+    }
   } catch(...) {
     LOG_EXCEPTION(std::current_exception());
   }
 }
 
-static void lifo_callbacks(std::vector<CallbackPtr> vec) {
+static void lifo_callbacks(std::vector<Work> vec) {
   while (!vec.empty()) {
-    auto cb = std::move(vec.back());
+    auto work = std::move(vec.back());
     vec.pop_back();
-    invoke(std::move(cb));
+    invoke(std::move(work));
   }
 }
 
@@ -96,7 +101,8 @@ void Task::add_subtask(Task* subtask) {
   }
 }
 
-void Task::on_cancelled(CallbackPtr cb) {
+void Task::on_cancelled(DispatcherPtr d, CallbackPtr cb) {
+  Work work(std::move(d), std::move(cb));
   auto lock = base::acquire_lock(mu_);
   bool run;
   if (state_ >= State::done) {
@@ -106,21 +112,22 @@ void Task::on_cancelled(CallbackPtr cb) {
     run = true;
   } else {
     run = false;
-    on_cancel_.push_back(std::move(cb));
+    on_cancel_.push_back(std::move(work));
   }
   if (run) {
     lock.unlock();
-    invoke(std::move(cb));
+    invoke(std::move(work));
   }
 }
 
-void Task::on_finished(CallbackPtr cb) {
+void Task::on_finished(DispatcherPtr d, CallbackPtr cb) {
+  Work work(std::move(d), std::move(cb));
   auto lock = base::acquire_lock(mu_);
   if (state_ >= State::done) {
     lock.unlock();
-    invoke(std::move(cb));
+    invoke(std::move(work));
   } else {
-    on_finish_.push_back(std::move(cb));
+    on_finish_.push_back(std::move(work));
   }
 }
 
