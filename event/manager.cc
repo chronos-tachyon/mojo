@@ -772,7 +772,7 @@ void ManagerImpl::wait() {
 
 base::Result ManagerImpl::shutdown() noexcept {
   auto lock0 = base::acquire_lock(mu_);
-  if (!running_) return not_running();
+  if (!running_) return base::Result();
 
   // Mark ourselves as no longer running.
   running_ = false;
