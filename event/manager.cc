@@ -27,6 +27,10 @@ using TeeMap = std::unordered_map<int, TeeVec>;
 
 namespace event {
 
+namespace internal {
+void assert_depth();  // defined in dispatcher.cc
+}  // namespace internal
+
 namespace {
 
 static base::Result not_running() {
@@ -1403,6 +1407,7 @@ struct WaitData {
 }  // anonymous namespace
 
 void wait_n(std::vector<Manager> mv, std::vector<Task*> tv, std::size_t n) {
+  internal::assert_depth();
   if (n > tv.size()) {
     LOG(DFATAL) << "BUG: event::wait_n asked to wait for " << n
                 << " task completions, but only " << tv.size()

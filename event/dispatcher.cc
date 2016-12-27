@@ -83,6 +83,12 @@ static thread_local std::size_t l_depth = 0;
 
 namespace event {
 
+namespace internal {
+void assert_depth() {
+  CHECK_EQ(l_depth, 0U);
+}
+}  // namespace internal
+
 base::Result Dispatcher::adjust(const DispatcherOptions& opts) {
   return base::Result::not_implemented();
 }
@@ -161,7 +167,7 @@ class AsyncDispatcher : public Dispatcher {
   }
 
   base::Result donate(bool forever) override {
-    CHECK_EQ(l_depth, 0U);
+    internal::assert_depth();
     ++l_depth;
     auto cleanup = base::cleanup([] { --l_depth; });
 
@@ -303,7 +309,7 @@ class ThreadPoolDispatcher : public Dispatcher {
   }
 
   base::Result donate(bool forever) override {
-    CHECK_EQ(l_depth, 0U);
+    internal::assert_depth();
     ++l_depth;
     auto cleanup0 = base::cleanup([] { --l_depth; });
 
