@@ -1079,6 +1079,7 @@ void ManagerImpl::handle_timer_event(CallbackVec* cbvec, base::token_t gt,
 }  // namespace internal
 
 static void wait_impl(ManagerPtr& ptr, RecordPtr& rec) {
+  if (!ptr || !rec) return;
   auto lock = base::acquire_lock(rec->mu);
   CHECK(rec->disabled);
   if (rec->waited) return;
@@ -1089,6 +1090,7 @@ static void wait_impl(ManagerPtr& ptr, RecordPtr& rec) {
 }
 
 static void disown_impl(ManagerPtr& ptr, RecordPtr& rec) {
+  if (!ptr || !rec) return;
   auto p = std::move(ptr);
   auto r = std::move(rec);
   p->dispose(std::move(r));
@@ -1115,17 +1117,15 @@ base::Result FileDescriptor::modify(Set set) {
 }
 
 base::Result FileDescriptor::disable() {
-  assert_valid();
-  return ptr_->fd_remove(rec_.get());
+  if (ptr_ && rec_) return ptr_->fd_remove(rec_.get());
+  return base::Result();
 }
 
 void FileDescriptor::wait() {
-  assert_valid();
   wait_impl(ptr_, rec_);
 }
 
 void FileDescriptor::disown() {
-  assert_valid();
   disown_impl(ptr_, rec_);
 }
 
@@ -1143,17 +1143,15 @@ void Signal::assert_valid() const {
 }
 
 base::Result Signal::disable() {
-  assert_valid();
-  return ptr_->signal_remove(rec_.get());
+  if (ptr_ && rec_) return ptr_->signal_remove(rec_.get());
+  return base::Result();
 }
 
 void Signal::wait() {
-  assert_valid();
   wait_impl(ptr_, rec_);
 }
 
 void Signal::disown() {
-  assert_valid();
   disown_impl(ptr_, rec_);
 }
 
@@ -1227,17 +1225,15 @@ base::Result Timer::cancel() {
 }
 
 base::Result Timer::disable() {
-  assert_valid();
-  return ptr_->timer_remove(rec_.get());
+  if (ptr_ && rec_) return ptr_->timer_remove(rec_.get());
+  return base::Result();
 }
 
 void Timer::wait() {
-  assert_valid();
   wait_impl(ptr_, rec_);
 }
 
 void Timer::disown() {
-  assert_valid();
   disown_impl(ptr_, rec_);
 }
 
@@ -1260,17 +1256,15 @@ base::Result Generic::fire(int value) const {
 }
 
 base::Result Generic::disable() {
-  assert_valid();
-  return ptr_->generic_remove(rec_.get());
+  if (ptr_ && rec_) return ptr_->generic_remove(rec_.get());
+  return base::Result();
 }
 
 void Generic::wait() {
-  assert_valid();
   wait_impl(ptr_, rec_);
 }
 
 void Generic::disown() {
-  assert_valid();
   disown_impl(ptr_, rec_);
 }
 
