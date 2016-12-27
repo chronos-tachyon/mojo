@@ -50,6 +50,15 @@ class Options {
   Options& operator=(const Options&) noexcept = default;
   Options& operator=(Options&&) noexcept = default;
 
+  // Resets this io::Options to the default values.
+  void reset() {
+    has_ = 0;
+    blocksize_ = 0;
+    manager_ = event::Manager();
+    pool_ = BufferPool();
+    transfer_ = TransferMode::system_default;
+  }
+
   // Returns the event::Manager on which to perform async I/O.
   event::Manager manager() const {
     return manager_.or_system_manager();  // Always returns a Manager
