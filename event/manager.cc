@@ -27,10 +27,6 @@ using TeeMap = std::unordered_map<int, TeeVec>;
 
 namespace event {
 
-namespace internal {
-void assert_depth();  // defined in dispatcher.cc
-}  // namespace internal
-
 namespace {
 
 static base::Result not_running() {
@@ -946,6 +942,7 @@ void ManagerImpl::schedule(CallbackVec* cbvec, Record* rec, Data data) {
 }
 
 void ManagerImpl::wait_locked(base::Lock& lock) {
+  internal::assert_depth();
   DispatcherPtr d = DCHECK_NOTNULL(d_);
   VLOG(6) << outstanding_ << " callback(s) to wait on";
   using MS = std::chrono::milliseconds;

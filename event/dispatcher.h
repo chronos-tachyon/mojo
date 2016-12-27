@@ -353,6 +353,10 @@ void set_system_dispatcher(DispatcherPtr ptr);
 
 std::size_t num_cores();
 
+namespace internal {
+void assert_depth();
+}  // namespace internal
+
 }  // namespace event
 
 #endif  // EVENT_DISPATCHER_H
