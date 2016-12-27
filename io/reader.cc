@@ -486,7 +486,6 @@ class FDReader : public ReaderImpl {
   void close(event::Task* task, const Options& opts) override;
 
  private:
-  void purge(base::Lock& lock);
   void process(base::Lock& lock);
   base::Result wake(event::Set set);
   base::Result arm(event::FileDescriptor* evt, const base::FD& fd,
@@ -511,7 +510,8 @@ FDReader::~FDReader() noexcept {
     op->process(this);
   }
   lock.lock();
-  purge(lock);
+  auto p = std::move(purge_);
+  for (auto& evt : p) evt.wait();
 }
 
 void FDReader::read(event::Task* task, char* out, std::size_t* n,
@@ -538,14 +538,8 @@ void FDReader::close(event::Task* task, const Options& opts) {
   if (prologue(task)) task->finish(std::move(r));
 }
 
-void FDReader::purge(base::Lock& lock) {
-  auto p = std::move(purge_);
-  for (auto& evt : p) evt.wait();
-}
-
 void FDReader::process(base::Lock& lock) {
   VLOG(4) << "io::FDReader::process: begin: q.size()=" << q_.size();
-
   while (!q_.empty()) {
     auto op = std::move(q_.front());
     q_.pop_front();
@@ -559,8 +553,6 @@ void FDReader::process(base::Lock& lock) {
     }
     VLOG(5) << "io::FDReader::process: consumed";
   }
-
-  if (depth_ == 0) purge(lock);
   VLOG(4) << "io::FDReader::process: end";
 }
 

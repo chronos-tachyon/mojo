@@ -345,7 +345,6 @@ class FDWriter : public WriterImpl {
   base::FD internal_writerfd() const override { return fd_; }
 
  private:
-  void purge(base::Lock& lock);
   void process(base::Lock& lock);
   base::Result wake(event::Set set);
   base::Result arm(event::FileDescriptor* evt, const base::FD& fd,
@@ -370,7 +369,8 @@ FDWriter::~FDWriter() noexcept {
     op->process(this);
   }
   lock.lock();
-  purge(lock);
+  auto p = std::move(purge_);
+  for (auto& evt : p) evt.wait();
 }
 
 void FDWriter::write(event::Task* task, std::size_t* n, const char* ptr,
@@ -386,11 +386,6 @@ void FDWriter::close(event::Task* task, const Options& opts) {
   VLOG(6) << "io::FDWriter::close";
   base::Result r = fd_->close();
   if (prologue(task)) task->finish(std::move(r));
-}
-
-void FDWriter::purge(base::Lock& lock) {
-  auto p = std::move(purge_);
-  for (auto& evt : p) evt.wait();
 }
 
 void FDWriter::process(base::Lock& lock) {
@@ -410,7 +405,6 @@ void FDWriter::process(base::Lock& lock) {
     VLOG(5) << "io::FDWriter::process: consumed";
   }
 
-  if (depth_ == 0) purge(lock);
   VLOG(4) << "io::FDWriter::process: end";
 }
 
