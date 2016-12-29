@@ -327,15 +327,15 @@ base::Result ManagerImpl::fd_add(std::unique_ptr<Record>* out, base::FD fd,
   if (fdnum == -1)
     return base::Result::invalid_argument("file descriptor is closed");
 
-  base::token_t gt;
+  base::token_t t;
   bool added_fd;
   auto fdit = fdmap_.find(fdnum);
   if (fdit == fdmap_.end()) {
-    gt = base::next_token();
-    fdmap_[fdnum] = gt;
+    t = base::next_token();
+    fdmap_[fdnum] = t;
     added_fd = true;
   } else {
-    gt = fdit->second;
+    t = fdit->second;
     added_fd = false;
   }
   auto cleanup0 = base::cleanup([this, fdnum, added_fd] {
@@ -344,7 +344,7 @@ base::Result ManagerImpl::fd_add(std::unique_ptr<Record>* out, base::FD fd,
 
   Set before;
   bool added_src;
-  auto& src = sources_[gt];
+  auto& src = sources_[t];
   if (src.records.empty()) {
     src.type = SourceType::fd;
     src.fd = std::move(fd);
@@ -363,19 +363,19 @@ base::Result ManagerImpl::fd_add(std::unique_ptr<Record>* out, base::FD fd,
   DCHECK_EQ(added_fd, added_src);
 
   Set after = before | set;
-  auto myrec = make_unique<Record>(gt, std::move(handler), set);
+  auto myrec = make_unique<Record>(t, std::move(handler), set);
   src.records.push_back(myrec.get());
-  auto cleanup1 = base::cleanup([this, gt, added_src, &src] {
+  auto cleanup1 = base::cleanup([this, t, added_src, &src] {
     src.records.pop_back();
-    if (added_src) sources_.erase(gt);
+    if (added_src) sources_.erase(t);
   });
 
   base::Result r;
   if (added_src) {
-    r = p->add(src.fd, gt, after);
+    r = p->add(src.fd, t, after);
   } else {
     if (before != after) {
-      r = p->modify(src.fd, gt, after);
+      r = p->modify(src.fd, t, after);
     }
   }
   if (r) {
@@ -397,8 +397,8 @@ base::Result ManagerImpl::fd_modify(Record* myrec, Set set) {
   if (!running_) return not_running();
   PollerPtr p = DCHECK_NOTNULL(p_);
 
-  auto gt = myrec->gt;
-  auto srcit = sources_.find(gt);
+  auto t = myrec->token;
+  auto srcit = sources_.find(t);
   DCHECK(srcit != sources_.end());
   DCHECK(srcit->second.type == SourceType::fd);
   auto& src = srcit->second;
@@ -420,7 +420,7 @@ base::Result ManagerImpl::fd_modify(Record* myrec, Set set) {
 
   base::Result r;
   if (before != after) {
-    r = p->modify(src.fd, gt, after);
+    r = p->modify(src.fd, t, after);
   }
   if (r) myrec->set = set;
   return r;
@@ -438,8 +438,8 @@ base::Result ManagerImpl::fd_remove(Record* myrec) {
   }
   PollerPtr p = DCHECK_NOTNULL(p_);
 
-  auto gt = myrec->gt;
-  auto srcit = sources_.find(gt);
+  auto t = myrec->token;
+  auto srcit = sources_.find(t);
   DCHECK(srcit != sources_.end());
   DCHECK(srcit->second.type == SourceType::fd);
   auto& src = srcit->second;
@@ -466,11 +466,11 @@ base::Result ManagerImpl::fd_remove(Record* myrec) {
   if (src.records.empty()) {
     auto fd = std::move(src.fd);
     int fdnum = src.signo;
-    sources_.erase(gt);
+    sources_.erase(t);
     fdmap_.erase(fdnum);
     r = p->remove(fd);
   } else if (before != after) {
-    r = p->modify(src.fd, gt, after);
+    r = p->modify(src.fd, t, after);
   }
 
   myrec->disabled = true;
@@ -490,15 +490,15 @@ base::Result ManagerImpl::signal_add(std::unique_ptr<Record>* out, int signo,
   auto lock = base::acquire_lock(mu_);
   if (!running_) return not_running();
 
-  base::token_t gt;
+  base::token_t t;
   bool added_sig;
   auto sigit = sigmap_.find(signo);
   if (sigit == sigmap_.end()) {
-    gt = base::next_token();
-    sigmap_[signo] = gt;
+    t = base::next_token();
+    sigmap_[signo] = t;
     added_sig = true;
   } else {
-    gt = sigit->second;
+    t = sigit->second;
     added_sig = false;
   }
   auto cleanup0 = base::cleanup([this, signo, added_sig] {
@@ -506,7 +506,7 @@ base::Result ManagerImpl::signal_add(std::unique_ptr<Record>* out, int signo,
   });
 
   bool added_src;
-  auto& src = sources_[gt];
+  auto& src = sources_[t];
   if (src.records.empty()) {
     src.type = SourceType::signal;
     src.signo = signo;
@@ -517,11 +517,11 @@ base::Result ManagerImpl::signal_add(std::unique_ptr<Record>* out, int signo,
   }
   DCHECK_EQ(added_sig, added_src);
 
-  auto myrec = make_unique<Record>(gt, std::move(handler));
+  auto myrec = make_unique<Record>(t, std::move(handler));
   src.records.push_back(myrec.get());
-  auto cleanup1 = base::cleanup([this, gt, added_src, &src] {
+  auto cleanup1 = base::cleanup([this, t, added_src, &src] {
     src.records.pop_back();
-    if (added_src) sources_.erase(gt);
+    if (added_src) sources_.erase(t);
   });
 
   base::Result r;
@@ -547,8 +547,8 @@ base::Result ManagerImpl::signal_remove(Record* myrec) {
     return base::Result();
   }
 
-  auto gt = myrec->gt;
-  auto srcit = sources_.find(gt);
+  auto t = myrec->token;
+  auto srcit = sources_.find(t);
   DCHECK(srcit != sources_.end());
   DCHECK(srcit->second.type == SourceType::signal);
   auto& src = srcit->second;
@@ -570,7 +570,7 @@ base::Result ManagerImpl::signal_remove(Record* myrec) {
   if (src.records.empty()) {
     int signo = src.signo;
     sigmap_.erase(signo);
-    sources_.erase(gt);
+    sources_.erase(t);
     r = sig_tee_remove(pipe_.write, signo);
   }
 
@@ -595,16 +595,16 @@ base::Result ManagerImpl::timer_add(std::unique_ptr<Record>* out,
   if (!running_) return not_running();
   PollerPtr p = DCHECK_NOTNULL(p_);
 
-  base::token_t gt = base::next_token();
-  auto& src = sources_[gt];
+  base::token_t t = base::next_token();
+  auto& src = sources_[t];
   src.type = SourceType::timer;
   src.fd = std::move(fd);
 
-  auto myrec = make_unique<Record>(gt, std::move(handler));
+  auto myrec = make_unique<Record>(t, std::move(handler));
   src.records.push_back(myrec.get());
-  auto cleanup = base::cleanup([this, gt] { sources_.erase(gt); });
+  auto cleanup = base::cleanup([this, t] { sources_.erase(t); });
 
-  base::Result r = p->add(src.fd, gt, Set::readable_bit());
+  base::Result r = p->add(src.fd, t, Set::readable_bit());
   if (r) {
     *out = std::move(myrec);
     cleanup.cancel();
@@ -622,7 +622,7 @@ base::Result ManagerImpl::timer_arm(Record* myrec, base::Duration delay,
     return base::Result::failed_precondition("event::Timer has been disabled");
   if (!running_) return not_running();
 
-  auto srcit = sources_.find(myrec->gt);
+  auto srcit = sources_.find(myrec->token);
   DCHECK(srcit != sources_.end());
   DCHECK(srcit->second.type == SourceType::timer);
   auto& src = srcit->second;
@@ -660,7 +660,7 @@ base::Result ManagerImpl::timer_remove(Record* myrec) {
   }
   PollerPtr p = DCHECK_NOTNULL(p_);
 
-  auto srcit = sources_.find(myrec->gt);
+  auto srcit = sources_.find(myrec->token);
   DCHECK(srcit != sources_.end());
   DCHECK(srcit->second.type == SourceType::timer);
   auto& src = srcit->second;
@@ -684,11 +684,11 @@ base::Result ManagerImpl::generic_add(std::unique_ptr<Record>* out,
   auto lock = base::acquire_lock(mu_);
   if (!running_) return not_running();
 
-  base::token_t gt = base::next_token();
-  auto& src = sources_[gt];
+  base::token_t t = base::next_token();
+  auto& src = sources_[t];
   src.type = SourceType::generic;
 
-  auto myrec = make_unique<Record>(gt, std::move(handler));
+  auto myrec = make_unique<Record>(t, std::move(handler));
   src.records.push_back(myrec.get());
   *out = std::move(myrec);
   return base::Result();
@@ -704,12 +704,12 @@ base::Result ManagerImpl::generic_fire(Record* myrec, int value) {
         "event::Generic has been disabled");
   if (!running_) return not_running();
 
-  auto srcit = sources_.find(myrec->gt);
+  auto srcit = sources_.find(myrec->token);
   DCHECK(srcit != sources_.end());
   DCHECK(srcit->second.type == SourceType::generic);
 
   Data data;
-  data.token = myrec->gt;
+  data.token = myrec->token;
   data.int_value = value;
   data.events = Set::event_bit();
   return base::write_exactly(pipe_.write, &data, sizeof(data), "event pipe");
@@ -726,7 +726,7 @@ base::Result ManagerImpl::generic_remove(Record* myrec) {
     return base::Result();
   }
 
-  auto srcit = sources_.find(myrec->gt);
+  auto srcit = sources_.find(myrec->token);
   DCHECK(srcit != sources_.end());
   DCHECK(srcit->second.type == SourceType::generic);
   auto& src = srcit->second;
@@ -952,24 +952,24 @@ void ManagerImpl::wait_locked(base::Lock& lock) {
   }
 }
 
-void ManagerImpl::handle_event(CallbackVec* cbvec, base::token_t gt, Set set) {
+void ManagerImpl::handle_event(CallbackVec* cbvec, base::token_t t, Set set) {
   DCHECK_NOTNULL(cbvec);
 
-  if (gt == base::token_t()) {
+  if (t == base::token_t()) {
     handle_pipe_event(cbvec);
   }
 
-  auto srcit = sources_.find(gt);
+  auto srcit = sources_.find(t);
   if (srcit == sources_.end()) return;
   const auto& src = srcit->second;
 
   switch (src.type) {
     case SourceType::fd:
-      handle_fd_event(cbvec, gt, src, set);
+      handle_fd_event(cbvec, t, src, set);
       break;
 
     case SourceType::timer:
-      handle_timer_event(cbvec, gt, src);
+      handle_timer_event(cbvec, t, src);
       break;
 
     default:
@@ -992,15 +992,15 @@ void ManagerImpl::handle_pipe_event(CallbackVec* cbvec) {
     if (data.events.signal()) {
       auto sigit = sigmap_.find(data.signal_number);
       if (sigit == sigmap_.end()) continue;
-      base::token_t gt = sigit->second;
+      base::token_t t = sigit->second;
 
-      auto srcit = sources_.find(gt);
+      auto srcit = sources_.find(t);
       if (srcit == sources_.end()) continue;
       if (srcit->second.type != SourceType::signal) continue;
       if (srcit->second.signo != data.signal_number) continue;
       const auto& src = srcit->second;
 
-      data.token = gt;
+      data.token = t;
       for (Record* rec : src.records) {
         schedule(cbvec, rec, data);
       }
@@ -1019,13 +1019,13 @@ void ManagerImpl::handle_pipe_event(CallbackVec* cbvec) {
   }
 }
 
-void ManagerImpl::handle_fd_event(CallbackVec* cbvec, base::token_t gt,
+void ManagerImpl::handle_fd_event(CallbackVec* cbvec, base::token_t t,
                                   const Source& src, Set set) {
   DCHECK_NOTNULL(cbvec);
 
   int fdnum = src.signo;
   Data data;
-  data.token = gt;
+  data.token = t;
   data.fd = fdnum;
   for (Record* rec : src.records) {
     auto intersection = rec->set & set;
@@ -1036,7 +1036,7 @@ void ManagerImpl::handle_fd_event(CallbackVec* cbvec, base::token_t gt,
   }
 }
 
-void ManagerImpl::handle_timer_event(CallbackVec* cbvec, base::token_t gt,
+void ManagerImpl::handle_timer_event(CallbackVec* cbvec, base::token_t t,
                                      const Source& src) {
   static constexpr uint64_t INTMAX = std::numeric_limits<int>::max();
   DCHECK_NOTNULL(cbvec);
@@ -1047,7 +1047,7 @@ void ManagerImpl::handle_timer_event(CallbackVec* cbvec, base::token_t gt,
   if (x > INTMAX) x = INTMAX;
 
   Data data;
-  data.token = gt;
+  data.token = t;
   data.int_value = x;
   data.events = Set::timer_bit();
   for (Record* rec : src.records) {

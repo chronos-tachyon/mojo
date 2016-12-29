@@ -42,14 +42,14 @@ enum class SourceType : uint8_t {
 
 struct Record {
   mutable std::mutex mu;
-  base::token_t gt;
+  base::token_t token;
   HandlerPtr handler;
   Set set;
   bool disabled;  // true iff new calls forbidden
   bool waited;    // true iff ManagerImpl::wait() was called after disabled
 
-  Record(base::token_t gt, HandlerPtr h, Set set = Set()) noexcept
-      : gt(gt),
+  Record(base::token_t t, HandlerPtr h, Set set = Set()) noexcept
+      : token(t),
         handler(std::move(h)),
         set(set),
         disabled(false),
@@ -127,11 +127,11 @@ class ManagerImpl {
 
   void schedule(CallbackVec* cbvec, Record* rec, Data data);
   void wait_locked(base::Lock& lock);
-  void handle_event(CallbackVec* cbvec, base::token_t gt, Set set);
+  void handle_event(CallbackVec* cbvec, base::token_t t, Set set);
   void handle_pipe_event(CallbackVec* cbvec);
-  void handle_fd_event(CallbackVec* cbvec, base::token_t gt, const Source& src,
+  void handle_fd_event(CallbackVec* cbvec, base::token_t t, const Source& src,
                        Set set);
-  void handle_timer_event(CallbackVec* cbvec, base::token_t gt,
+  void handle_timer_event(CallbackVec* cbvec, base::token_t t,
                           const Source& src);
 
   mutable std::mutex mu_;
