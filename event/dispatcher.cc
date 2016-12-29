@@ -20,20 +20,24 @@
 #include "base/logging.h"
 #include "base/util.h"
 
+static thread_local std::size_t l_depth = 0;
+
+namespace event {
+
 namespace {
 
 struct Work {
-  event::Task* task;
-  event::CallbackPtr callback;
+  Task* task;
+  CallbackPtr callback;
 
-  Work(event::Task* task, event::CallbackPtr callback) noexcept
+  Work(Task* task, CallbackPtr callback) noexcept
       : task(task),
         callback(std::move(callback)) {}
   Work() noexcept : Work(nullptr, nullptr) {}
 };
 
 static void invoke(base::Lock& lock, std::size_t& busy, std::size_t& done,
-                   std::size_t& caught, Work item) {
+                   std::size_t& caught, Work item) noexcept {
   bool threw = true;
   ++busy;
   auto cleanup0 = base::cleanup([&busy, &done, &caught, &threw] {
@@ -64,7 +68,7 @@ static void invoke(base::Lock& lock, std::size_t& busy, std::size_t& done,
   item.callback.reset();
 }
 
-static void invoke(base::Lock& lock, event::IdleFunction idle) {
+static void invoke(base::Lock& lock, IdleFunction idle) noexcept {
   if (!idle) return;
 
   lock.unlock();
@@ -77,26 +81,20 @@ static void invoke(base::Lock& lock, event::IdleFunction idle) {
   }
 }
 
-static thread_local std::size_t l_depth = 0;
-
 }  // anonymous namespace
 
-namespace event {
-
 namespace internal {
-void assert_depth() {
-  CHECK_EQ(l_depth, 0U);
-}
+void assert_depth() { CHECK_EQ(l_depth, 0U); }
 }  // namespace internal
 
 base::Result Dispatcher::adjust(const DispatcherOptions& opts) noexcept {
   return base::Result::not_implemented();
 }
 
-void Dispatcher::shutdown() noexcept { /*noop*/ }
-void Dispatcher::cork() noexcept { /*noop*/ }
-void Dispatcher::uncork() noexcept { /*noop*/ }
-void Dispatcher::donate(bool forever) noexcept { /*noop*/ }
+void Dispatcher::shutdown() noexcept {}
+void Dispatcher::cork() noexcept {}
+void Dispatcher::uncork() noexcept {}
+void Dispatcher::donate(bool forever) noexcept {}
 
 namespace {
 
@@ -329,9 +327,7 @@ class ThreadPoolDispatcher : public Dispatcher {
     curr_cv_.notify_all();
   }
 
-  bool should_exit() noexcept {
-    return current_ > desired_;
-  }
+  bool should_exit() noexcept { return current_ > desired_; }
 
   void donate_forever(base::Lock& lock) noexcept {
     using MS = std::chrono::milliseconds;
