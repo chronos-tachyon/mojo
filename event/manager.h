@@ -82,7 +82,7 @@ class ManagerImpl {
  public:
   ManagerImpl(PollerPtr p, DispatcherPtr d, base::Pipe pipe,
               std::size_t min_pollers, std::size_t max_pollers);
-  ~ManagerImpl() noexcept;
+  ~ManagerImpl() noexcept { shutdown(); }
 
   bool is_running() const noexcept {
     auto lock = base::acquire_lock(mu_);
@@ -110,20 +110,20 @@ class ManagerImpl {
   base::Result generic_fire(Record* myrec, int value);
   base::Result generic_remove(Record* myrec);
 
-  base::Result donate(bool forever);
+  void donate(bool forever) noexcept;
 
   void dispose(std::unique_ptr<internal::Record> rec);
   void wait();
 
-  base::Result shutdown() noexcept;
+  void shutdown() noexcept;
 
  private:
   friend struct Record;
   friend struct HandlerCallback;
 
-  base::Result donate_as_poller(base::Lock lock, bool forever);
-  base::Result donate_as_mixed(base::Lock lock, bool forever);
-  base::Result donate_as_worker(base::Lock lock, bool forever);
+  void donate_as_poller(base::Lock& lock, bool forever) noexcept;
+  void donate_as_mixed(base::Lock& lock, bool forever) noexcept;
+  void donate_as_worker(base::Lock& lock, bool forever) noexcept;
 
   void schedule(CallbackVec* cbvec, Record* rec, Data data);
   void wait_locked(base::Lock& lock);
@@ -562,16 +562,22 @@ class Manager {
   explicit operator bool() const noexcept { return !!ptr_; }
 
   // Asserts that this Manager is non-empty.
-  void assert_valid() const;
+  void assert_valid() const noexcept;
 
   // Returns this Manager, if non-empty, or else returns the system_manager().
   Manager or_system_manager() const;
 
   // Returns this Manager's Poller implementation.
-  PollerPtr poller() const;
+  PollerPtr poller() const noexcept {
+    assert_valid();
+    return ptr_->poller();
+  }
 
   // Returns this Manager's Dispatcher implementation.
-  DispatcherPtr dispatcher() const;
+  DispatcherPtr dispatcher() const noexcept {
+    assert_valid();
+    return ptr_->dispatcher();
+  }
 
   // Forwards the given <Task, Callback> to this Manager's Dispatcher.
   void dispatch(Task* /*nullable*/ task, CallbackPtr callback) const {
@@ -605,10 +611,15 @@ class Manager {
   base::Result set_timeout(Task* task, base::Duration delay);
 
   // Donates the current thread to the Manager, if supported.
-  base::Result donate(bool forever) const;
+  void donate(bool forever) const noexcept {
+    assert_valid();
+    ptr_->donate(forever);
+  }
 
   // Shuts down the Manager and releases all resources.
-  base::Result shutdown() const;
+  void shutdown() const noexcept {
+    if (ptr_) ptr_->shutdown();
+  }
 
  private:
   ManagerPtr ptr_;

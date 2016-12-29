@@ -327,7 +327,7 @@ static void TestManagerImplementation(event::Manager m, std::string name) {
   LOG(INFO) << "[TestManagerImplementation_TaskTimeouts:" << name << "]";
   TestManagerImplementation_TaskTimeouts(m);
   LOG(INFO) << "[shutdown:" << name << "]";
-  EXPECT_OK(m.shutdown());
+  m.shutdown();
   LOG(INFO) << "[OK:" << name << "]";
   base::log_flush();
 }

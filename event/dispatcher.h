@@ -90,7 +90,7 @@ class Dispatcher {
   }
 
   // Obtains statistics about this Dispatcher.
-  virtual DispatcherStats stats() const = 0;
+  virtual DispatcherStats stats() const noexcept = 0;
 
   // Requests that the Dispatcher free all resources. Blocks.
   //
@@ -100,7 +100,7 @@ class Dispatcher {
   //
   // Calls to |shutdown| are idempotent: two calls have the same effect as one.
   //
-  virtual void shutdown() = 0;
+  virtual void shutdown() noexcept;
 
   // OPTIONAL. Changes the Dispatcher's options at runtime. May block.
   //
@@ -113,19 +113,23 @@ class Dispatcher {
   //
   // APPLIES: |threaded_dispatcher|
   //
-  virtual base::Result adjust(const DispatcherOptions& opts);
+  virtual base::Result adjust(const DispatcherOptions& opts) noexcept;
 
-  // OPTIONAL. Causes the Dispatcher to temporarily stop dispatching callbacks.
+  // OPTIONAL. Corks the Dispatcher, pausing the processing of callbacks.
+  //
+  // It is an error to call |cork()| on a corked Dispatcher.
   //
   // APPLIES: |threaded_dispatcher|
   //
-  virtual base::Result cork();
+  virtual void cork() noexcept;
 
-  // OPTIONAL. Undoes the effect of |cork|.
+  // OPTIONAL. Uncorks the Dispatcher, resuming the processing of callbacks.
+  //
+  // It is an error to call |uncork()| on a Dispatcher that is not corked.
   //
   // APPLIES: |threaded_dispatcher|
   //
-  virtual base::Result uncork();
+  virtual void uncork() noexcept;
 
   // OPTIONAL. Donates the current thread to the Dispatcher, if supported.
   //
@@ -143,7 +147,7 @@ class Dispatcher {
   //
   // REENTRANCY NOTE: It is NEVER safe to call |donate| from within a Callback.
   //
-  virtual base::Result donate(bool forever) = 0;
+  virtual void donate(bool forever) noexcept;
 };
 
 // An IdleFunction is a function that Dispatcher instances may choose to call

@@ -38,10 +38,6 @@ static int get_fdnum(const base::FD& fd) {
   return pair.first;
 }
 
-static bool donate_ok(const base::Result& r) {
-  return r || r.code() == base::Result::Code::NOT_IMPLEMENTED;
-}
-
 template <typename T, typename... Args>
 static std::unique_ptr<T> make_unique(Args&&... args) {
   return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
@@ -299,25 +295,21 @@ ManagerImpl::ManagerImpl(PollerPtr p, DispatcherPtr d, base::Pipe pipe,
   DCHECK_NOTNULL(pipe_.write);
   DCHECK_NOTNULL(pipe_.read);
   auto lock = base::acquire_lock(mu_);
-  auto closure = [this] { donate(true).ignore_ok(); };
+  auto closure = [this] { donate(true); };
   for (std::size_t i = 0; i < min_; ++i) {
     std::thread(closure).detach();
   }
   while (current_ < min_) curr_cv_.wait(lock);
 }
 
-ManagerImpl::~ManagerImpl() noexcept {
-  shutdown().expect_ok(__FILE__, __LINE__);
-}
-
 PollerPtr ManagerImpl::poller() const noexcept {
   auto lock = base::acquire_lock(mu_);
-  return DCHECK_NOTNULL(p_);
+  return CHECK_NOTNULL(p_);
 }
 
 DispatcherPtr ManagerImpl::dispatcher() const noexcept {
   auto lock = base::acquire_lock(mu_);
-  return DCHECK_NOTNULL(d_);
+  return CHECK_NOTNULL(d_);
 }
 
 base::Result ManagerImpl::fd_add(std::unique_ptr<Record>* out, base::FD fd,
@@ -746,14 +738,14 @@ base::Result ManagerImpl::generic_remove(Record* myrec) {
   return base::Result();
 }
 
-base::Result ManagerImpl::donate(bool forever) {
+void ManagerImpl::donate(bool forever) noexcept {
   auto lock = base::acquire_lock(mu_);
   if (current_ >= max_) {
-    return donate_as_worker(std::move(lock), forever);
+    donate_as_worker(lock, forever);
   } else if (current_ >= min_) {
-    return donate_as_mixed(std::move(lock), forever);
+    donate_as_mixed(lock, forever);
   } else {
-    return donate_as_poller(std::move(lock), forever);
+    donate_as_poller(lock, forever);
   }
 }
 
@@ -770,9 +762,9 @@ void ManagerImpl::wait() {
   wait_locked(lock);
 }
 
-base::Result ManagerImpl::shutdown() noexcept {
+void ManagerImpl::shutdown() noexcept {
   auto lock0 = base::acquire_lock(mu_);
-  if (!running_) return base::Result();
+  if (!running_) return;
 
   // Mark ourselves as no longer running.
   running_ = false;
@@ -801,10 +793,10 @@ base::Result ManagerImpl::shutdown() noexcept {
   }
 
   VLOG(6) << "Closing event pipe (write half)";
-  base::Result wr = pipe_.write->close();
+  pipe_.write->close().expect_ok(__FILE__, __LINE__);
 
   VLOG(6) << "Closing event pipe (read half)";
-  base::Result rr = pipe_.read->close();
+  pipe_.read->close().expect_ok(__FILE__, __LINE__);
 
   VLOG(6) << "Freeing poller";
   p_ = nullptr;
@@ -826,11 +818,9 @@ base::Result ManagerImpl::shutdown() noexcept {
 
   VLOG(6) << "Freeing dispatcher";
   d_ = nullptr;
-
-  return wr.and_then(rr);
 }
 
-base::Result ManagerImpl::donate_as_poller(base::Lock lock, bool forever) {
+void ManagerImpl::donate_as_poller(base::Lock& lock, bool forever) noexcept {
   ++current_;
   curr_cv_.notify_all();
   auto cleanup = base::cleanup([this] {
@@ -843,11 +833,10 @@ base::Result ManagerImpl::donate_as_poller(base::Lock lock, bool forever) {
 
   Poller::EventVec vec;
   CallbackVec cbvec;
-  base::Result r;
   while (running_) {
     lock.unlock();
     auto reacquire0 = base::cleanup([&lock] { lock.lock(); });
-    r = p->wait(&vec, -1);
+    p->wait(&vec, -1).expect_ok(__FILE__, __LINE__);
     reacquire0.run();
 
     for (const auto& ev : vec) {
@@ -863,14 +852,11 @@ base::Result ManagerImpl::donate_as_poller(base::Lock lock, bool forever) {
     cbvec.clear();
     reacquire1.run();
 
-    if (!r) break;
     if (!forever) break;
   }
-  r.expect_ok(__FILE__, __LINE__);
-  return base::Result();
 }
 
-base::Result ManagerImpl::donate_as_mixed(base::Lock lock, bool forever) {
+void ManagerImpl::donate_as_mixed(base::Lock& lock, bool forever) noexcept {
   ++current_;
   curr_cv_.notify_all();
   auto cleanup = base::cleanup([this] {
@@ -883,17 +869,15 @@ base::Result ManagerImpl::donate_as_mixed(base::Lock lock, bool forever) {
 
   Poller::EventVec vec;
   CallbackVec cbvec;
-  base::Result r;
   while (running_) {
     lock.unlock();
     auto reacquire0 = base::cleanup([&lock] { lock.lock(); });
-    r = d->donate(false);
+    d->donate(false);
     reacquire0.run();
-    if (!donate_ok(r)) break;
 
     lock.unlock();
     auto reacquire1 = base::cleanup([&lock] { lock.lock(); });
-    r = p->wait(&vec, 0);
+    p->wait(&vec, 0).expect_ok(__FILE__, __LINE__);
     reacquire1.run();
 
     for (const auto& ev : vec) {
@@ -909,27 +893,20 @@ base::Result ManagerImpl::donate_as_mixed(base::Lock lock, bool forever) {
     cbvec.clear();
     reacquire2.run();
 
-    if (!r) break;
     if (!forever) break;
   }
-  r.expect_ok(__FILE__, __LINE__);
-  return base::Result();
 }
 
-base::Result ManagerImpl::donate_as_worker(base::Lock lock, bool forever) {
+void ManagerImpl::donate_as_worker(base::Lock& lock, bool forever) noexcept {
   DispatcherPtr d = DCHECK_NOTNULL(d_);
-  base::Result r;
   while (running_) {
     lock.unlock();
     auto reacquire0 = base::cleanup([&lock] { lock.lock(); });
-    r = d->donate(false);
+    d->donate(false);
     reacquire0.run();
 
-    if (!donate_ok(r)) break;
     if (!forever) break;
   }
-  r.expect_ok(__FILE__, __LINE__);
-  return base::Result();
 }
 
 void ManagerImpl::schedule(CallbackVec* cbvec, Record* rec, Data data) {
@@ -953,14 +930,14 @@ void ManagerImpl::wait_locked(base::Lock& lock) {
       if (call_cv_.wait_for(lock, timeout) == std::cv_status::timeout) {
         VLOG(6) << "Gave up waiting; donating this thread to the dispatcher";
         lock.unlock();
-        d->donate(false).expect_ok(__FILE__, __LINE__);
+        d->donate(false);
         lock.lock();
         timeout *= 2;
       }
     } else {
       VLOG(6) << "Donating this thread to the dispatcher";
       lock.unlock();
-      d->donate(false).expect_ok(__FILE__, __LINE__);
+      d->donate(false);
       lock.lock();
     }
     VLOG(6) << outstanding_ << " callback(s) remain(s)";
@@ -1275,18 +1252,8 @@ base::Result Generic::release() {
   return r;
 }
 
-void Manager::assert_valid() const {
+void Manager::assert_valid() const noexcept {
   CHECK(ptr_) << ": event::Manager is empty!";
-}
-
-PollerPtr Manager::poller() const {
-  assert_valid();
-  return ptr_->poller();
-}
-
-DispatcherPtr Manager::dispatcher() const {
-  assert_valid();
-  return ptr_->dispatcher();
 }
 
 base::Result Manager::fd(FileDescriptor* out, base::FD fd, Set set,
@@ -1383,16 +1350,6 @@ base::Result Manager::set_timeout(Task* task, base::Duration delay) {
   return r;
 }
 
-base::Result Manager::donate(bool forever) const {
-  assert_valid();
-  return ptr_->donate(forever);
-}
-
-base::Result Manager::shutdown() const {
-  assert_valid();
-  return ptr_->shutdown();
-}
-
 namespace {
 struct WaitData {
   std::mutex mu;
@@ -1445,7 +1402,7 @@ void wait_n(std::vector<Manager> mv, std::vector<Task*> tv, std::size_t n) {
     } else {
       lock.unlock();
       for (const Manager& m : mv) {
-        CHECK_OK(m.donate(false));
+        m.donate(false);
       }
       lock.lock();
     }

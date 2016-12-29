@@ -144,7 +144,7 @@ TEST(AsyncDispatcher, EndToEnd) {
   d->dispatch(&task2, event::callback(Closure(&n)));
   d->dispatch(&task3, event::callback(Closure(&n)));
   EXPECT_EQ(0, n);
-  EXPECT_OK(d->donate(false));
+  d->donate(false);
   EXPECT_EQ(3, n);
   EXPECT_OK(task1.result());
   EXPECT_OK(task2.result());
@@ -165,7 +165,7 @@ TEST(AsyncDispatcher, ThrowingCallback) {
   for (auto& task : tasks) {
     d->dispatch(&task, event::callback(Throw()));
   }
-  EXPECT_OK(d->donate(false));
+  d->donate(false);
   for (auto& task : tasks) {
     EXPECT_THROW(task.result(), std::system_error);
   }
@@ -190,9 +190,7 @@ TEST(ThreadPoolDispatcher, EndToEnd) {
   expected.current_num_workers = 1;
   EXPECT_EQ(expected, d->stats());
 
-  EXPECT_FAILED_PRECONDITION(d->uncork());
-  ASSERT_OK(d->cork());
-  EXPECT_FAILED_PRECONDITION(d->cork());
+  d->cork();
 
   expected.corked = true;
   EXPECT_EQ(expected, d->stats());
@@ -238,8 +236,7 @@ TEST(ThreadPoolDispatcher, EndToEnd) {
   expected.pending_count = 11;
   EXPECT_EQ(expected, d->stats());
 
-  ASSERT_OK(d->uncork());
-  EXPECT_FAILED_PRECONDITION(d->uncork());
+  d->uncork();
 
   lock.lock();
   LOG(INFO) << "waiting on done";

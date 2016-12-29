@@ -708,7 +708,7 @@ TEST(FDReader, AsyncRead) {
 
   TestFDReader_Read(o);
 
-  EXPECT_OK(m.shutdown());
+  m.shutdown();
 }
 
 TEST(FDReader, ThreadedRead) {
@@ -723,7 +723,7 @@ TEST(FDReader, ThreadedRead) {
 
   TestFDReader_Read(o);
 
-  EXPECT_OK(m.shutdown());
+  m.shutdown();
 }
 
 TEST(FDReader, WriteToFallback) {
@@ -739,7 +739,7 @@ TEST(FDReader, WriteToFallback) {
 
   TestFDReader_WriteTo(o);
 
-  EXPECT_OK(m.shutdown());
+  m.shutdown();
 }
 
 TEST(FDReader, WriteToSendfile) {
@@ -755,7 +755,7 @@ TEST(FDReader, WriteToSendfile) {
 
   TestFDReader_WriteTo(o);
 
-  EXPECT_OK(m.shutdown());
+  m.shutdown();
 }
 
 TEST(FDReader, WriteToSplice) {
@@ -771,7 +771,7 @@ TEST(FDReader, WriteToSplice) {
 
   TestFDReader_WriteTo(o);
 
-  EXPECT_OK(m.shutdown());
+  m.shutdown();
 }
 
 // }}}
@@ -922,7 +922,7 @@ TEST(MultiReader, Async) {
   io::Options o;
   o.set_manager(m);
   TestMultiReader(o, "async");
-  EXPECT_OK(m.shutdown());
+  m.shutdown();
 }
 
 TEST(MultiReader, Threaded) {
@@ -936,7 +936,7 @@ TEST(MultiReader, Threaded) {
   io::Options o;
   o.set_manager(m);
   TestMultiReader(o, "threaded");
-  EXPECT_OK(m.shutdown());
+  m.shutdown();
 }
 
 // }}}

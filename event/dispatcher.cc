@@ -89,13 +89,14 @@ void assert_depth() {
 }
 }  // namespace internal
 
-base::Result Dispatcher::adjust(const DispatcherOptions& opts) {
+base::Result Dispatcher::adjust(const DispatcherOptions& opts) noexcept {
   return base::Result::not_implemented();
 }
 
-base::Result Dispatcher::cork() { return base::Result::not_implemented(); }
-
-base::Result Dispatcher::uncork() { return base::Result::not_implemented(); }
+void Dispatcher::shutdown() noexcept { /*noop*/ }
+void Dispatcher::cork() noexcept { /*noop*/ }
+void Dispatcher::uncork() noexcept { /*noop*/ }
+void Dispatcher::donate(bool forever) noexcept { /*noop*/ }
 
 namespace {
 
@@ -113,7 +114,7 @@ class InlineDispatcher : public Dispatcher {
     invoke(lock, busy_, done_, caught_, Work(task, std::move(callback)));
   }
 
-  DispatcherStats stats() const override {
+  DispatcherStats stats() const noexcept override {
     auto lock = base::acquire_lock(mu_);
     DispatcherStats tmp;
     tmp.active_count = busy_;
@@ -121,12 +122,6 @@ class InlineDispatcher : public Dispatcher {
     tmp.caught_exceptions = caught_;
     return tmp;
   }
-
-  void shutdown() override {
-    // noop
-  }
-
-  base::Result donate(bool forever) override { return base::Result(); }
 
  private:
   mutable std::mutex mu_;
@@ -152,7 +147,7 @@ class AsyncDispatcher : public Dispatcher {
     work_.emplace(task, std::move(callback));
   }
 
-  DispatcherStats stats() const override {
+  DispatcherStats stats() const noexcept override {
     auto lock = base::acquire_lock(mu_);
     DispatcherStats tmp;
     tmp.pending_count = work_.size();
@@ -162,24 +157,18 @@ class AsyncDispatcher : public Dispatcher {
     return tmp;
   }
 
-  void shutdown() override {
-    // noop
-  }
-
-  base::Result donate(bool forever) override {
+  void donate(bool forever) noexcept override {
     internal::assert_depth();
-    ++l_depth;
-    auto cleanup = base::cleanup([] { --l_depth; });
-
     auto lock = base::acquire_lock(mu_);
     Work item;
     while (!work_.empty()) {
       item = std::move(work_.front());
       work_.pop();
+      ++l_depth;
+      auto cleanup = base::cleanup([] { --l_depth; });
       invoke(lock, busy_, done_, caught_, std::move(item));
     }
     invoke(lock, idle_);
-    return base::Result();
   }
 
  private:
@@ -236,7 +225,7 @@ class ThreadPoolDispatcher : public Dispatcher {
     work_cv_.notify_one();
   }
 
-  DispatcherStats stats() const override {
+  DispatcherStats stats() const noexcept override {
     auto lock = base::acquire_lock(mu_);
     DispatcherStats tmp;
     tmp.min_workers = min_;
@@ -251,13 +240,13 @@ class ThreadPoolDispatcher : public Dispatcher {
     return tmp;
   }
 
-  void shutdown() override {
+  void shutdown() noexcept override {
     auto lock = base::acquire_lock(mu_);
     min_ = max_ = desired_ = 0;
     while (current_ > desired_) curr_cv_.wait(lock);
   }
 
-  base::Result adjust(const DispatcherOptions& opts) override {
+  base::Result adjust(const DispatcherOptions& opts) noexcept override {
     auto lock = base::acquire_lock(mu_);
     std::size_t min, max;
     bool has_min, has_max;
@@ -279,67 +268,95 @@ class ThreadPoolDispatcher : public Dispatcher {
     return base::Result();
   }
 
-  base::Result cork() override {
+  void cork() noexcept override {
     auto lock = base::acquire_lock(mu_);
-    if (corked_)
-      return base::Result::failed_precondition(
-          "event::Dispatcher is already corked");
+    CHECK(!corked_);
     corked_ = true;
     while (busy_ > 0) busy_cv_.wait(lock);
-    return base::Result();
   }
 
-  base::Result uncork() override {
+  void uncork() noexcept override {
     auto lock = base::acquire_lock(mu_);
-    if (!corked_)
-      return base::Result::failed_precondition(
-          "event::Dispatcher is not corked");
+    CHECK(corked_);
     corked_ = false;
-    if (!work_.empty()) {
-      std::size_t n = work_.size();
-      // HEURISTIC: when uncorking, aggressively spawn 1 thread per callback.
-      n = std::min(n, max_);
-      if (n > desired_) {
-        desired_ = n;
-        ensure();
-      }
-      work_cv_.notify_all();
+    std::size_t n = work_.size();
+    n = std::min(n, max_);
+    // HEURISTIC: when uncorking, aggressively spawn 1 thread per callback.
+    if (n > desired_) {
+      desired_ = n;
+      ensure();
     }
-    return base::Result();
+    if (n > 1)
+      work_cv_.notify_all();
+    else if (n == 1)
+      work_cv_.notify_one();
   }
 
-  base::Result donate(bool forever) override {
+  void donate(bool forever) noexcept override {
     internal::assert_depth();
-    ++l_depth;
-    auto cleanup0 = base::cleanup([] { --l_depth; });
+    auto lock = base::acquire_lock(mu_);
+    if (forever)
+      donate_forever(lock);
+    else
+      donate_once(lock);
+  }
 
+ private:
+  bool has_work() { return !corked_ && !work_.empty(); }
+
+  void donate_once(base::Lock& lock) noexcept {
+    Work item;
+    while (has_work()) {
+      item = std::move(work_.front());
+      work_.pop();
+      ++l_depth;
+      auto cleanup = base::cleanup([] { --l_depth; });
+      invoke(lock, busy_, done_, caught_, std::move(item));
+    }
+    if (busy_ == 0) busy_cv_.notify_all();
+    invoke(lock, idle_);
+  }
+
+  bool inc_current() noexcept {
+    if (current_ >= desired_) return true;
+    ++current_;
+    curr_cv_.notify_all();
+    return false;
+  }
+
+  void dec_current() noexcept {
+    --current_;
+    curr_cv_.notify_all();
+  }
+
+  bool should_exit() noexcept {
+    return current_ > desired_;
+  }
+
+  void donate_forever(base::Lock& lock) noexcept {
     using MS = std::chrono::milliseconds;
     static constexpr MS kInitialTimeout = MS(125);
     static constexpr MS kMaximumTimeout = MS(8000);
 
+    if (inc_current()) return;
+    auto cleanup0 = base::cleanup([this] { dec_current(); });
+
     Work item;
     MS ms(kInitialTimeout);
-    auto lock = base::acquire_lock(mu_);
-    ++current_;
-    curr_cv_.notify_all();
-    auto cleanup1 = base::cleanup([this] {
-      --current_;
-      curr_cv_.notify_all();
-    });
-
     while (true) {
-      while (!corked_ && !work_.empty()) {
-        if (current_ > max_) break;
+      while (has_work()) {
+        if (should_exit()) return;
         ms = kInitialTimeout;
         item = std::move(work_.front());
         work_.pop();
+        ++l_depth;
+        auto cleanup1 = base::cleanup([] { --l_depth; });
         invoke(lock, busy_, done_, caught_, std::move(item));
-        if (busy_ == 0) busy_cv_.notify_all();
       }
-      if (current_ > desired_) break;
+      if (busy_ == 0) busy_cv_.notify_all();
+      if (should_exit()) return;
       invoke(lock, idle_);
-      if (!corked_ && !work_.empty()) continue;
-      if (!forever) break;
+      if (has_work()) continue;
       if (work_cv_.wait_for(lock, ms) == std::cv_status::timeout) {
         // HEURISTIC: If we've waited too long (approx. 2*kMaximumTimeout) with
         //            no work coming from the queue, then reduce the num
@@ -353,16 +370,17 @@ class ThreadPoolDispatcher : public Dispatcher {
         if (ms < kMaximumTimeout) {
           ms *= 2;
         } else {
-          if (desired_ > min_) --desired_;
+          if (desired_ > min_) {
+            --desired_;
+            return;
+          }
         }
       }
     }
-    return base::Result();
   }
 
- private:
   void ensure() {
-    auto closure = [this] { donate(true).ignore_ok(); };
+    auto closure = [this] { donate(true); };
     for (std::size_t i = current_, j = desired_; i < j; ++i) {
       std::thread t(closure);
       t.detach();
