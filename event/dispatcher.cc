@@ -81,7 +81,7 @@ static void invoke(base::Lock& lock, IdleFunction idle) noexcept {
   }
 }
 
-static void finalize(base::Lock& lock, std::vector<CallbackPtr>& trash) {
+static void finalize(base::Lock& lock, std::vector<CallbackPtr>& trash) noexcept {
   auto vec = std::move(trash);
   lock.unlock();
   auto reacquire = base::cleanup([&lock] { lock.lock(); });
@@ -385,7 +385,7 @@ class ThreadPoolDispatcher : public Dispatcher {
     }
   };
 
-  bool has_work() { return !corked_ && !work_.empty(); }
+  bool has_work() const noexcept { return !corked_ && !work_.empty(); }
 
   void donate_once(base::Lock& lock0) noexcept {
     Work item;
@@ -421,6 +421,7 @@ class ThreadPoolDispatcher : public Dispatcher {
       if (busy_ == 0) busy_cv_.notify_all();
       if (monitor.maybe_exit()) return;
       invoke(lock0, idle_);
+      finalize(lock0, trash_);
       if (has_work()) continue;
       if (work_cv_.wait_for(lock0, ms) == std::cv_status::timeout) {
         // HEURISTIC: If we've waited too long (approx. 2*kMaximumTimeout) with
@@ -441,7 +442,7 @@ class ThreadPoolDispatcher : public Dispatcher {
     }
   }
 
-  void ensure(base::Lock& lock1) {
+  void ensure(base::Lock& lock1) noexcept {
     CHECK_LE(min_, max_);
     CHECK_LE(min_, desired_);
     CHECK_LE(desired_, max_);
