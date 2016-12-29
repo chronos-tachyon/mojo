@@ -164,6 +164,8 @@ class Dispatcher {
   // - If |forever == true|, then Dispatcher will not return control of the
   //   thread until |shutdown()| is called.
   //
+  // If this Dispatcher DOES NOT support thread donation, returns immediately.
+  //
   // APPLIES: |async_dispatcher|, |threaded_dispatcher|
   //
   // REENTRANCY NOTE: It is NEVER safe to call |donate| from within a Callback.
@@ -341,9 +343,9 @@ struct DispatcherStats {
                                completed_count(0),
                                caught_exceptions(0),
                                corked(false) {}
-  DispatcherStats(const DispatcherStats&) = default;
+  DispatcherStats(const DispatcherStats&) noexcept = default;
   DispatcherStats(DispatcherStats&&) noexcept = default;
-  DispatcherStats& operator=(const DispatcherStats&) = default;
+  DispatcherStats& operator=(const DispatcherStats&) noexcept = default;
   DispatcherStats& operator=(DispatcherStats&&) noexcept = default;
 
   // Convenience method for the sum |pending_count + active_count|.
