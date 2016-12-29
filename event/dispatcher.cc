@@ -6,10 +6,10 @@
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
+#include <deque>
 #include <exception>
 #include <iostream>
 #include <mutex>
-#include <queue>
 #include <stdexcept>
 #include <system_error>
 #include <thread>
@@ -142,7 +142,7 @@ class AsyncDispatcher : public Dispatcher {
 
   void dispatch(Task* task, CallbackPtr callback) override {
     auto lock = base::acquire_lock(mu_);
-    work_.emplace(task, std::move(callback));
+    work_.emplace_back(task, std::move(callback));
   }
 
   DispatcherStats stats() const noexcept override {
@@ -161,7 +161,7 @@ class AsyncDispatcher : public Dispatcher {
     Work item;
     while (!work_.empty()) {
       item = std::move(work_.front());
-      work_.pop();
+      work_.pop_front();
       ++l_depth;
       auto cleanup = base::cleanup([] { --l_depth; });
       invoke(lock, busy_, done_, caught_, std::move(item));
@@ -171,7 +171,7 @@ class AsyncDispatcher : public Dispatcher {
 
  private:
   mutable std::mutex mu_;
-  std::queue<Work> work_;
+  std::deque<Work> work_;
   IdleFunction idle_;
   std::size_t busy_;
   std::size_t done_;
@@ -209,7 +209,7 @@ class ThreadPoolDispatcher : public Dispatcher {
 
   void dispatch(Task* task, CallbackPtr callback) override {
     auto lock = base::acquire_lock(mu_);
-    work_.emplace(task, std::move(callback));
+    work_.emplace_back(task, std::move(callback));
     if (corked_) return;
 
     std::size_t n = work_.size();
@@ -306,7 +306,7 @@ class ThreadPoolDispatcher : public Dispatcher {
     Work item;
     while (has_work()) {
       item = std::move(work_.front());
-      work_.pop();
+      work_.pop_front();
       ++l_depth;
       auto cleanup = base::cleanup([] { --l_depth; });
       invoke(lock, busy_, done_, caught_, std::move(item));
@@ -344,7 +344,7 @@ class ThreadPoolDispatcher : public Dispatcher {
         if (should_exit()) return;
         ms = kInitialTimeout;
         item = std::move(work_.front());
-        work_.pop();
+        work_.pop_front();
         ++l_depth;
         auto cleanup1 = base::cleanup([] { --l_depth; });
         invoke(lock, busy_, done_, caught_, std::move(item));
@@ -387,7 +387,7 @@ class ThreadPoolDispatcher : public Dispatcher {
   std::condition_variable work_cv_;
   std::condition_variable curr_cv_;
   std::condition_variable busy_cv_;
-  std::queue<Work> work_;
+  std::deque<Work> work_;
   IdleFunction idle_;
   std::size_t min_;
   std::size_t max_;
