@@ -111,9 +111,13 @@ struct properties_for {
                                    is_specialization_of<T, std::pair>::value;
 
   template <typename>
-  static constexpr std::false_type check_container(...) { return {}; }
+  static constexpr std::false_type check_container(...) {
+    return {};
+  }
   template <typename U>
-  static constexpr std::true_type check_container(typename U::value_type*) { return {}; }
+  static constexpr std::true_type check_container(typename U::value_type*) {
+    return {};
+  }
   using container_type = decltype(check_container<T>(nullptr));
   // Specifically exclude std::string from the definition of "a container".
   // The simple_appender for it works fine.
@@ -121,18 +125,26 @@ struct properties_for {
   static constexpr bool is_container = container_type::value && !is_string;
 
   template <typename>
-  static constexpr std::false_type check_append_to(...) { return {}; }
+  static constexpr std::false_type check_append_to(...) {
+    return {};
+  }
   template <typename U>
   static constexpr auto check_append_to(U*) -> typename std::is_void<decltype(
-      std::declval<const U&>().append_to(std::declval<std::string&>()))>::type { return {}; }
+      std::declval<const U&>().append_to(std::declval<std::string&>()))>::type {
+    return {};
+  }
   using append_to_type = decltype(check_append_to<T>(nullptr));
   static constexpr bool has_append_to = append_to_type::value;
 
   template <typename>
-  static constexpr std::false_type check_length_hint(...) { return {}; }
+  static constexpr std::false_type check_length_hint(...) {
+    return {};
+  }
   template <typename U>
   static constexpr auto check_length_hint(U*) -> typename std::is_same<
-      std::size_t, decltype(std::declval<const U&>().length_hint())>::type { return {}; }
+      std::size_t, decltype(std::declval<const U&>().length_hint())>::type {
+    return {};
+  }
   using length_hint_type = decltype(check_length_hint<T>(nullptr));
   static constexpr bool has_length_hint = length_hint_type::value;
 

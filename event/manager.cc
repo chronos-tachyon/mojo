@@ -914,7 +914,8 @@ void ManagerImpl::schedule(CallbackVec* cbvec, Record* rec, Data data) {
   auto lock = base::acquire_lock(rec->mu);
   if (rec->disabled) return;
   cbvec->push_back(make_unique<HandlerCallback>(this, rec, std::move(data)));
-  VLOG(6) << "Scheduled a callback; " << outstanding_ << " were already outstanding";
+  VLOG(6) << "Scheduled a callback; " << outstanding_
+          << " were already outstanding";
   ++outstanding_;
 }
 
@@ -1099,13 +1100,9 @@ base::Result FileDescriptor::disable() {
   return base::Result();
 }
 
-void FileDescriptor::wait() {
-  wait_impl(ptr_, rec_);
-}
+void FileDescriptor::wait() { wait_impl(ptr_, rec_); }
 
-void FileDescriptor::disown() {
-  disown_impl(ptr_, rec_);
-}
+void FileDescriptor::disown() { disown_impl(ptr_, rec_); }
 
 base::Result FileDescriptor::release() {
   base::Result r = disable();
@@ -1125,13 +1122,9 @@ base::Result Signal::disable() {
   return base::Result();
 }
 
-void Signal::wait() {
-  wait_impl(ptr_, rec_);
-}
+void Signal::wait() { wait_impl(ptr_, rec_); }
 
-void Signal::disown() {
-  disown_impl(ptr_, rec_);
-}
+void Signal::disown() { disown_impl(ptr_, rec_); }
 
 base::Result Signal::release() {
   base::Result r = disable();
@@ -1207,13 +1200,9 @@ base::Result Timer::disable() {
   return base::Result();
 }
 
-void Timer::wait() {
-  wait_impl(ptr_, rec_);
-}
+void Timer::wait() { wait_impl(ptr_, rec_); }
 
-void Timer::disown() {
-  disown_impl(ptr_, rec_);
-}
+void Timer::disown() { disown_impl(ptr_, rec_); }
 
 base::Result Timer::release() {
   base::Result r = disable();
@@ -1238,13 +1227,9 @@ base::Result Generic::disable() {
   return base::Result();
 }
 
-void Generic::wait() {
-  wait_impl(ptr_, rec_);
-}
+void Generic::wait() { wait_impl(ptr_, rec_); }
 
-void Generic::disown() {
-  disown_impl(ptr_, rec_);
-}
+void Generic::disown() { disown_impl(ptr_, rec_); }
 
 base::Result Generic::release() {
   base::Result r = disable();

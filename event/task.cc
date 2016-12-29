@@ -26,7 +26,7 @@ static void invoke(Work work) {
     } else {
       work.callback->run();
     }
-  } catch(...) {
+  } catch (...) {
     LOG_EXCEPTION(std::current_exception());
   }
 }

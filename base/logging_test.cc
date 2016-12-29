@@ -29,8 +29,8 @@ class LogCapture : public base::LogTarget {
     CHECK_OK(base::make_pipe(&pipe_));
   }
 
-  bool want(const char* file, unsigned int line,
-            base::level_t level) const noexcept override {
+  bool want(const char* file, unsigned int line, base::level_t level) const
+      noexcept override {
     return level >= LOG_LEVEL_INFO;
   }
 

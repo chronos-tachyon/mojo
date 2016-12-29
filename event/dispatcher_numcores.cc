@@ -4,13 +4,13 @@
 #include "event/dispatcher.h"
 
 #include <fcntl.h>
-#include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 #include "base/cleanup.h"
-#include "base/result.h"
 #include "base/logging.h"
+#include "base/result.h"
 
 namespace event {
 
@@ -18,7 +18,8 @@ static std::size_t compute_num_cores() {
   int fd = ::open("/proc/cpuinfo", O_RDONLY | O_CLOEXEC);
   if (fd == -1) {
     int err_no = errno;
-    CHECK_OK(base::Result::from_errno(err_no, "open(2)")) << ": failed to open /proc/cpuinfo";
+    CHECK_OK(base::Result::from_errno(err_no, "open(2)"))
+        << ": failed to open /proc/cpuinfo";
     return 4;
   }
   auto cleanup = base::cleanup([fd] { ::close(fd); });
@@ -30,7 +31,8 @@ static std::size_t compute_num_cores() {
     ssize_t n = ::read(fd, buf.data() + pos, buf.size() - pos);
     if (n < 0) {
       int err_no = errno;
-      CHECK_OK(base::Result::from_errno(err_no, "read(2)")) << ": failed to read /proc/cpuinfo";
+      CHECK_OK(base::Result::from_errno(err_no, "read(2)"))
+          << ": failed to read /proc/cpuinfo";
       return 4;
     }
     if (n == 0) break;

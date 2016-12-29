@@ -42,17 +42,18 @@ struct CopyHelper {
   bool eof;
 
   CopyHelper(event::Task* t, std::size_t* c, std::size_t x, Writer w, Reader r,
-             Options opts) noexcept : task(t),
-                                      copied(c),
-                                      max(x),
-                                      writer(std::move(w)),
-                                      reader(std::move(r)),
-                                      options(std::move(opts)),
-                                      block_size(compute_block_size(writer, reader, options)),
-                                      pool(choose_pool(block_size, options)),
-                                      buffer(pool.take()),
-                                      n(0),
-                                      eof(false) {
+             Options opts) noexcept
+      : task(t),
+        copied(c),
+        max(x),
+        writer(std::move(w)),
+        reader(std::move(r)),
+        options(std::move(opts)),
+        block_size(compute_block_size(writer, reader, options)),
+        pool(choose_pool(block_size, options)),
+        buffer(pool.take()),
+        n(0),
+        eof(false) {
     VLOG(6) << "io::CopyHelper::CopyHelper: max=" << max;
   }
 

@@ -10,8 +10,6 @@ namespace base {
 
 static std::atomic<uint64_t> g_last;
 
-token_t next_token() noexcept {
-  return token_t(1 + g_last.fetch_add(1));
-}
+token_t next_token() noexcept { return token_t(1 + g_last.fetch_add(1)); }
 
 }  // namespace base

@@ -27,7 +27,7 @@ TEST(MockReader, EndToEnd) {
 
   std::thread t0([&mu, &cv, &ready, &mr, r, m] {
     mr.expect({
-      Mock(Verb::write_to, "Hello, world!\n"),
+        Mock(Verb::write_to, "Hello, world!\n"),
     });
 
     auto lock = base::acquire_lock(mu);
@@ -46,9 +46,9 @@ TEST(MockReader, EndToEnd) {
 
   std::thread t1([&mu, &cv, &ready, &mr, r, m] {
     mr.expect({
-      Mock(Verb::write_to, "", base::Result::not_implemented()),
-      Mock(Verb::read, "Hello, world!\n"),
-      Mock(Verb::read, "", base::Result::eof()),
+        Mock(Verb::write_to, "", base::Result::not_implemented()),
+        Mock(Verb::read, "Hello, world!\n"),
+        Mock(Verb::read, "", base::Result::eof()),
     });
 
     auto lock = base::acquire_lock(mu);
@@ -66,7 +66,7 @@ TEST(MockReader, EndToEnd) {
   });
 
   mr.expect({
-    Mock(Verb::close, "", base::Result()),
+      Mock(Verb::close, "", base::Result()),
   });
 
   auto lock = base::acquire_lock(mu);

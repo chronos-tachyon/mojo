@@ -53,10 +53,9 @@ static ::testing::AssertionResult equalish(const char* a_text,
   assert_bounded(a);
   assert_bounded(b);
   if (a.min_workers == b.min_workers && a.max_workers == b.max_workers &&
-         a.pending_count == b.pending_count &&
-         a.active_count == b.active_count &&
-         a.completed_count == b.completed_count &&
-         a.caught_exceptions == b.caught_exceptions && a.corked == b.corked) {
+      a.pending_count == b.pending_count && a.active_count == b.active_count &&
+      a.completed_count == b.completed_count &&
+      a.caught_exceptions == b.caught_exceptions && a.corked == b.corked) {
     return ::testing::AssertionSuccess();
   } else {
     return ::testing::AssertionFailure() << " expected: " << a_text << "\n"

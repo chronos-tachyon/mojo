@@ -81,14 +81,15 @@ static void invoke(base::Lock& lock, IdleFunction idle) noexcept {
   }
 }
 
-static void finalize(base::Lock& lock, std::vector<CallbackPtr>& trash) noexcept {
+static void finalize(base::Lock& lock,
+                     std::vector<CallbackPtr>& trash) noexcept {
   auto vec = std::move(trash);
   lock.unlock();
   auto reacquire = base::cleanup([&lock] { lock.lock(); });
   for (const auto& cb : vec) {
     try {
       cb->run();
-    } catch(...) {
+    } catch (...) {
       LOG_EXCEPTION(std::current_exception());
     }
   }

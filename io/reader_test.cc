@@ -942,4 +942,7 @@ TEST(MultiReader, Threaded) {
 // }}}
 
 static void init() __attribute__((constructor));
-static void init() { base::log_single_threaded(); base::log_stderr_set_level(VLOG_LEVEL(6)); }
+static void init() {
+  base::log_single_threaded();
+  base::log_stderr_set_level(VLOG_LEVEL(6));
+}
