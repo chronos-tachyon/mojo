@@ -89,6 +89,27 @@ class Dispatcher {
     return dispatch(nullptr, std::move(callback));
   }
 
+  // Runs the provided finalizer on the Dispatcher in a safe context.
+  //
+  // Unlike |dispatch()|, the Callback provided here may call |donate()| or
+  // functions that can call it, such as |event::wait()|.
+  //
+  virtual void dispose(CallbackPtr finalizer) = 0;
+
+  // Destroys the provided pointer on the Dispatcher in a safe context.
+  //
+  // |~T()| may call |donate()| or functions that can call it, such as
+  // |event::wait()|.
+  //
+  template <typename T>
+  void dispose(T* ptr) {
+    auto closure = [ptr] {
+      delete ptr;
+      return base::Result();
+    };
+    dispose(event::callback(closure));
+  }
+
   // Obtains statistics about this Dispatcher.
   virtual DispatcherStats stats() const noexcept = 0;
 

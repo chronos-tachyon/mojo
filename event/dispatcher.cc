@@ -81,6 +81,19 @@ static void invoke(base::Lock& lock, IdleFunction idle) noexcept {
   }
 }
 
+static void finalize(base::Lock& lock, std::vector<CallbackPtr>& trash) {
+  auto vec = std::move(trash);
+  lock.unlock();
+  auto reacquire = base::cleanup([&lock] { lock.lock(); });
+  for (const auto& cb : vec) {
+    try {
+      cb->run();
+    } catch(...) {
+      LOG_EXCEPTION(std::current_exception());
+    }
+  }
+}
+
 }  // anonymous namespace
 
 namespace internal {
@@ -111,6 +124,8 @@ class InlineDispatcher : public Dispatcher {
     auto lock = base::acquire_lock(mu_);
     invoke(lock, busy_, done_, caught_, Work(task, std::move(callback)));
   }
+
+  void dispose(CallbackPtr callback) override { callback->run(); }
 
   DispatcherStats stats() const noexcept override {
     auto lock = base::acquire_lock(mu_);
@@ -145,6 +160,11 @@ class AsyncDispatcher : public Dispatcher {
     work_.emplace_back(task, std::move(callback));
   }
 
+  void dispose(CallbackPtr callback) override {
+    auto lock = base::acquire_lock(mu_);
+    trash_.push_back(std::move(callback));
+  }
+
   DispatcherStats stats() const noexcept override {
     auto lock = base::acquire_lock(mu_);
     DispatcherStats tmp;
@@ -167,11 +187,13 @@ class AsyncDispatcher : public Dispatcher {
       invoke(lock, busy_, done_, caught_, std::move(item));
     }
     invoke(lock, idle_);
+    finalize(lock, trash_);
   }
 
  private:
   mutable std::mutex mu_;
   std::deque<Work> work_;
+  std::vector<CallbackPtr> trash_;
   IdleFunction idle_;
   std::size_t busy_;
   std::size_t done_;
@@ -220,6 +242,11 @@ class ThreadPoolDispatcher : public Dispatcher {
     }
   }
 
+  void dispose(CallbackPtr callback) override {
+    auto lock0 = base::acquire_lock(mu0_);
+    trash_.push_back(std::move(callback));
+  }
+
   DispatcherStats stats() const noexcept override {
     auto lock0 = base::acquire_lock(mu0_);
     auto lock1 = base::acquire_lock(mu1_);
@@ -240,6 +267,10 @@ class ThreadPoolDispatcher : public Dispatcher {
     auto lock1 = base::acquire_lock(mu1_);
     min_ = max_ = desired_ = 0;
     ensure(lock1);
+    lock1.unlock();
+
+    auto lock0 = base::acquire_lock(mu0_);
+    finalize(lock0, trash_);
   }
 
   base::Result adjust(const DispatcherOptions& opts) noexcept override {
@@ -297,6 +328,7 @@ class ThreadPoolDispatcher : public Dispatcher {
       donate_forever(lock0);
     else
       donate_once(lock0);
+    finalize(lock0, trash_);
   }
 
  private:
@@ -446,6 +478,7 @@ class ThreadPoolDispatcher : public Dispatcher {
   std::condition_variable curr_cv_;  // mu1_: current_ == desired_
   std::deque<Work> work_;            // protected by mu0_
   IdleFunction idle_;                // protected by mu0_
+  std::vector<CallbackPtr> trash_;   // protected by mu0_
   std::size_t min_;                  // protected by mu1_
   std::size_t max_;                  // protected by mu1_
   std::size_t desired_;              // protected by mu1_
