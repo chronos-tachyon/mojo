@@ -332,7 +332,7 @@ class FDWriter : public WriterImpl {
                                      ptr(p),
                                      len(l),
                                      options(std::move(opts)) {}
-    void cancel() { task->cancel(); }
+    void cancel() override { task->cancel(); }
     bool process(FDWriter* writer) override;
   };
 

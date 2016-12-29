@@ -23,6 +23,20 @@ static bool operator==(const DispatcherStats& a, const DispatcherStats& b) {
          a.completed_count == b.completed_count &&
          a.caught_exceptions == b.caught_exceptions && a.corked == b.corked;
 }
+
+static std::ostream& operator<<(std::ostream& os, const DispatcherStats& s) {
+  os << "Stats("
+     << "min=" << s.min_workers << ","
+     << "max=" << s.max_workers << ","
+     << "desired=" << s.desired_num_workers << ","
+     << "current=" << s.current_num_workers << ","
+     << "pending=" << s.pending_count << ","
+     << "active=" << s.active_count << ","
+     << "completed=" << s.completed_count << ","
+     << "exceptions=" << s.caught_exceptions << ","
+     << "corked=" << s.corked << ")";
+  return os;
+}
 }  // namespace event
 
 static bool equalish(const event::DispatcherStats& a,
@@ -40,21 +54,6 @@ static bool equalish(const event::DispatcherStats& a,
           a.current_num_workers <= a.max_workers &&
           b.current_num_workers >= b.min_workers &&
           b.current_num_workers <= b.max_workers);
-}
-
-static std::ostream& operator<<(std::ostream& os,
-                                const event::DispatcherStats& s) {
-  os << "Stats("
-     << "min=" << s.min_workers << ","
-     << "max=" << s.max_workers << ","
-     << "desired=" << s.desired_num_workers << ","
-     << "current=" << s.current_num_workers << ","
-     << "pending=" << s.pending_count << ","
-     << "active=" << s.active_count << ","
-     << "completed=" << s.completed_count << ","
-     << "exceptions=" << s.caught_exceptions << ","
-     << "corked=" << s.corked << ")";
-  return os;
 }
 
 struct Closure {
