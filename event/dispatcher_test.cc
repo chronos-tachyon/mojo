@@ -269,8 +269,10 @@ TEST(ThreadPoolDispatcher, EndToEnd) {
   expected.corked = false;
   EXPECT_PRED_FORMAT2(equalish, expected, d->stats());
 
+  LOG(INFO) << "starting adjust";
   o.set_num_workers(2, 3);
   EXPECT_OK(d->adjust(o));
+  LOG(INFO) << "done with adjust";
 
   expected.min_workers = 2;
   expected.max_workers = 3;
@@ -287,6 +289,8 @@ TEST(ThreadPoolDispatcher, EndToEnd) {
   expected.desired_num_workers = 0;
   expected.current_num_workers = 0;
   EXPECT_EQ(expected, d->stats());
+
+  base::log_flush();
 }
 
 TEST(ThreadPoolDispatcher, ThrowingCallback) {
@@ -320,7 +324,9 @@ TEST(ThreadPoolDispatcher, ThrowingCallback) {
   expected.completed_count = 5;
   expected.caught_exceptions = 5;
   EXPECT_PRED_FORMAT2(equalish, expected, d->stats());
+
+  base::log_flush();
 }
 
 static void init() __attribute__((constructor));
-static void init() { base::log_stderr_set_level(VLOG_LEVEL(0)); }
+static void init() { base::log_stderr_set_level(VLOG_LEVEL(6)); }
