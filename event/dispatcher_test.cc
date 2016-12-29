@@ -39,21 +39,31 @@ static std::ostream& operator<<(std::ostream& os, const DispatcherStats& s) {
 }
 }  // namespace event
 
-static bool equalish(const event::DispatcherStats& a,
-                     const event::DispatcherStats& b) {
-  return a.min_workers == b.min_workers && a.max_workers == b.max_workers &&
+static void assert_bounded(const event::DispatcherStats& stats) {
+  CHECK_GE(stats.desired_num_workers, stats.min_workers);
+  CHECK_LE(stats.desired_num_workers, stats.max_workers);
+  CHECK_GE(stats.current_num_workers, stats.min_workers);
+  CHECK_LE(stats.current_num_workers, stats.max_workers);
+}
+
+static ::testing::AssertionResult equalish(const char* a_text,
+                                           const char* b_text,
+                                           const event::DispatcherStats& a,
+                                           const event::DispatcherStats& b) {
+  assert_bounded(a);
+  assert_bounded(b);
+  if (a.min_workers == b.min_workers && a.max_workers == b.max_workers &&
          a.pending_count == b.pending_count &&
          a.active_count == b.active_count &&
          a.completed_count == b.completed_count &&
-         a.caught_exceptions == b.caught_exceptions && a.corked == b.corked &&
-         (a.desired_num_workers >= a.min_workers &&
-          a.desired_num_workers <= a.max_workers &&
-          b.desired_num_workers >= b.min_workers &&
-          b.desired_num_workers <= b.max_workers) &&
-         (a.current_num_workers >= a.min_workers &&
-          a.current_num_workers <= a.max_workers &&
-          b.current_num_workers >= b.min_workers &&
-          b.current_num_workers <= b.max_workers);
+         a.caught_exceptions == b.caught_exceptions && a.corked == b.corked) {
+    return ::testing::AssertionSuccess();
+  } else {
+    return ::testing::AssertionFailure() << " expected: " << a_text << "\n"
+                                         << " which is: " << a << "\n"
+                                         << "      got: " << b_text << "\n"
+                                         << " which is: " << b;
+  }
 }
 
 struct Closure {
@@ -258,7 +268,7 @@ TEST(ThreadPoolDispatcher, EndToEnd) {
   expected.pending_count = 0;
   expected.completed_count = 11;
   expected.corked = false;
-  EXPECT_PRED2(equalish, expected, d->stats());
+  EXPECT_PRED_FORMAT2(equalish, expected, d->stats());
 
   o.set_num_workers(2, 3);
   EXPECT_OK(d->adjust(o));
@@ -267,7 +277,7 @@ TEST(ThreadPoolDispatcher, EndToEnd) {
   expected.max_workers = 3;
   expected.desired_num_workers = 3;
   expected.current_num_workers = 3;
-  EXPECT_PRED2(equalish, expected, d->stats());
+  EXPECT_PRED_FORMAT2(equalish, expected, d->stats());
 
   LOG(INFO) << "waiting on shutdown";
   d->shutdown();
@@ -310,7 +320,7 @@ TEST(ThreadPoolDispatcher, ThrowingCallback) {
 
   expected.completed_count = 5;
   expected.caught_exceptions = 5;
-  EXPECT_PRED2(equalish, expected, d->stats());
+  EXPECT_PRED_FORMAT2(equalish, expected, d->stats());
 }
 
 static void init() __attribute__((constructor));
