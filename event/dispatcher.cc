@@ -237,7 +237,7 @@ class ThreadPoolDispatcher : public Dispatcher {
   }
 
   void shutdown() noexcept override {
-    auto lock1 = base::acquire_lock(mu0_);
+    auto lock1 = base::acquire_lock(mu1_);
     min_ = max_ = desired_ = 0;
     ensure(lock1);
   }
