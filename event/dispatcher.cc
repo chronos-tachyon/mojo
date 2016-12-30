@@ -162,6 +162,7 @@ class AsyncDispatcher : public Dispatcher {
 
   ~AsyncDispatcher() noexcept override {
     auto lock = base::acquire_lock(mu_);
+    work_.clear();
     finalize(lock, trash_);
   }
 
@@ -299,6 +300,7 @@ class ThreadPoolDispatcher : public Dispatcher {
   ~ThreadPoolDispatcher() noexcept override {
     shutdown();
     auto lock0 = base::acquire_lock(mu0_);
+    work_.clear();
     finalize(lock0, trash_);
   }
 
@@ -343,13 +345,6 @@ class ThreadPoolDispatcher : public Dispatcher {
     tmp.caught_exceptions = caught_;
     tmp.corked = corked_;
     return tmp;
-  }
-
-  void shutdown() noexcept override {
-    auto lock1 = base::acquire_lock(mu1_);
-    min_ = max_ = desired_ = 0;
-    ensure(lock1);
-    lock1.unlock();
   }
 
   base::Result adjust(const DispatcherOptions& opts) noexcept override {
@@ -407,6 +402,12 @@ class ThreadPoolDispatcher : public Dispatcher {
       donate_forever(lock0);
     else
       donate_once(lock0);
+  }
+
+  void shutdown() noexcept override {
+    auto lock1 = base::acquire_lock(mu1_);
+    min_ = max_ = desired_ = 0;
+    ensure(lock1);
   }
 
  private:
