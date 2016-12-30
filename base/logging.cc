@@ -71,7 +71,7 @@ static Queue* g_queue = nullptr;                  // protected by g_queue_mu
 
 static base::LogTarget* make_stderr();
 
-static void thread_body();
+static void thread_body() noexcept;
 
 static void init() {
   auto queue_lock = acquire_lock(g_queue_mu);
@@ -98,7 +98,7 @@ static void process(base::Lock& main_lock, LogEntry entry) {
   }
 }
 
-static void thread_body() {
+static void thread_body() noexcept {
   auto queue_lock = base::acquire_lock(g_queue_mu);
   while (true) {
     if (g_queue->empty()) {
