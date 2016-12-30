@@ -408,6 +408,7 @@ class ThreadPoolDispatcher : public Dispatcher {
       invoke(lock0, &busy_, &done_, &caught_, std::move(item));
     }
     if (busy_ == 0) busy_cv_.notify_all();
+    finalize(lock0, trash_);
   }
 
   void donate_forever(base::Lock& lock0) noexcept {
