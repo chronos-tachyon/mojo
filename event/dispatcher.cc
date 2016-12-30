@@ -103,17 +103,21 @@ static void invoke(base::Lock& lock, std::size_t* busy, std::size_t* done,
   item.callback.reset();
 }
 
+static void finalize(CallbackPtr finalizer) noexcept {
+  try {
+    DCHECK_NOTNULL(std::move(finalizer))->run().expect_ok(__FILE__, __LINE__);
+  } catch (...) {
+    LOG_EXCEPTION(std::current_exception());
+  }
+}
+
 static void finalize(base::Lock& lock,
                      std::vector<CallbackPtr>& trash) noexcept {
   auto vec = std::move(trash);
   lock.unlock();
   auto reacquire = base::cleanup(reacquire_lock(lock));
-  for (const auto& cb : vec) {
-    try {
-      cb->run();
-    } catch (...) {
-      LOG_EXCEPTION(std::current_exception());
-    }
+  for (auto& finalizer : vec) {
+    finalize(std::move(finalizer));
   }
 }
 
@@ -131,7 +135,9 @@ class InlineDispatcher : public Dispatcher {
     invoke(lock, &busy_, &done_, &caught_, Work(task, std::move(callback)));
   }
 
-  void dispose(CallbackPtr callback) override { callback->run(); }
+  void dispose(CallbackPtr finalizer) override {
+    finalize(std::move(finalizer));
+  }
 
   DispatcherStats stats() const noexcept override {
     auto lock = base::acquire_lock(mu_);
@@ -163,9 +169,9 @@ class AsyncDispatcher : public Dispatcher {
     work_.emplace_back(task, std::move(callback));
   }
 
-  void dispose(CallbackPtr callback) override {
+  void dispose(CallbackPtr finalizer) override {
     auto lock = base::acquire_lock(mu_);
-    trash_.push_back(std::move(callback));
+    trash_.push_back(std::move(finalizer));
   }
 
   DispatcherStats stats() const noexcept override {
@@ -242,9 +248,9 @@ class ThreadPoolDispatcher : public Dispatcher {
     }
   }
 
-  void dispose(CallbackPtr callback) override {
+  void dispose(CallbackPtr finalizer) override {
     auto lock0 = base::acquire_lock(mu0_);
-    trash_.push_back(std::move(callback));
+    trash_.push_back(std::move(finalizer));
   }
 
   DispatcherStats stats() const noexcept override {
