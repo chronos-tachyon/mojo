@@ -160,6 +160,11 @@ class AsyncDispatcher : public Dispatcher {
  public:
   AsyncDispatcher() noexcept : busy_(0), done_(0), caught_(0) {}
 
+  ~AsyncDispatcher() noexcept override {
+    auto lock = base::acquire_lock(mu_);
+    finalize(lock, trash_);
+  }
+
   DispatcherType type() const noexcept override {
     return DispatcherType::async_dispatcher;
   }
@@ -224,7 +229,11 @@ class ThreadPoolDispatcher : public Dispatcher {
     ensure(lock1);
   }
 
-  ~ThreadPoolDispatcher() noexcept override { shutdown(); }
+  ~ThreadPoolDispatcher() noexcept override {
+    shutdown();
+    auto lock0 = base::acquire_lock(mu0_);
+    finalize(lock0, trash_);
+  }
 
   DispatcherType type() const noexcept override {
     return DispatcherType::threaded_dispatcher;
@@ -274,9 +283,6 @@ class ThreadPoolDispatcher : public Dispatcher {
     min_ = max_ = desired_ = 0;
     ensure(lock1);
     lock1.unlock();
-
-    auto lock0 = base::acquire_lock(mu0_);
-    finalize(lock0, trash_);
   }
 
   base::Result adjust(const DispatcherOptions& opts) noexcept override {
