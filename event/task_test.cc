@@ -277,6 +277,3 @@ TEST(Task, SubtaskExpire) {
   EXPECT_EQ(event::Task::State::done, child0.state());
   EXPECT_EQ(event::Task::State::done, child1.state());
 }
-
-static void init() __attribute__((constructor));
-static void init() { base::log_stderr_set_level(VLOG_LEVEL(0)); }
