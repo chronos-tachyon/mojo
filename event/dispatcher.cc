@@ -212,6 +212,73 @@ class AsyncDispatcher : public Dispatcher {
   std::size_t caught_;
 };
 
+struct thread_monitor {
+  std::mutex* const mutex;
+  std::condition_variable* const condvar;
+  std::size_t* const min;
+  std::size_t* const max;
+  std::size_t* const desired;
+  std::size_t* const current;
+  bool is_live;
+
+  explicit thread_monitor(std::mutex* mu, std::condition_variable* cv, std::size_t* mn,
+                   std::size_t* mx, std::size_t* d, std::size_t* c) noexcept
+      : mutex(DCHECK_NOTNULL(mu)),
+        condvar(DCHECK_NOTNULL(cv)),
+        min(DCHECK_NOTNULL(mn)),
+        max(DCHECK_NOTNULL(mx)),
+        desired(DCHECK_NOTNULL(d)),
+        current(DCHECK_NOTNULL(c)),
+        is_live(false) {
+    auto lock = base::acquire_lock(*mutex);
+    inc(lock);
+  }
+
+  thread_monitor(const thread_monitor&) = delete;
+  thread_monitor(thread_monitor&&) = delete;
+  thread_monitor& operator=(const thread_monitor&) = delete;
+  thread_monitor& operator=(thread_monitor&&) = delete;
+
+  ~thread_monitor() noexcept {
+    auto lock = base::acquire_lock(*mutex);
+    if (is_live) dec(lock);
+  }
+
+  bool maybe_exit() noexcept {
+    auto lock = base::acquire_lock(*mutex);
+    if (*current > *desired) {
+      dec(lock);
+      return true;
+    }
+    return false;
+  }
+
+  bool too_many() noexcept {
+    auto lock = base::acquire_lock(*mutex);
+    if (*desired > *min) {
+      --*desired;
+      dec(lock);
+      return true;
+    }
+    return false;
+  }
+
+ private:
+  void inc(base::Lock& lock) noexcept {
+    CHECK(!is_live);
+    is_live = true;
+    ++*current;
+    if (*current == *desired) condvar->notify_all();
+  }
+
+  void dec(base::Lock& lock) noexcept {
+    CHECK(is_live);
+    is_live = false;
+    --*current;
+    if (*current == *desired) condvar->notify_all();
+  }
+};
+
 // The threaded implementation of Dispatcher is much more complex than that of
 // the other two.  The basic idea is to match threads to workload.
 class ThreadPoolDispatcher : public Dispatcher {
@@ -343,59 +410,6 @@ class ThreadPoolDispatcher : public Dispatcher {
   }
 
  private:
-  struct Monitor {
-    ThreadPoolDispatcher* d;
-    bool is_live;
-
-    Monitor(const Monitor&) = delete;
-    Monitor(Monitor&&) = delete;
-    Monitor& operator=(const Monitor&) = delete;
-    Monitor& operator=(Monitor&&) = delete;
-
-    explicit Monitor(ThreadPoolDispatcher* d) noexcept : d(d), is_live(false) {
-      auto lock1 = base::acquire_lock(d->mu1_);
-      inc(lock1);
-    }
-
-    ~Monitor() noexcept {
-      auto lock1 = base::acquire_lock(d->mu1_);
-      if (is_live) dec(lock1);
-    }
-
-    bool maybe_exit() noexcept {
-      auto lock1 = base::acquire_lock(d->mu1_);
-      if (d->current_ > d->desired_) {
-        dec(lock1);
-        return true;
-      }
-      return false;
-    }
-
-    bool too_many() noexcept {
-      auto lock1 = base::acquire_lock(d->mu1_);
-      if (d->desired_ > d->min_) {
-        --d->desired_;
-        dec(lock1);
-        return true;
-      }
-      return false;
-    }
-
-    void inc(base::Lock& lock1) noexcept {
-      CHECK(!is_live);
-      is_live = true;
-      ++d->current_;
-      if (d->current_ == d->desired_) d->curr_cv_.notify_all();
-    }
-
-    void dec(base::Lock& lock1) noexcept {
-      CHECK(is_live);
-      is_live = false;
-      --d->current_;
-      if (d->current_ == d->desired_) d->curr_cv_.notify_all();
-    }
-  };
-
   bool has_work() const noexcept { return !corked_ && !work_.empty(); }
 
   void donate_once(base::Lock& lock0) noexcept {
@@ -416,12 +430,12 @@ class ThreadPoolDispatcher : public Dispatcher {
     static constexpr MS kInitialTimeout = MS(125);
     static constexpr MS kMaximumTimeout = MS(8000);
 
-    Monitor monitor(this);
+    thread_monitor mon(&mu1_, &curr_cv_, &min_, &max_, &desired_, &current_);
     Work item;
     MS ms(kInitialTimeout);
     while (true) {
       while (has_work()) {
-        if (monitor.maybe_exit()) return;
+        if (mon.maybe_exit()) return;
         ms = kInitialTimeout;
         item = std::move(work_.front());
         work_.pop_front();
@@ -430,7 +444,7 @@ class ThreadPoolDispatcher : public Dispatcher {
         invoke(lock0, &busy_, &done_, &caught_, std::move(item));
       }
       if (busy_ == 0) busy_cv_.notify_all();
-      if (monitor.maybe_exit()) return;
+      if (mon.maybe_exit()) return;
       finalize(lock0, trash_);
       if (has_work()) continue;
       if (work_cv_.wait_for(lock0, ms) == std::cv_status::timeout) {
@@ -445,7 +459,7 @@ class ThreadPoolDispatcher : public Dispatcher {
         //            pruned once sufficient time has passed.
         if (ms < kMaximumTimeout) {
           ms *= 2;
-        } else if (monitor.too_many()) {
+        } else if (mon.too_many()) {
           return;
         }
       }
