@@ -68,19 +68,6 @@ static void invoke(base::Lock& lock, std::size_t& busy, std::size_t& done,
   item.callback.reset();
 }
 
-static void invoke(base::Lock& lock, IdleFunction idle) noexcept {
-  if (!idle) return;
-
-  lock.unlock();
-  auto reacquire = base::cleanup([&lock] { lock.lock(); });
-
-  try {
-    idle();
-  } catch (...) {
-    LOG_EXCEPTION(std::current_exception());
-  }
-}
-
 static void finalize(base::Lock& lock,
                      std::vector<CallbackPtr>& trash) noexcept {
   auto vec = std::move(trash);
@@ -130,10 +117,7 @@ class InlineDispatcher : public Dispatcher {
 // The implementation for async Dispatchers is slightly more complex.
 class AsyncDispatcher : public Dispatcher {
  public:
-  AsyncDispatcher(IdleFunction idle) noexcept : idle_(std::move(idle)),
-                                                busy_(0),
-                                                done_(0),
-                                                caught_(0) {}
+  AsyncDispatcher() noexcept : busy_(0), done_(0), caught_(0) {}
 
   DispatcherType type() const noexcept override {
     return DispatcherType::async_dispatcher;
@@ -170,7 +154,6 @@ class AsyncDispatcher : public Dispatcher {
       auto cleanup = base::cleanup([] { --l_depth; });
       invoke(lock, busy_, done_, caught_, std::move(item));
     }
-    invoke(lock, idle_);
     finalize(lock, trash_);
   }
 
@@ -178,7 +161,6 @@ class AsyncDispatcher : public Dispatcher {
   mutable std::mutex mu_;
   std::deque<Work> work_;
   std::vector<CallbackPtr> trash_;
-  IdleFunction idle_;
   std::size_t busy_;
   std::size_t done_;
   std::size_t caught_;
@@ -188,9 +170,8 @@ class AsyncDispatcher : public Dispatcher {
 // the other two.  The basic idea is to match threads to workload.
 class ThreadPoolDispatcher : public Dispatcher {
  public:
-  ThreadPoolDispatcher(IdleFunction idle, std::size_t min, std::size_t max)
-      : idle_(std::move(idle)),
-        min_(min),
+  ThreadPoolDispatcher(std::size_t min, std::size_t max)
+      : min_(min),
         max_(max),
         desired_(min),
         current_(0),
@@ -381,7 +362,6 @@ class ThreadPoolDispatcher : public Dispatcher {
       invoke(lock0, busy_, done_, caught_, std::move(item));
     }
     if (busy_ == 0) busy_cv_.notify_all();
-    invoke(lock0, idle_);
   }
 
   void donate_forever(base::Lock& lock0) noexcept {
@@ -404,7 +384,6 @@ class ThreadPoolDispatcher : public Dispatcher {
       }
       if (busy_ == 0) busy_cv_.notify_all();
       if (monitor.maybe_exit()) return;
-      invoke(lock0, idle_);
       finalize(lock0, trash_);
       if (has_work()) continue;
       if (work_cv_.wait_for(lock0, ms) == std::cv_status::timeout) {
@@ -462,7 +441,6 @@ class ThreadPoolDispatcher : public Dispatcher {
   std::condition_variable busy_cv_;  // mu0_: busy_ == 0
   std::condition_variable curr_cv_;  // mu1_: current_ == desired_
   std::deque<Work> work_;            // protected by mu0_
-  IdleFunction idle_;                // protected by mu0_
   std::vector<CallbackPtr> trash_;   // protected by mu0_
   std::size_t min_;                  // protected by mu1_
   std::size_t max_;                  // protected by mu1_
@@ -481,7 +459,6 @@ void assert_depth() { CHECK_EQ(l_depth, 0U); }
 }  // namespace internal
 
 base::Result new_dispatcher(DispatcherPtr* out, const DispatcherOptions& opts) {
-  auto idle = opts.idle_function();
   auto type = opts.type();
   std::size_t min, max;
   bool has_min, has_max;
@@ -495,7 +472,7 @@ base::Result new_dispatcher(DispatcherPtr* out, const DispatcherOptions& opts) {
 
     case DispatcherType::unspecified:
     case DispatcherType::async_dispatcher:
-      *out = std::make_shared<AsyncDispatcher>(std::move(idle));
+      *out = std::make_shared<AsyncDispatcher>();
       break;
 
     case DispatcherType::threaded_dispatcher:
@@ -504,7 +481,7 @@ base::Result new_dispatcher(DispatcherPtr* out, const DispatcherOptions& opts) {
       if (min > max)
         return base::Result::invalid_argument(
             "bad event::DispatcherOptions: min_workers > max_workers");
-      *out = std::make_shared<ThreadPoolDispatcher>(std::move(idle), min, max);
+      *out = std::make_shared<ThreadPoolDispatcher>(min, max);
       break;
 
     case DispatcherType::system_dispatcher:
@@ -532,7 +509,7 @@ DispatcherPtr system_dispatcher() {
   auto lock = base::acquire_lock(g_sys_mu);
   if (g_sys_d == nullptr) g_sys_d = new DispatcherPtr;
   if (!*g_sys_d)
-    *g_sys_d = std::make_shared<ThreadPoolDispatcher>(nullptr, 1, num_cores());
+    *g_sys_d = std::make_shared<ThreadPoolDispatcher>(1, num_cores());
   return *g_sys_d;
 }
 

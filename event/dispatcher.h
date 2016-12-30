@@ -175,12 +175,6 @@ class Dispatcher {
   virtual void shutdown() noexcept {}
 };
 
-// An IdleFunction is a function that Dispatcher instances may choose to call
-// when they have nothing better to do.
-//
-// THREAD SAFETY: This function MUST be thread-safe.
-using IdleFunction = std::function<void()>;
-
 // A DispatcherOptions holds user-available choices in the selection and
 // configuration of Dispatcher instances.
 class DispatcherOptions {
@@ -204,16 +198,6 @@ class DispatcherOptions {
 
   // Resets all fields to their default values.
   void reset() noexcept { *this = DispatcherOptions(); }
-
-  // The |idle_function()| value is a function object which certain Dispatcher
-  // implementations may choose to invoke when they have nothing better to do,
-  // i.e. when the work queue is empty and there are no threads to be
-  // terminated.
-  IdleFunction idle_function() const { return idle_; }
-  void reset_idle_function() noexcept { idle_ = nullptr; }
-  void set_idle_function(IdleFunction idle) noexcept {
-    idle_ = std::move(idle);
-  }
 
   // The |type()| value selects a Dispatcher implementation.
   DispatcherType type() const noexcept { return type_; }
@@ -263,7 +247,6 @@ class DispatcherOptions {
   void set_num_workers(std::size_t n) noexcept { set_num_workers(n, n); }
 
  private:
-  IdleFunction idle_;
   DispatcherType type_;
   std::size_t min_;
   std::size_t max_;
