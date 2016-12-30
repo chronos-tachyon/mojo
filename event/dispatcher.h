@@ -10,6 +10,7 @@
 #include <memory>
 #include <utility>
 
+#include "base/logging.h"
 #include "base/result.h"
 #include "event/callback.h"
 #include "event/task.h"
@@ -103,6 +104,7 @@ class Dispatcher {
   //
   template <typename T>
   void dispose(T* ptr) {
+    CHECK_NOTNULL(ptr);
     auto closure = [ptr] {
       delete ptr;
       return base::Result();
