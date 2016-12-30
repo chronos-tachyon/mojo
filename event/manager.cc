@@ -50,9 +50,7 @@ static bool vec_erase_all(std::vector<T>& vec, const T& item) noexcept {
   while (it != begin) {
     --it;
     if (*it == item) {
-      auto tmp = it - 1;
       vec.erase(it);
-      it = tmp + 1;
       found = true;
     }
   }
