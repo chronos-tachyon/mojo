@@ -80,8 +80,7 @@ struct HandlerCallback : public Callback {
 
 class ManagerImpl {
  public:
-  ManagerImpl(PollerPtr p, DispatcherPtr d, base::Pipe pipe,
-              std::size_t min_pollers, std::size_t max_pollers);
+  ManagerImpl(PollerPtr p, DispatcherPtr d, base::Pipe pipe, std::size_t num);
   ~ManagerImpl() noexcept { shutdown(); }
 
   bool is_running() const noexcept {
@@ -121,9 +120,11 @@ class ManagerImpl {
   friend struct Record;
   friend struct HandlerCallback;
 
-  void donate_as_poller(base::Lock& lock, bool forever) noexcept;
-  void donate_as_mixed(base::Lock& lock, bool forever) noexcept;
-  void donate_as_worker(base::Lock& lock, bool forever) noexcept;
+  void inc_current(base::Lock& lock) noexcept;
+  void dec_current(base::Lock& lock) noexcept;
+
+  void donate_once(base::Lock& lock) noexcept;
+  void donate_forever(base::Lock& lock) noexcept;
 
   void schedule(CallbackVec* cbvec, Record* rec, Data data);
   void wait_locked(base::Lock& lock);
@@ -144,8 +145,7 @@ class ManagerImpl {
   PollerPtr p_;
   DispatcherPtr d_;
   base::Pipe pipe_;
-  std::size_t min_;          // min # of poller threads
-  std::size_t max_;          // max # of poller threads
+  std::size_t num_;          // target # of poller threads
   std::size_t current_;      // current # of poller threads
   std::size_t outstanding_;  // # of pending event handler invocations
   bool running_;             // true iff not shut down
@@ -404,14 +404,13 @@ inline void swap(Generic& a, Generic& b) noexcept { a.swap(b); }
 class ManagerOptions {
  private:
   enum bits {
-    bit_min = (1U << 0),
-    bit_max = (1U << 1),
+    bit_num = (1U << 0),
   };
 
  public:
   // ManagerOptions is default constructible, copyable, and moveable.
   // There is intentionally no constructor for aggregate initialization.
-  ManagerOptions() noexcept : min_(0), max_(0), has_(0) {}
+  ManagerOptions() noexcept : num_(0), has_(0) {}
   ManagerOptions(const ManagerOptions&) = default;
   ManagerOptions(ManagerOptions&&) = default;
   ManagerOptions& operator=(const ManagerOptions&) = default;
@@ -428,57 +427,31 @@ class ManagerOptions {
   DispatcherOptions& dispatcher() noexcept { return dispatcher_; }
   const DispatcherOptions& dispatcher() const noexcept { return dispatcher_; }
 
-  // The |min_pollers()| value suggests a minimum number of polling threads.
-  // - |min_pollers().first| is true iff a custom value has been specified.
-  // - |min_pollers().second| is the custom value, if present.
-  std::pair<bool, std::size_t> min_pollers() const {
-    return std::make_pair((has_ & bit_min) != 0, min_);
+  // |num_pollers()| is the number of threads that should dedicate their full
+  // attention to event polling.
+  // - |num_pollers().first| is true iff a custom value has been specified.
+  // - |num_pollers().second| is the custom value, if present.
+  std::pair<bool, std::size_t> num_pollers() const {
+    return std::make_pair((has_ & bit_num) != 0, num_);
   }
-  void reset_min_pollers() noexcept {
-    has_ &= ~bit_min;
-    min_ = 0;
-  }
-  void set_min_pollers(std::size_t min) noexcept {
-    min_ = min;
-    has_ |= bit_min;
-  }
-
-  // The |max_pollers()| value suggests a maximum number of polling threads.
-  // - |max_pollers().first| is true iff a custom value has been specified.
-  // - |max_pollers().second| is the custom value, if present.
-  std::pair<bool, std::size_t> max_pollers() const {
-    return std::make_pair((has_ & bit_max) != 0, max_);
-  }
-  void reset_max_pollers() noexcept {
-    has_ &= ~bit_max;
-    max_ = 0;
-  }
-  void set_max_pollers(std::size_t max) noexcept {
-    max_ = max;
-    has_ |= bit_max;
-  }
-
-  // Convenience methods for modifying both min_pollers and max_pollers.
   void reset_num_pollers() noexcept {
-    has_ &= ~(bit_min | bit_max);
-    min_ = max_ = 0;
+    has_ &= ~bit_num;
+    num_ = 0;
   }
-  void set_num_pollers(std::size_t min, std::size_t max) noexcept {
-    min_ = min;
-    max_ = max;
-    has_ |= (bit_min | bit_max);
+  void set_num_pollers(std::size_t num) noexcept {
+    num_ = num;
+    has_ |= bit_num;
   }
-  void set_num_pollers(std::size_t n) noexcept { set_num_pollers(n, n); }
 
   // Convenience method for a single-threaded Manager with inline dispatching.
   void set_inline_mode() noexcept {
-    set_num_pollers(0, 1);
+    set_num_pollers(0);
     dispatcher().set_type(DispatcherType::inline_dispatcher);
   }
 
   // Convenience method for a single-threaded Manager with async dispatching.
   void set_async_mode() noexcept {
-    set_num_pollers(0, 1);
+    set_num_pollers(0);
     dispatcher().set_type(DispatcherType::async_dispatcher);
   }
 
@@ -499,8 +472,7 @@ class ManagerOptions {
  private:
   PollerOptions poller_;
   DispatcherOptions dispatcher_;
-  std::size_t min_;
-  std::size_t max_;
+  std::size_t num_;
   uint8_t has_;
 };
 

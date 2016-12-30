@@ -36,10 +36,10 @@ static void sleep_ms(unsigned int ms) {
 }
 
 static event::Manager make_manager() {
-  event::Manager m;
   event::ManagerOptions mo;
-  mo.set_num_pollers(0, 1);
-  mo.dispatcher().set_type(event::DispatcherType::async_dispatcher);
+  mo.set_async_mode();
+
+  event::Manager m;
   CHECK_OK(event::new_manager(&m, mo));
   return m;
 }

@@ -283,12 +283,11 @@ base::Result HandlerCallback::run() {
 }
 
 ManagerImpl::ManagerImpl(PollerPtr p, DispatcherPtr d, base::Pipe pipe,
-                         std::size_t min_pollers, std::size_t max_pollers)
+                         std::size_t num)
     : p_(DCHECK_NOTNULL(std::move(p))),
       d_(DCHECK_NOTNULL(std::move(d))),
       pipe_(std::move(pipe)),
-      min_(min_pollers),
-      max_(max_pollers),
+      num_(num),
       current_(0),
       outstanding_(0),
       running_(true) {
@@ -296,10 +295,10 @@ ManagerImpl::ManagerImpl(PollerPtr p, DispatcherPtr d, base::Pipe pipe,
   DCHECK_NOTNULL(pipe_.read);
   auto lock = base::acquire_lock(mu_);
   auto closure = [this] { donate(true); };
-  for (std::size_t i = 0; i < min_; ++i) {
+  for (std::size_t i = 0; i < num_; ++i) {
     std::thread(closure).detach();
   }
-  while (current_ < min_) curr_cv_.wait(lock);
+  while (current_ < num_) curr_cv_.wait(lock);
 }
 
 PollerPtr ManagerImpl::poller() const noexcept {
@@ -740,13 +739,10 @@ base::Result ManagerImpl::generic_remove(Record* myrec) {
 
 void ManagerImpl::donate(bool forever) noexcept {
   auto lock = base::acquire_lock(mu_);
-  if (current_ >= max_) {
-    donate_as_worker(lock, forever);
-  } else if (current_ >= min_) {
-    donate_as_mixed(lock, forever);
-  } else {
-    donate_as_poller(lock, forever);
-  }
+  if (forever)
+    donate_forever(lock);
+  else
+    donate_once(lock);
 }
 
 void ManagerImpl::dispose(std::unique_ptr<Record> rec) {
@@ -820,16 +816,42 @@ void ManagerImpl::shutdown() noexcept {
   d_ = nullptr;
 }
 
-void ManagerImpl::donate_as_poller(base::Lock& lock, bool forever) noexcept {
+void ManagerImpl::inc_current(base::Lock& lock) noexcept {
   ++current_;
   curr_cv_.notify_all();
-  auto cleanup = base::cleanup([this] {
-    --current_;
-    curr_cv_.notify_all();
-  });
+}
 
+void ManagerImpl::dec_current(base::Lock& lock) noexcept {
+  --current_;
+  curr_cv_.notify_all();
+}
+
+void ManagerImpl::donate_once(base::Lock& lock) noexcept {
   DispatcherPtr d = DCHECK_NOTNULL(d_);
   PollerPtr p = DCHECK_NOTNULL(p_);
+
+  Poller::EventVec vec;
+  p->wait(&vec, 0).expect_ok(__FILE__, __LINE__);
+
+  CallbackVec cbvec;
+  for (const auto& ev : vec) {
+    handle_event(&cbvec, ev.first, ev.second);
+  }
+
+  lock.unlock();
+  auto reacquire = base::cleanup([&lock] { lock.lock(); });
+  for (auto& cb : cbvec) {
+    d->dispatch(nullptr, std::move(cb));
+  }
+  d->donate(false);
+}
+
+void ManagerImpl::donate_forever(base::Lock& lock) noexcept {
+  DispatcherPtr d = DCHECK_NOTNULL(d_);
+  PollerPtr p = DCHECK_NOTNULL(p_);
+
+  inc_current(lock);
+  auto cleanup = base::cleanup([this, &lock] { dec_current(lock); });
 
   Poller::EventVec vec;
   CallbackVec cbvec;
@@ -851,61 +873,6 @@ void ManagerImpl::donate_as_poller(base::Lock& lock, bool forever) noexcept {
     }
     cbvec.clear();
     reacquire1.run();
-
-    if (!forever) break;
-  }
-}
-
-void ManagerImpl::donate_as_mixed(base::Lock& lock, bool forever) noexcept {
-  ++current_;
-  curr_cv_.notify_all();
-  auto cleanup = base::cleanup([this] {
-    --current_;
-    curr_cv_.notify_all();
-  });
-
-  DispatcherPtr d = DCHECK_NOTNULL(d_);
-  PollerPtr p = DCHECK_NOTNULL(p_);
-
-  Poller::EventVec vec;
-  CallbackVec cbvec;
-  while (running_) {
-    lock.unlock();
-    auto reacquire0 = base::cleanup([&lock] { lock.lock(); });
-    d->donate(false);
-    reacquire0.run();
-
-    lock.unlock();
-    auto reacquire1 = base::cleanup([&lock] { lock.lock(); });
-    p->wait(&vec, 0).expect_ok(__FILE__, __LINE__);
-    reacquire1.run();
-
-    for (const auto& ev : vec) {
-      handle_event(&cbvec, ev.first, ev.second);
-    }
-    vec.clear();
-
-    lock.unlock();
-    auto reacquire2 = base::cleanup([&lock] { lock.lock(); });
-    for (auto& cb : cbvec) {
-      d->dispatch(nullptr, std::move(cb));
-    }
-    cbvec.clear();
-    reacquire2.run();
-
-    if (!forever) break;
-  }
-}
-
-void ManagerImpl::donate_as_worker(base::Lock& lock, bool forever) noexcept {
-  DispatcherPtr d = DCHECK_NOTNULL(d_);
-  while (running_) {
-    lock.unlock();
-    auto reacquire0 = base::cleanup([&lock] { lock.lock(); });
-    d->donate(false);
-    reacquire0.run();
-
-    if (!forever) break;
   }
 }
 
@@ -1397,15 +1364,10 @@ void wait_n(std::vector<Manager> mv, std::vector<Task*> tv, std::size_t n) {
 static base::Result make_manager(ManagerPtr* out, const ManagerOptions& o) {
   DCHECK_NOTNULL(out);
 
-  std::size_t min, max;
-  bool has_min, has_max;
-  std::tie(has_min, min) = o.min_pollers();
-  std::tie(has_max, max) = o.max_pollers();
-  if (!has_min) min = 1;
-  if (!has_max) max = min;
-  if (min > max)
-    return base::Result::invalid_argument("min_pollers > max_pollers");
-  if (max < 1) return base::Result::invalid_argument("max_pollers < 1");
+  std::size_t num;
+  bool has_num;
+  std::tie(has_num, num) = o.num_pollers();
+  if (!has_num) num = 1;
 
   base::Pipe pipe;
   base::Result r = base::make_pipe(&pipe);
@@ -1423,7 +1385,7 @@ static base::Result make_manager(ManagerPtr* out, const ManagerOptions& o) {
   if (!r) return r;
 
   *out = std::make_shared<internal::ManagerImpl>(std::move(p), std::move(d),
-                                                 pipe, min, max);
+                                                 pipe, num);
   return r;
 }
 

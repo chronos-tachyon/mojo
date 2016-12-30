@@ -355,16 +355,13 @@ static void FDWriterTest(event::ManagerOptions mo) {
 
 TEST(FDWriter, AsyncWrite) {
   event::ManagerOptions mo;
-  mo.set_num_pollers(0, 1);
-  mo.dispatcher().set_type(event::DispatcherType::async_dispatcher);
+  mo.set_async_mode();
   FDWriterTest(std::move(mo));
 }
 
 TEST(FDWriter, ThreadedWrite) {
   event::ManagerOptions mo;
-  mo.set_num_pollers(1);
-  mo.dispatcher().set_type(event::DispatcherType::threaded_dispatcher);
-  mo.dispatcher().set_num_workers(1);
+  mo.set_minimal_threaded_mode();
   FDWriterTest(std::move(mo));
 }
 
