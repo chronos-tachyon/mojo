@@ -32,14 +32,6 @@ namespace internal {
 
 using CallbackVec = std::vector<CallbackPtr>;
 
-enum class SourceType : uint8_t {
-  undefined = 0,
-  fd = 1,
-  signal = 2,
-  timer = 3,
-  generic = 4,
-};
-
 struct Record {
   mutable std::mutex mu;
   base::token_t token;
@@ -55,6 +47,14 @@ struct Record {
         disabled(false),
         waited(false) {}
   ~Record() noexcept;
+};
+
+enum class SourceType : uint8_t {
+  undefined = 0,
+  fd = 1,
+  signal = 2,
+  timer = 3,
+  generic = 4,
 };
 
 struct Source {
