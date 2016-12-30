@@ -58,7 +58,7 @@ struct tuple_helper<Only> {
   using tail_indices = backport::make_index_sequence<0U>;
   using tail_type = std::tuple<>;
 
-  static constexpr const Only& head(type t) { return std::get<0>(t); }
+  static constexpr Only head(type t) { return std::get<0>(t); }
 
   static constexpr tail_type tail(type t) { return std::make_tuple(); }
 };
@@ -71,7 +71,7 @@ struct tuple_helper<First, Second, Rest...> {
   using tail_indices = backport::make_index_sequence<1U + sizeof...(Rest)>;
   using tail_type = std::tuple<Second, Rest...>;
 
-  static constexpr const First& head(type t) { return std::get<0>(t); }
+  static constexpr First head(type t) { return std::get<0>(t); }
 
   template <std::size_t... I>
   static constexpr tail_type tail_impl(backport::index_sequence<I...>, type t) {
