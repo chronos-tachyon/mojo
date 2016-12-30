@@ -315,19 +315,37 @@ static void TestManagerImplementation_TaskTimeouts(event::Manager m) {
   LOG(INFO) << "after release";
 }
 
-static void TestManagerImplementation(event::Manager m, std::string name) {
-  LOG(INFO) << "[TestManagerImplementation_FDs:" << name << "]";
+static void TestManagerImplementation(const event::ManagerOptions& mo, const char* name) {
+  event::Manager m;
+
+  LOG(INFO) << "[new:" << name << "]";
+  base::log_flush();
+  ASSERT_OK(event::new_manager(&m, mo));
+
+  LOG(INFO) << "[FDs:" << name << "]";
+  base::log_flush();
   TestManagerImplementation_FDs(m);
-  LOG(INFO) << "[TestManagerImplementation_Signals:" << name << "]";
+
+  LOG(INFO) << "[Signals:" << name << "]";
+  base::log_flush();
   TestManagerImplementation_Signals(m);
-  LOG(INFO) << "[TestManagerImplementation_Timers:" << name << "]";
+
+  LOG(INFO) << "[Timers:" << name << "]";
+  base::log_flush();
   TestManagerImplementation_Timers(m);
-  LOG(INFO) << "[TestManagerImplementation_Events:" << name << "]";
+
+  LOG(INFO) << "[Events:" << name << "]";
+  base::log_flush();
   TestManagerImplementation_Events(m);
-  LOG(INFO) << "[TestManagerImplementation_TaskTimeouts:" << name << "]";
+
+  LOG(INFO) << "[TaskTimeouts:" << name << "]";
+  base::log_flush();
   TestManagerImplementation_TaskTimeouts(m);
+
   LOG(INFO) << "[shutdown:" << name << "]";
+  base::log_flush();
   m.shutdown();
+
   LOG(INFO) << "[OK:" << name << "]";
   base::log_flush();
 }
@@ -335,31 +353,19 @@ static void TestManagerImplementation(event::Manager m, std::string name) {
 TEST(Manager, Inline) {
   event::ManagerOptions mo;
   mo.set_inline_mode();
-
-  event::Manager m;
-  ASSERT_OK(event::new_manager(&m, mo));
-
-  TestManagerImplementation(m, "inline");
+  TestManagerImplementation(mo, "inline");
 }
 
 TEST(Manager, Async) {
   event::ManagerOptions mo;
   mo.set_async_mode();
-
-  event::Manager m;
-  ASSERT_OK(event::new_manager(&m, mo));
-
-  TestManagerImplementation(m, "async");
+  TestManagerImplementation(mo, "async");
 }
 
 TEST(Manager, SingleThreaded) {
   event::ManagerOptions mo;
   mo.set_minimal_threaded_mode();
-
-  event::Manager m;
-  ASSERT_OK(event::new_manager(&m, mo));
-
-  TestManagerImplementation(m, "threaded");
+  TestManagerImplementation(mo, "single-threaded");
 }
 
 TEST(Manager, MultiThreaded) {
@@ -367,11 +373,7 @@ TEST(Manager, MultiThreaded) {
   mo.set_threaded_mode();
   mo.set_num_pollers(2);
   mo.dispatcher().set_num_workers(2);
-
-  event::Manager m;
-  ASSERT_OK(event::new_manager(&m, mo));
-
-  TestManagerImplementation(m, "threaded");
+  TestManagerImplementation(mo, "multi-threaded");
 }
 
 static void init() __attribute__((constructor));
