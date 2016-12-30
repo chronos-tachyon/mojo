@@ -293,7 +293,6 @@ class ThreadPoolDispatcher : public Dispatcher {
       donate_forever(lock0);
     else
       donate_once(lock0);
-    finalize(lock0, trash_);
   }
 
  private:
