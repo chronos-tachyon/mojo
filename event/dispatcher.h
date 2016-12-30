@@ -113,16 +113,6 @@ class Dispatcher {
   // Obtains statistics about this Dispatcher.
   virtual DispatcherStats stats() const noexcept = 0;
 
-  // Requests that the Dispatcher free all resources. Blocks.
-  //
-  // Depending on the implementation:
-  // - Calls to |dispatch| MAY be ignored after this, or they may execute.
-  // - Calls to |adjust| MAY undo this, bringing the Dispatcher back to life.
-  //
-  // Calls to |shutdown| are idempotent: two calls have the same effect as one.
-  //
-  virtual void shutdown() noexcept;
-
   // OPTIONAL. Changes the Dispatcher's options at runtime. May block.
   //
   // When the caller calls |adjust| after having previously invoked |shutdown|,
@@ -134,7 +124,9 @@ class Dispatcher {
   //
   // APPLIES: |threaded_dispatcher|
   //
-  virtual base::Result adjust(const DispatcherOptions& opts) noexcept;
+  virtual base::Result adjust(const DispatcherOptions& opts) noexcept {
+    return base::Result::not_implemented();
+  }
 
   // OPTIONAL. Corks the Dispatcher, pausing the processing of callbacks.
   //
@@ -142,7 +134,7 @@ class Dispatcher {
   //
   // APPLIES: |threaded_dispatcher|
   //
-  virtual void cork() noexcept;
+  virtual void cork() noexcept {}
 
   // OPTIONAL. Uncorks the Dispatcher, resuming the processing of callbacks.
   //
@@ -150,7 +142,7 @@ class Dispatcher {
   //
   // APPLIES: |threaded_dispatcher|
   //
-  virtual void uncork() noexcept;
+  virtual void uncork() noexcept {}
 
   // OPTIONAL. Donates the current thread to the Dispatcher, if supported.
   //
@@ -170,7 +162,17 @@ class Dispatcher {
   //
   // REENTRANCY NOTE: It is NEVER safe to call |donate| from within a Callback.
   //
-  virtual void donate(bool forever) noexcept;
+  virtual void donate(bool forever) noexcept {}
+
+  // Requests that the Dispatcher free all resources. Blocks.
+  //
+  // Depending on the implementation:
+  // - Calls to |dispatch| MAY be ignored after this, or they may execute.
+  // - Calls to |adjust| MAY undo this, bringing the Dispatcher back to life.
+  //
+  // Calls to |shutdown| are idempotent: two calls have the same effect as one.
+  //
+  virtual void shutdown() noexcept {}
 };
 
 // An IdleFunction is a function that Dispatcher instances may choose to call

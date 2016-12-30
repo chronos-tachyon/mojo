@@ -95,23 +95,6 @@ static void finalize(base::Lock& lock,
   }
 }
 
-}  // anonymous namespace
-
-namespace internal {
-void assert_depth() { CHECK_EQ(l_depth, 0U); }
-}  // namespace internal
-
-base::Result Dispatcher::adjust(const DispatcherOptions& opts) noexcept {
-  return base::Result::not_implemented();
-}
-
-void Dispatcher::shutdown() noexcept {}
-void Dispatcher::cork() noexcept {}
-void Dispatcher::uncork() noexcept {}
-void Dispatcher::donate(bool forever) noexcept {}
-
-namespace {
-
 // The implementation for inline Dispatchers is fairly minimal.
 class InlineDispatcher : public Dispatcher {
  public:
@@ -492,6 +475,10 @@ class ThreadPoolDispatcher : public Dispatcher {
 };
 
 }  // anonymous namespace
+
+namespace internal {
+void assert_depth() { CHECK_EQ(l_depth, 0U); }
+}  // namespace internal
 
 base::Result new_dispatcher(DispatcherPtr* out, const DispatcherOptions& opts) {
   auto idle = opts.idle_function();
