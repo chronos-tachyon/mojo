@@ -26,6 +26,25 @@ namespace event {
 
 namespace {
 
+struct restore_depth {
+  void operator()() const noexcept { --l_depth; }
+};
+
+struct reacquire_lock {
+  base::Lock& lock;
+
+  explicit reacquire_lock(base::Lock& lk) noexcept : lock(lk) {}
+  void operator()() const noexcept { lock.lock(); }
+};
+
+struct dispatch_thread {
+  Dispatcher* dispatcher;
+
+  explicit dispatch_thread(Dispatcher* d) noexcept
+      : dispatcher(DCHECK_NOTNULL(d)) {}
+  void operator()() const noexcept { dispatcher->donate(true); }
+};
+
 struct Work {
   Task* task;
   CallbackPtr callback;
@@ -36,18 +55,34 @@ struct Work {
   Work() noexcept : Work(nullptr, nullptr) {}
 };
 
-static void invoke(base::Lock& lock, std::size_t& busy, std::size_t& done,
-                   std::size_t& caught, Work item) noexcept {
-  bool threw = true;
-  ++busy;
-  auto cleanup = base::cleanup([&busy, &done, &caught, &threw] {
-    --busy;
-    ++done;
-    if (threw) ++caught;
-  });
+struct invoke_helper {
+  std::size_t* const busy;
+  std::size_t* const done;
+  std::size_t* const caught;
+  bool threw;
 
+  invoke_helper(std::size_t* b, std::size_t* d, std::size_t* c) noexcept
+      : busy(DCHECK_NOTNULL(b)),
+        done(DCHECK_NOTNULL(d)),
+        caught(DCHECK_NOTNULL(c)),
+        threw(true) {
+    ++*busy;
+  }
+
+  ~invoke_helper() noexcept {
+    --*busy;
+    ++*done;
+    if (threw) ++*caught;
+  }
+
+  void safe() noexcept { threw = false; }
+};
+
+static void invoke(base::Lock& lock, std::size_t* busy, std::size_t* done,
+                   std::size_t* caught, Work item) noexcept {
+  invoke_helper helper(busy, done, caught);
   lock.unlock();
-  auto reacquire = base::cleanup([&lock] { lock.lock(); });
+  auto reacquire = base::cleanup(reacquire_lock(lock));
 
   if (item.task == nullptr || item.task->start()) {
     try {
@@ -56,7 +91,7 @@ static void invoke(base::Lock& lock, std::size_t& busy, std::size_t& done,
         item.task->finish(std::move(result));
       else
         result.expect_ok(__FILE__, __LINE__);
-      threw = false;
+      helper.safe();
     } catch (...) {
       std::exception_ptr eptr = std::current_exception();
       if (item.task != nullptr)
@@ -72,7 +107,7 @@ static void finalize(base::Lock& lock,
                      std::vector<CallbackPtr>& trash) noexcept {
   auto vec = std::move(trash);
   lock.unlock();
-  auto reacquire = base::cleanup([&lock] { lock.lock(); });
+  auto reacquire = base::cleanup(reacquire_lock(lock));
   for (const auto& cb : vec) {
     try {
       cb->run();
@@ -93,7 +128,7 @@ class InlineDispatcher : public Dispatcher {
 
   void dispatch(Task* task, CallbackPtr callback) override {
     auto lock = base::acquire_lock(mu_);
-    invoke(lock, busy_, done_, caught_, Work(task, std::move(callback)));
+    invoke(lock, &busy_, &done_, &caught_, Work(task, std::move(callback)));
   }
 
   void dispose(CallbackPtr callback) override { callback->run(); }
@@ -151,8 +186,8 @@ class AsyncDispatcher : public Dispatcher {
       item = std::move(work_.front());
       work_.pop_front();
       ++l_depth;
-      auto cleanup = base::cleanup([] { --l_depth; });
-      invoke(lock, busy_, done_, caught_, std::move(item));
+      auto cleanup = base::cleanup(restore_depth());
+      invoke(lock, &busy_, &done_, &caught_, std::move(item));
     }
     finalize(lock, trash_);
   }
@@ -357,8 +392,8 @@ class ThreadPoolDispatcher : public Dispatcher {
       item = std::move(work_.front());
       work_.pop_front();
       ++l_depth;
-      auto cleanup = base::cleanup([] { --l_depth; });
-      invoke(lock0, busy_, done_, caught_, std::move(item));
+      auto cleanup = base::cleanup(restore_depth());
+      invoke(lock0, &busy_, &done_, &caught_, std::move(item));
     }
     if (busy_ == 0) busy_cv_.notify_all();
   }
@@ -378,8 +413,8 @@ class ThreadPoolDispatcher : public Dispatcher {
         item = std::move(work_.front());
         work_.pop_front();
         ++l_depth;
-        auto cleanup = base::cleanup([] { --l_depth; });
-        invoke(lock0, busy_, done_, caught_, std::move(item));
+        auto cleanup = base::cleanup(restore_depth());
+        invoke(lock0, &busy_, &done_, &caught_, std::move(item));
       }
       if (busy_ == 0) busy_cv_.notify_all();
       if (monitor.maybe_exit()) return;
@@ -413,14 +448,13 @@ class ThreadPoolDispatcher : public Dispatcher {
       // Spin up new threads.
       std::size_t delta = desired_ - current_;
       while (delta != 0) {
-        auto closure = [this] { donate(true); };
-        std::thread(closure).detach();
+        std::thread(dispatch_thread(this)).detach();
         --delta;
       }
     } else if (current_ > desired_) {
       // Wake up existing threads to self-terminate.
       lock1.unlock();
-      auto reacquire = base::cleanup([&lock1] { lock1.lock(); });
+      auto reacquire = base::cleanup(reacquire_lock(lock1));
       auto lock0 = base::acquire_lock(mu0_);
       work_cv_.notify_all();
     }
