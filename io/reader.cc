@@ -516,6 +516,8 @@ class FDReader : public ReaderImpl {
                 const Writer& w, const Options& opts) override;
   void close(event::Task* task, const Options& opts) override;
 
+  base::FD internal_readerfd() const override { return fd_; }
+
  private:
   void process(base::Lock& lock);
   base::Result wake(event::Set set);

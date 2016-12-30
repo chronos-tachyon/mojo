@@ -143,6 +143,9 @@ class ReaderImpl {
   // THREAD SAFETY: Implementations of this function MUST be thread-safe.
   //
   virtual void close(event::Task* task, const Options& opts) = 0;
+
+  // FOR INTERNAL USE ONLY.  DO NOT CALL DIRECTLY.
+  virtual base::FD internal_readerfd() const { return nullptr; }
 };
 
 // Reader is a handle to a readable I/O stream.
