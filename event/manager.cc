@@ -251,20 +251,6 @@ static void sig_tee_remove_all(base::FD fd) noexcept {
 
 namespace internal {
 
-Record::~Record() noexcept {
-  auto lock = base::acquire_lock(mu);
-  CHECK(disabled) << ": must call event.disable() first!";
-  CHECK(waited) << ": must call event.wait() first!";
-}
-
-HandlerCallback::HandlerCallback(ManagerImpl* ptr, Record* rec,
-                                 Data data) noexcept : ptr(ptr),
-                                                       rec(rec),
-                                                       data(std::move(data)) {
-  DCHECK_NOTNULL(ptr);
-  DCHECK_NOTNULL(rec);
-}
-
 HandlerCallback::~HandlerCallback() noexcept {
   auto lock = base::acquire_lock(ptr->mu_);
   auto& x = ptr->outstanding_;

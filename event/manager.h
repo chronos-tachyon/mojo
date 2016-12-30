@@ -15,6 +15,7 @@
 #include "base/clock.h"
 #include "base/duration.h"
 #include "base/fd.h"
+#include "base/logging.h"
 #include "base/result.h"
 #include "base/time.h"
 #include "base/token.h"
@@ -45,8 +46,15 @@ struct Record {
         handler(std::move(h)),
         set(set),
         disabled(false),
-        waited(false) {}
-  ~Record() noexcept;
+        waited(false) {
+    DCHECK_NOTNULL(handler);
+  }
+
+  ~Record() noexcept {
+    auto lock = base::acquire_lock(mu);
+    CHECK(disabled) << ": must call event.disable() first!";
+    CHECK(waited) << ": must call event.wait() first!";
+  }
 };
 
 enum class SourceType : uint8_t {
@@ -73,14 +81,28 @@ struct HandlerCallback : public Callback {
   Record* rec;
   Data data;
 
-  HandlerCallback(ManagerImpl* ptr, Record* rec, Data data) noexcept;
+  HandlerCallback(ManagerImpl* p, Record* r, Data d) noexcept
+      : ptr(p),
+        rec(r),
+        data(std::move(d)) {
+    DCHECK_NOTNULL(ptr);
+    DCHECK_NOTNULL(rec);
+  }
+
   ~HandlerCallback() noexcept override;
+
   base::Result run() override;
 };
 
 class ManagerImpl {
  public:
   ManagerImpl(PollerPtr p, DispatcherPtr d, base::Pipe pipe, std::size_t num);
+
+  ManagerImpl(const ManagerImpl&) = delete;
+  ManagerImpl(ManagerImpl&&) = delete;
+  ManagerImpl& operator=(const ManagerImpl&) = delete;
+  ManagerImpl& operator=(ManagerImpl&&) = delete;
+
   ~ManagerImpl() noexcept { shutdown(); }
 
   bool is_running() const noexcept {
