@@ -17,6 +17,8 @@
 #include "base/util.h"
 #include "io/reader.h"
 
+static constexpr std::size_t kDefaultIdealBlockSize = 1U << 20;  // 1 MiB
+
 static base::Result writer_closed() {
   return base::Result::failed_precondition("io::Writer is closed");
 }
@@ -98,6 +100,10 @@ class FunctionWriter : public WriterImpl {
   FunctionWriter(WriteFn wfn, CloseFn cfn) noexcept : wfn_(std::move(wfn)),
                                                       cfn_(std::move(cfn)) {}
 
+  std::size_t ideal_block_size() const noexcept override {
+    return kDefaultIdealBlockSize;
+  }
+
   void write(event::Task* task, std::size_t* n, const char* ptr,
              std::size_t len, const Options& opts) override {
     wfn_(task, n, ptr, len, opts);
@@ -118,6 +124,10 @@ class SyncFunctionWriter : public WriterImpl {
       : wfn_(std::move(wfn)),
         cfn_(std::move(cfn)) {}
 
+  std::size_t ideal_block_size() const noexcept override {
+    return kDefaultIdealBlockSize;
+  }
+
   void write(event::Task* task, std::size_t* n, const char* ptr,
              std::size_t len, const Options& opts) override {
     if (prologue(task, n, ptr, len)) task->finish(wfn_(n, ptr, len, opts));
@@ -136,6 +146,10 @@ class CloseIgnoringWriter : public WriterImpl {
  public:
   CloseIgnoringWriter(Writer w) noexcept : w_(std::move(w)) {
     w_.assert_valid();
+  }
+
+  std::size_t ideal_block_size() const noexcept override {
+    return w_.ideal_block_size();
   }
 
   void write(event::Task* task, std::size_t* n, const char* ptr,
@@ -163,6 +177,10 @@ class CloseIgnoringWriter : public WriterImpl {
 class StringWriter : public WriterImpl {
  public:
   StringWriter(std::string* str) noexcept : str_(str), closed_(false) {}
+
+  std::size_t ideal_block_size() const noexcept override {
+    return kDefaultIdealBlockSize;
+  }
 
   void write(event::Task* task, std::size_t* n, const char* ptr,
              std::size_t len, const Options& opts) override {
@@ -203,6 +221,10 @@ class BufferWriter : public WriterImpl {
                                                       buflen_(n),
                                                       closed_(false) {
     *buflen_ = 0;
+  }
+
+  std::size_t ideal_block_size() const noexcept override {
+    return kDefaultIdealBlockSize;
   }
 
   void write(event::Task* task, std::size_t* n, const char* ptr,
@@ -276,6 +298,10 @@ class DiscardWriter : public WriterImpl {
     if (total_) *total_ = 0;
   }
 
+  std::size_t ideal_block_size() const noexcept override {
+    return kDefaultIdealBlockSize;
+  }
+
   void write(event::Task* task, std::size_t* n, const char* ptr,
              std::size_t len, const Options& opts) override {
     if (!prologue(task, n, ptr, len)) return;
@@ -295,6 +321,8 @@ class DiscardWriter : public WriterImpl {
 class FullWriter : public WriterImpl {
  public:
   FullWriter() noexcept = default;
+
+  std::size_t ideal_block_size() const noexcept override { return 64; }
 
   void write(event::Task* task, std::size_t* n, const char* ptr,
              std::size_t len, const Options& opts) override {
@@ -338,6 +366,10 @@ class FDWriter : public WriterImpl {
 
   explicit FDWriter(base::FD fd) noexcept : fd_(std::move(fd)), depth_(0) {}
   ~FDWriter() noexcept override;
+
+  std::size_t ideal_block_size() const noexcept override {
+    return kDefaultIdealBlockSize;
+  }
 
   void write(event::Task* task, std::size_t* n, const char* ptr,
              std::size_t len, const Options& opts) override;

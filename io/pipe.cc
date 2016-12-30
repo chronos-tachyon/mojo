@@ -9,6 +9,8 @@
 #include "base/cleanup.h"
 #include "base/logging.h"
 
+static constexpr std::size_t kPipeIdealBlockSize = 1U << 20;  // 1 MiB
+
 static base::Result closed_pipe() {
   return base::Result::failed_precondition("io::Pipe is closed");
 }
@@ -92,6 +94,10 @@ class PipeReader : public ReaderImpl {
     close_guts(lock);
   }
 
+  std::size_t ideal_block_size() const noexcept override {
+    return kPipeIdealBlockSize;
+  }
+
   void read(event::Task* task, char* out, std::size_t* n, std::size_t min,
             std::size_t max, const Options& opts) override {
     if (!prologue(task, out, n, min, max)) return;
@@ -143,6 +149,10 @@ class PipeWriter : public WriterImpl {
     auto lock = base::acquire_lock(guts_->mu);
     guts_->write_closed = true;
     guts_->process(lock);
+  }
+
+  std::size_t ideal_block_size() const noexcept override {
+    return kPipeIdealBlockSize;
   }
 
   void write(event::Task* task, std::size_t* n, const char* ptr,

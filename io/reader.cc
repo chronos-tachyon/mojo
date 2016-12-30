@@ -33,8 +33,9 @@
 
 using RC = base::Result::Code;
 
-static constexpr std::size_t kSendfileMax = 4U << 20;  // 4 MiB
-static constexpr std::size_t kSpliceMax = 4U << 20;    // 4 MiB
+static constexpr std::size_t kDefaultIdealBlockSize = 1U << 20;  // 1 MiB
+static constexpr std::size_t kSendfileMax = 4U << 20;            // 4 MiB
+static constexpr std::size_t kSpliceMax = 4U << 20;              // 4 MiB
 
 static base::Result reader_closed() {
   return base::Result::failed_precondition("io::Reader is closed");
@@ -190,6 +191,10 @@ class FunctionReader : public ReaderImpl {
   FunctionReader(ReadFn rfn, CloseFn cfn)
       : rfn_(std::move(rfn)), cfn_(std::move(cfn)) {}
 
+  std::size_t ideal_block_size() const noexcept override {
+    return kDefaultIdealBlockSize;
+  }
+
   void read(event::Task* task, char* out, std::size_t* n, std::size_t min,
             std::size_t max, const Options& opts) override {
     rfn_(task, out, n, min, max, opts);
@@ -209,6 +214,10 @@ class SyncFunctionReader : public ReaderImpl {
   SyncFunctionReader(SyncReadFn rfn, SyncCloseFn cfn)
       : rfn_(std::move(rfn)), cfn_(std::move(cfn)) {}
 
+  std::size_t ideal_block_size() const noexcept override {
+    return kDefaultIdealBlockSize;
+  }
+
   void read(event::Task* task, char* out, std::size_t* n, std::size_t min,
             std::size_t max, const Options& opts) override {
     if (prologue(task, out, n, min, max))
@@ -227,6 +236,10 @@ class SyncFunctionReader : public ReaderImpl {
 class CloseIgnoringReader : public ReaderImpl {
  public:
   CloseIgnoringReader(Reader r) : r_(std::move(r)) {}
+
+  std::size_t ideal_block_size() const noexcept override {
+    return r_.ideal_block_size();
+  }
 
   void read(event::Task* task, char* out, std::size_t* n, std::size_t min,
             std::size_t max, const Options& opts) override {
@@ -250,6 +263,10 @@ class LimitedReader : public ReaderImpl {
  public:
   LimitedReader(Reader r, std::size_t max)
       : r_(std::move(r)), remaining_(max) {}
+
+  std::size_t ideal_block_size() const noexcept override {
+    return r_.ideal_block_size();
+  }
 
   void read(event::Task* task, char* out, std::size_t* n, std::size_t min,
             std::size_t max, const Options& opts) override {
@@ -314,6 +331,10 @@ class StringOrBufferReader : public ReaderImpl {
                                                    buf_(ConstBuffer(str_)),
                                                    pos_(0),
                                                    closed_(false) {}
+
+  std::size_t ideal_block_size() const noexcept override {
+    return kDefaultIdealBlockSize;
+  }
 
   void read(event::Task* task, char* out, std::size_t* n, std::size_t min,
             std::size_t max, const Options& opts) override {
@@ -391,6 +412,8 @@ class NullReader : public ReaderImpl {
  public:
   NullReader() noexcept = default;
 
+  std::size_t ideal_block_size() const noexcept override { return 64; }
+
   void read(event::Task* task, char* out, std::size_t* n, std::size_t min,
             std::size_t max, const Options& opts) override {
     if (!prologue(task, out, n, min, max)) return;
@@ -415,6 +438,10 @@ class NullReader : public ReaderImpl {
 class ZeroReader : public ReaderImpl {
  public:
   ZeroReader() noexcept = default;
+
+  std::size_t ideal_block_size() const noexcept override {
+    return kDefaultIdealBlockSize;
+  }
 
   void read(event::Task* task, char* out, std::size_t* n, std::size_t min,
             std::size_t max, const Options& opts) override {
@@ -478,6 +505,10 @@ class FDReader : public ReaderImpl {
 
   explicit FDReader(base::FD fd) noexcept : fd_(std::move(fd)), depth_(0) {}
   ~FDReader() noexcept override;
+
+  std::size_t ideal_block_size() const noexcept override {
+    return kDefaultIdealBlockSize;
+  }
 
   void read(event::Task* task, char* out, std::size_t* n, std::size_t min,
             std::size_t max, const Options& opts) override;
@@ -898,6 +929,10 @@ class MultiReader : public ReaderImpl {
   explicit MultiReader(std::vector<Reader> vec) noexcept : vec_(std::move(vec)),
                                                            pass_(0),
                                                            curr_(0) {}
+
+  std::size_t ideal_block_size() const noexcept override {
+    return kDefaultIdealBlockSize;  // TODO: calculate LCM(vec[0], vec[1], ...)
+  }
 
   void read(event::Task* task, char* out, std::size_t* n, std::size_t min,
             std::size_t max, const Options& opts) override {

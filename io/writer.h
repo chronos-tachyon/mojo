@@ -78,6 +78,10 @@ class WriterImpl {
   // Closes the Writer, if not already closed, and frees resources.
   virtual ~WriterImpl() noexcept = default;
 
+  // Returns the block size which results in efficient writes.  For best
+  // performance, write buffer sizes should be in multiples of this size.
+  virtual std::size_t ideal_block_size() const noexcept = 0;
+
   // Writes |len| bytes out of the buffer at |ptr|.
   // - ALWAYS sets |*n| to the number of bytes successfully written
   //   ~ In the case of an error, |*n| is the number of bytes *known* to have
@@ -122,9 +126,6 @@ class WriterImpl {
   // THREAD SAFETY: Implementations of this function MUST be thread-safe.
   //
   virtual void close(event::Task* task, const Options& opts) = 0;
-
-  // Returns the minimum size which results in efficient writes.
-  virtual std::size_t ideal_block_size() const noexcept { return 4096; }
 
   // FOR INTERNAL USE ONLY.  DO NOT CALL DIRECTLY.
   //

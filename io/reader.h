@@ -80,6 +80,10 @@ class ReaderImpl {
   // Closes the Reader, if not already closed, and frees resources.
   virtual ~ReaderImpl() noexcept = default;
 
+  // Returns the block size which results in efficient reads.  For best
+  // performance, read buffer sizes should be in multiples of this size.
+  virtual std::size_t ideal_block_size() const noexcept = 0;
+
   // Reads up to |max| bytes into the buffer at |out|.
   // - NEVER reads more than |max| bytes
   // - ALWAYS sets |*n| to the number of bytes successfully read
@@ -139,9 +143,6 @@ class ReaderImpl {
   // THREAD SAFETY: Implementations of this function MUST be thread-safe.
   //
   virtual void close(event::Task* task, const Options& opts) = 0;
-
-  // Returns the minimum size which results in efficient reads.
-  virtual std::size_t ideal_block_size() const noexcept { return 4096; }
 };
 
 // Reader is a handle to a readable I/O stream.
