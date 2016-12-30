@@ -57,6 +57,35 @@ static bool vec_erase_all(std::vector<T>& vec, const T& item) noexcept {
   return found;
 }
 
+static char safe_back(const std::string& str) noexcept {
+  if (str.empty())
+    return 0;
+  else
+    return str.back();
+}
+
+static std::string S(std::size_t count, std::string s, std::string p = "") {
+  if (count == 1) return s;
+  if (p.empty()) {
+    p = s;
+    switch (safe_back(p)) {
+      case 'a':
+      case 'i':
+      case 'o':
+      case 'u':
+        p += 'e';
+        break;
+
+      case 'y':
+        p.back() = 'i';
+        p += 'e';
+        break;
+    }
+    p += 's';
+  }
+  return p;
+}
+
 // Signal handler implementation details {{{
 
 static constexpr std::size_t NUM_SIGNALS =
@@ -249,12 +278,33 @@ static void sig_tee_remove_all(base::FD fd) noexcept {
 
 namespace internal {
 
+void Record::wait() noexcept {
+  internal::assert_depth();
+  auto lock = base::acquire_lock(mu);
+  CHECK(disabled) << ": must call event.disable() first!";
+  auto x = outstanding;
+  VLOG(6) << x << " " << S(x, "callback") << " to wait on";
+  std::chrono::milliseconds timeout(1);
+  while (outstanding != 0) {
+    VLOG(6) << "Blocking on CV";
+    if (cv.wait_for(lock, timeout) == std::cv_status::timeout) {
+      VLOG(6) << "Gave up waiting; donating this thread to the dispatcher";
+      lock.unlock();
+      dispatcher->donate(false);
+      lock.lock();
+      timeout *= 2;
+    }
+    x = outstanding;
+    VLOG(6) << x << " " << S(x, "callback remains", "callbacks remain");
+  }
+}
+
 HandlerCallback::~HandlerCallback() noexcept {
-  auto lock = base::acquire_lock(ptr->mu_);
-  auto& x = ptr->outstanding_;
-  --x;
-  if (x == 0) ptr->call_cv_.notify_all();
-  VLOG(6) << "Destroyed a callback; " << x << " more remain(s)";
+  auto lock = base::acquire_lock(rec->mu);
+  auto x = --rec->outstanding;
+  if (x == 0) rec->cv.notify_all();
+  VLOG(6) << "Destroyed a callback; " << x << " more "
+          << S(x, "remains", "remain");
 }
 
 base::Result HandlerCallback::run() {
@@ -273,7 +323,6 @@ ManagerImpl::ManagerImpl(PollerPtr p, DispatcherPtr d, base::Pipe pipe,
       pipe_(std::move(pipe)),
       num_(num),
       current_(0),
-      outstanding_(0),
       running_(true) {
   DCHECK_NOTNULL(pipe_.write);
   DCHECK_NOTNULL(pipe_.read);
@@ -346,7 +395,7 @@ base::Result ManagerImpl::fd_add(std::unique_ptr<Record>* out, base::FD fd,
   DCHECK_EQ(added_fd, added_src);
 
   Set after = before | set;
-  auto myrec = make_unique<Record>(t, std::move(handler), set);
+  auto myrec = make_unique<Record>(t, d_, std::move(handler), set);
   src.records.push_back(myrec.get());
   auto cleanup1 = base::cleanup([this, t, added_src, &src] {
     src.records.pop_back();
@@ -500,7 +549,7 @@ base::Result ManagerImpl::signal_add(std::unique_ptr<Record>* out, int signo,
   }
   DCHECK_EQ(added_sig, added_src);
 
-  auto myrec = make_unique<Record>(t, std::move(handler));
+  auto myrec = make_unique<Record>(t, d_, std::move(handler));
   src.records.push_back(myrec.get());
   auto cleanup1 = base::cleanup([this, t, added_src, &src] {
     src.records.pop_back();
@@ -583,7 +632,7 @@ base::Result ManagerImpl::timer_add(std::unique_ptr<Record>* out,
   src.type = SourceType::timer;
   src.fd = std::move(fd);
 
-  auto myrec = make_unique<Record>(t, std::move(handler));
+  auto myrec = make_unique<Record>(t, d_, std::move(handler));
   src.records.push_back(myrec.get());
   auto cleanup = base::cleanup([this, t] { sources_.erase(t); });
 
@@ -671,7 +720,7 @@ base::Result ManagerImpl::generic_add(std::unique_ptr<Record>* out,
   auto& src = sources_[t];
   src.type = SourceType::generic;
 
-  auto myrec = make_unique<Record>(t, std::move(handler));
+  auto myrec = make_unique<Record>(t, d_, std::move(handler));
   src.records.push_back(myrec.get());
   *out = std::move(myrec);
   return base::Result();
@@ -729,19 +778,6 @@ void ManagerImpl::donate(bool forever) noexcept {
     donate_once(lock);
 }
 
-void ManagerImpl::dispose(std::unique_ptr<Record> rec) {
-  CHECK(rec);
-  auto lock0 = base::acquire_lock(mu_);
-  auto lock1 = base::acquire_lock(rec->mu);
-  CHECK(rec->disabled);
-  if (running_ && !rec->waited) trash_.push_back(std::move(rec));
-}
-
-void ManagerImpl::wait() {
-  auto lock = base::acquire_lock(mu_);
-  wait_locked(lock);
-}
-
 void ManagerImpl::shutdown() noexcept {
   auto lock0 = base::acquire_lock(mu_);
   if (!running_) return;
@@ -764,8 +800,8 @@ void ManagerImpl::shutdown() noexcept {
 
   // Wait for the poller threads to notice.
   while (current_ > 0) {
-    std::size_t x = current_;
-    VLOG(6) << "Stopping " << x << " poller thread(s)";
+    auto x = current_;
+    VLOG(6) << "Stopping " << x << " poller " << S(x, "thread");
     event::Data data;
     base::write_exactly(pipe_.write, &data, sizeof(data), "event pipe")
         .expect_ok(__FILE__, __LINE__);
@@ -781,19 +817,16 @@ void ManagerImpl::shutdown() noexcept {
   VLOG(6) << "Freeing poller";
   p_ = nullptr;
 
-  VLOG(6) << "Marking " << records.size() << " record(s) as waited";
+  auto x = records.size();
+  VLOG(6) << "Marking " << x << " " << S(x, "record") << " as disabled";
   for (Record* rec : records) {
     auto lock1 = base::acquire_lock(rec->mu);
     rec->disabled = true;
   }
 
-  VLOG(6) << "Waiting on outstanding callbacks";
-  wait_locked(lock0);
-
-  VLOG(6) << "Marking " << records.size() << " record(s) as waited";
+  VLOG(6) << "Waiting on " << x << " " << S(x, "record");
   for (Record* rec : records) {
-    auto lock1 = base::acquire_lock(rec->mu);
-    rec->waited = true;
+    rec->wait();
   }
 
   VLOG(6) << "Freeing dispatcher";
@@ -864,43 +897,10 @@ void ManagerImpl::schedule(CallbackVec* cbvec, Record* rec, Data data) {
   DCHECK_NOTNULL(rec);
   auto lock = base::acquire_lock(rec->mu);
   if (rec->disabled) return;
-  cbvec->push_back(make_unique<HandlerCallback>(this, rec, std::move(data)));
-  VLOG(6) << "Scheduled a callback; " << outstanding_
-          << " were already outstanding";
-  ++outstanding_;
-}
-
-void ManagerImpl::wait_locked(base::Lock& lock) {
-  internal::assert_depth();
-  DispatcherPtr d = DCHECK_NOTNULL(d_);
-  VLOG(6) << outstanding_ << " callback(s) to wait on";
-  using MS = std::chrono::milliseconds;
-  MS timeout = MS(1);
-  while (outstanding_ != 0) {
-    if (d->type() == DispatcherType::threaded_dispatcher) {
-      VLOG(6) << "Blocking on CV";
-      if (call_cv_.wait_for(lock, timeout) == std::cv_status::timeout) {
-        VLOG(6) << "Gave up waiting; donating this thread to the dispatcher";
-        lock.unlock();
-        d->donate(false);
-        lock.lock();
-        timeout *= 2;
-      }
-    } else {
-      VLOG(6) << "Donating this thread to the dispatcher";
-      lock.unlock();
-      d->donate(false);
-      lock.lock();
-    }
-    VLOG(6) << outstanding_ << " callback(s) remain(s)";
-  }
-
-  VLOG(6) << "Throwing away " << trash_.size() << " piece(s) of trash";
-  auto trash = std::move(trash_);
-  for (auto& rec : trash) {
-    auto lock1 = base::acquire_lock(rec->mu);
-    rec->waited = true;
-  }
+  auto x = rec->outstanding;
+  VLOG(6) << "Scheduling a callback; " << x << " " << S(x, "is", "are")
+          << " already outstanding";
+  cbvec->push_back(make_unique<HandlerCallback>(rec, std::move(data)));
 }
 
 void ManagerImpl::handle_event(CallbackVec* cbvec, base::token_t t, Set set) {
@@ -1009,21 +1009,18 @@ void ManagerImpl::handle_timer_event(CallbackVec* cbvec, base::token_t t,
 }  // namespace internal
 
 static void wait_impl(ManagerPtr& ptr, RecordPtr& rec) {
-  if (!ptr || !rec) return;
-  auto lock = base::acquire_lock(rec->mu);
-  CHECK(rec->disabled);
-  if (rec->waited) return;
-  lock.unlock();
-  ptr->wait();
-  lock.lock();
-  rec->waited = true;
+  auto p = std::move(ptr);
+  auto r = std::move(rec);
+  if (r) r->wait();
 }
 
 static void disown_impl(ManagerPtr& ptr, RecordPtr& rec) {
-  if (!ptr || !rec) return;
   auto p = std::move(ptr);
   auto r = std::move(rec);
-  p->dispose(std::move(r));
+  if (r) {
+    internal::Record* record = r.release();
+    record->dispatcher->dispose(record);
+  }
 }
 
 void FileDescriptor::assert_valid() const {
@@ -1298,11 +1295,12 @@ struct WaitData {
 
 void wait_n(std::vector<Manager> mv, std::vector<Task*> tv, std::size_t n) {
   internal::assert_depth();
-  if (n > tv.size()) {
-    LOG(DFATAL) << "BUG: event::wait_n asked to wait for " << n
-                << " task completions, but only " << tv.size()
-                << " tasks were provided!";
-    n = tv.size();
+  auto tn = tv.size();
+  if (n > tn) {
+    LOG(DFATAL) << "BUG: event::wait_n asked to wait for " << n << " task "
+                << S(n, "completion") << ", but only " << tn << " "
+                << S(tn, "task") << " were provided!";
+    n = tn;
   }
 
   auto closure = [](std::shared_ptr<WaitData> data) {

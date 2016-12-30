@@ -35,26 +35,28 @@ using CallbackVec = std::vector<CallbackPtr>;
 
 struct Record {
   mutable std::mutex mu;
-  base::token_t token;
-  HandlerPtr handler;
+  std::condition_variable cv;  // outstanding == 0
+  const base::token_t token;
+  const DispatcherPtr dispatcher;
+  const HandlerPtr handler;
+  std::size_t outstanding;  // # of outstanding calls to |handler|
   Set set;
   bool disabled;  // true iff new calls forbidden
-  bool waited;    // true iff ManagerImpl::wait() was called after disabled
 
-  Record(base::token_t t, HandlerPtr h, Set set = Set()) noexcept
-      : token(t),
-        handler(std::move(h)),
-        set(set),
-        disabled(false),
-        waited(false) {
+  Record(base::token_t t, DispatcherPtr d, HandlerPtr h,
+         Set set = Set()) noexcept : token(t),
+                                     dispatcher(std::move(d)),
+                                     handler(std::move(h)),
+                                     outstanding(0),
+                                     set(set),
+                                     disabled(false) {
+    DCHECK_NOTNULL(dispatcher);
     DCHECK_NOTNULL(handler);
   }
 
-  ~Record() noexcept {
-    auto lock = base::acquire_lock(mu);
-    CHECK(disabled) << ": must call event.disable() first!";
-    CHECK(waited) << ": must call event.wait() first!";
-  }
+  ~Record() noexcept { wait(); }
+
+  void wait() noexcept;
 };
 
 enum class SourceType : uint8_t {
@@ -77,16 +79,12 @@ struct Source {
 class ManagerImpl;
 
 struct HandlerCallback : public Callback {
-  ManagerImpl* ptr;
   Record* rec;
   Data data;
 
-  HandlerCallback(ManagerImpl* p, Record* r, Data d) noexcept
-      : ptr(p),
-        rec(r),
-        data(std::move(d)) {
-    DCHECK_NOTNULL(ptr);
-    DCHECK_NOTNULL(rec);
+  HandlerCallback(Record* r, Data d) noexcept : rec(DCHECK_NOTNULL(r)),
+                                                data(std::move(d)) {
+    ++rec->outstanding;
   }
 
   ~HandlerCallback() noexcept override;
@@ -132,10 +130,6 @@ class ManagerImpl {
   base::Result generic_remove(Record* myrec);
 
   void donate(bool forever) noexcept;
-
-  void dispose(std::unique_ptr<internal::Record> rec);
-  void wait();
-
   void shutdown() noexcept;
 
  private:
@@ -149,7 +143,6 @@ class ManagerImpl {
   void donate_forever(base::Lock& lock) noexcept;
 
   void schedule(CallbackVec* cbvec, Record* rec, Data data);
-  void wait_locked(base::Lock& lock);
   void handle_event(CallbackVec* cbvec, base::token_t t, Set set);
   void handle_pipe_event(CallbackVec* cbvec);
   void handle_fd_event(CallbackVec* cbvec, base::token_t t, const Source& src,
@@ -159,18 +152,15 @@ class ManagerImpl {
 
   mutable std::mutex mu_;
   std::condition_variable curr_cv_;  // all changes to current_
-  std::condition_variable call_cv_;  // outstanding_ == 0
   std::unordered_map<int, base::token_t> fdmap_;
   std::unordered_map<int, base::token_t> sigmap_;
   std::unordered_map<base::token_t, Source> sources_;
-  std::vector<std::unique_ptr<internal::Record>> trash_;
   PollerPtr p_;
   DispatcherPtr d_;
   base::Pipe pipe_;
-  std::size_t num_;          // target # of poller threads
-  std::size_t current_;      // current # of poller threads
-  std::size_t outstanding_;  // # of pending event handler invocations
-  bool running_;             // true iff not shut down
+  std::size_t num_;      // target # of poller threads
+  std::size_t current_;  // current # of poller threads
+  bool running_;         // true iff not shut down
 };
 
 }  // namespace internal
