@@ -71,7 +71,7 @@ static void teardown(LogCapture* target) {
   re2::RE2::GlobalReplace(target->string(), ":[0-9]+\\] ", ":XX] ");
 }
 
-TEST(Logger, EndToEnd) {
+TEST(LoggerDeathTest, EndToEnd) {
   std::string data;
   LogCapture target(&data);
   setup(&target);
@@ -123,7 +123,7 @@ TEST(Check, Correct) {
   CHECK_GT(5, 3) << ": not used";
 }
 
-TEST(Check, Wrong) {
+TEST(CheckDeathTest, Wrong) {
   std::string data;
   LogCapture target(&data);
   setup(&target);
