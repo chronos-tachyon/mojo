@@ -274,6 +274,22 @@ static void sig_tee_remove_all(base::FD fd) noexcept {
 }
 
 // }}}
+
+struct reacquire_lock {
+  base::Lock& lock;
+
+  explicit reacquire_lock(base::Lock& lk) noexcept : lock(lk) {}
+  void operator()() const noexcept { lock.lock(); }
+};
+
+struct poll_thread {
+  ManagerImpl* manager;
+
+  explicit poll_thread(ManagerImpl* m) noexcept
+      : manager(DCHECK_NOTNULL(m)) {}
+  void operator()() const noexcept { manager->donate(true); }
+};
+
 }  // anonymous namespace
 
 namespace internal {
@@ -334,9 +350,8 @@ ManagerImpl::ManagerImpl(PollerPtr p, DispatcherPtr d, base::Pipe pipe,
   DCHECK_NOTNULL(pipe_.write);
   DCHECK_NOTNULL(pipe_.read);
   auto lock = base::acquire_lock(mu_);
-  auto closure = [this] { donate(true); };
   for (std::size_t i = 0; i < num_; ++i) {
-    std::thread(closure).detach();
+    std::thread(poll_thread(this)).detach();
   }
   while (current_ < num_) curr_cv_.wait(lock);
 }
@@ -390,8 +405,8 @@ base::Result ManagerImpl::fd_add(std::unique_ptr<Record>* out, base::FD fd,
     src.signo = fdnum;  // for fdmap_.erase() and handle_fd_event
     added_src = true;
   } else {
-    CHECK_EQ(src.fd, fd);
     DCHECK_EQ(src.signo, fdnum);
+    CHECK_EQ(src.fd, fd);
     for (const Record* rec : src.records) {
       auto lock1 = base::acquire_lock(rec->mu);
       before |= rec->set;
@@ -863,7 +878,7 @@ void ManagerImpl::donate_once(base::Lock& lock) noexcept {
   }
 
   lock.unlock();
-  auto reacquire = base::cleanup([&lock] { lock.lock(); });
+  auto reacquire = base::cleanup(reacquire_lock(lock));
   for (auto& cb : cbvec) {
     d->dispatch(nullptr, std::move(cb));
   }
@@ -881,7 +896,7 @@ void ManagerImpl::donate_forever(base::Lock& lock) noexcept {
   CallbackVec cbvec;
   while (running_) {
     lock.unlock();
-    auto reacquire0 = base::cleanup([&lock] { lock.lock(); });
+    auto reacquire0 = base::cleanup(reacquire_lock(lock));
     p->wait(&vec, -1).expect_ok(__FILE__, __LINE__);
     reacquire0.run();
 
@@ -891,7 +906,7 @@ void ManagerImpl::donate_forever(base::Lock& lock) noexcept {
     vec.clear();
 
     lock.unlock();
-    auto reacquire1 = base::cleanup([&lock] { lock.lock(); });
+    auto reacquire1 = base::cleanup(reacquire_lock(lock));
     for (auto& cb : cbvec) {
       d->dispatch(nullptr, std::move(cb));
     }
