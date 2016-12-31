@@ -897,10 +897,10 @@ void ManagerImpl::schedule(CallbackVec* cbvec, Record* rec, Data data) {
   DCHECK_NOTNULL(rec);
   auto lock = base::acquire_lock(rec->mu);
   if (rec->disabled) return;
-  auto x = rec->outstanding;
-  VLOG(6) << "Scheduling a callback; " << x << " " << S(x, "is", "are")
-          << " already outstanding";
   cbvec->push_back(make_unique<HandlerCallback>(rec, std::move(data)));
+  auto x = rec->outstanding;
+  VLOG(6) << "Scheduled a callback; now " << x << " " << S(x, "is", "are")
+          << " outstanding";
 }
 
 void ManagerImpl::handle_event(CallbackVec* cbvec, base::token_t t, Set set) {
@@ -1196,7 +1196,7 @@ base::Result Manager::fd(FileDescriptor* out, base::FD fd, Set set,
   DCHECK_NOTNULL(handler);
   assert_valid();
   RecordPtr myrec;
-  base::Result r = ptr_->fd_add(&myrec, fd, set, std::move(handler));
+  base::Result r = ptr_->fd_add(&myrec, std::move(fd), set, std::move(handler));
   if (r) {
     *out = FileDescriptor(ptr_, std::move(myrec));
   }
@@ -1296,12 +1296,8 @@ struct WaitData {
 void wait_n(std::vector<Manager> mv, std::vector<Task*> tv, std::size_t n) {
   internal::assert_depth();
   auto tn = tv.size();
-  if (n > tn) {
-    LOG(DFATAL) << "BUG: event::wait_n asked to wait for " << n << " task "
-                << S(n, "completion") << ", but only " << tn << " "
-                << S(tn, "task") << " were provided!";
-    n = tn;
-  }
+  CHECK_LE(n, tn);
+  n = std::min(n, tn);
 
   auto closure = [](std::shared_ptr<WaitData> data) {
     VLOG(4) << "hello from event::wait_n closure";
@@ -1326,14 +1322,20 @@ void wait_n(std::vector<Manager> mv, std::vector<Task*> tv, std::size_t n) {
   }
 
   auto lock = base::acquire_lock(data->mu);
+  std::chrono::milliseconds timeout(1);
+  if (data->done < n && !all_threaded) {
+    VLOG(5) << "event::wait_n: donating";
+    lock.unlock();
+    for (const Manager& m : mv) {
+      m.donate(false);
+    }
+    lock.lock();
+  }
   while (data->done < n) {
-    // Inline? Maybe it's blocked on I/O. Try donating.
-    // Async? Just donate.
-    // Threaded? Don't be so eager to join the fray.
-    if (all_threaded) {
-      VLOG(5) << "event::wait_n: blocking";
-      data->cv.wait(lock);
-    } else {
+    VLOG(5) << "event::wait_n: blocking";
+    if (data->cv.wait_for(lock, timeout) == std::cv_status::timeout) {
+      timeout *= 2;
+      VLOG(5) << "event::wait_n: donating";
       lock.unlock();
       for (const Manager& m : mv) {
         m.donate(false);
