@@ -283,11 +283,84 @@ struct reacquire_lock {
 };
 
 struct poll_thread {
-  ManagerImpl* manager;
+  using MI = internal::ManagerImpl;
+  MI* manager;
 
-  explicit poll_thread(ManagerImpl* m) noexcept
-      : manager(DCHECK_NOTNULL(m)) {}
+  explicit poll_thread(MI* m) noexcept : manager(DCHECK_NOTNULL(m)) {}
   void operator()() const noexcept { manager->donate(true); }
+};
+
+struct DeadlineHelper {
+  const DispatcherPtr dispatcher;
+  Task* const task;
+  std::mutex mu;
+  Timer timer;
+  bool seen;
+
+  struct ExpireHandler : public Handler {
+    DeadlineHelper* const helper;
+
+    explicit ExpireHandler(DeadlineHelper* h) noexcept : helper(h) {}
+    base::Result run(Data) const override {
+      helper->expire();
+      return base::Result();
+    }
+  };
+
+  struct FinishCallback : public Callback {
+    DeadlineHelper* const helper;
+
+    explicit FinishCallback(DeadlineHelper* h) noexcept : helper(h) {}
+    base::Result run() override {
+      helper->finish();
+      return base::Result();
+    }
+  };
+
+  DeadlineHelper(DispatcherPtr d, Task* t) noexcept
+      : dispatcher(DCHECK_NOTNULL(std::move(d))),
+        task(DCHECK_NOTNULL(t)),
+        seen(false) {}
+
+  base::Result initialize(const Manager& m, base::MonotonicTime at) {
+    base::Result r = m.timer(&timer, std::make_shared<ExpireHandler>(this));
+    if (r) {
+      r = timer.set_at(at);
+      if (r) task->on_finished(make_unique<FinishCallback>(this));
+    }
+    if (!r) finish();
+    return r;
+  }
+
+  base::Result initialize(const Manager& m, base::Duration delay) {
+    base::Result r = m.timer(&timer, std::make_shared<ExpireHandler>(this));
+    if (r) {
+      r = timer.set_delay(delay);
+      if (r) task->on_finished(make_unique<FinishCallback>(this));
+    }
+    if (!r) finish();
+    return r;
+  }
+
+  void expire() {
+    auto lock = base::acquire_lock(mu);
+    if (!seen) {
+      seen = true;
+      timer.disable().expect_ok(__FILE__, __LINE__);
+      lock.unlock();
+      task->expire();
+    }
+  }
+
+  void finish() {
+    auto lock = base::acquire_lock(mu);
+    if (!seen) {
+      seen = true;
+      timer.disable().expect_ok(__FILE__, __LINE__);
+    }
+    lock.unlock();
+    dispatcher->dispose(this);
+  }
 };
 
 }  // anonymous namespace
@@ -300,7 +373,8 @@ void Record::wait() noexcept {
   CHECK(disabled) << ": must call event.disable() first!";
   auto x = outstanding;
   VLOG(6) << x << " " << S(x, "callback") << " to wait on";
-  bool threaded = (dispatcher->type() == event::DispatcherType::threaded_dispatcher);
+  bool threaded =
+      (dispatcher->type() == event::DispatcherType::threaded_dispatcher);
   std::chrono::milliseconds timeout(1);
   if (outstanding != 0 && !threaded) {
     VLOG(5) << "event::Record::wait: donating";
@@ -1263,46 +1337,14 @@ base::Result Manager::generic(Generic* out, HandlerPtr handler) const {
 
 base::Result Manager::set_deadline(Task* task, base::MonotonicTime at) {
   CHECK_NOTNULL(task);
-  auto closure0 = [task](Data) {
-    task->expire();
-    return base::Result();
-  };
-
-  auto* tmr = new Timer;
-  auto closure1 = [tmr] {
-    tmr->disable().expect_ok(__FILE__, __LINE__);
-    tmr->disown();
-    delete tmr;
-    return base::Result();
-  };
-
-  auto r = timer(tmr, handler(closure0));
-  if (r) r = tmr->set_at(at);
-  if (r) task->on_finished(callback(closure1));
-  if (!r) closure1();
-  return r;
+  auto* helper = new DeadlineHelper(dispatcher(), task);
+  return helper->initialize(*this, at);
 }
 
 base::Result Manager::set_timeout(Task* task, base::Duration delay) {
   CHECK_NOTNULL(task);
-  auto closure0 = [task](Data) {
-    task->expire();
-    return base::Result();
-  };
-
-  auto* tmr = new Timer;
-  auto closure1 = [tmr] {
-    tmr->disable().expect_ok(__FILE__, __LINE__);
-    tmr->disown();
-    delete tmr;
-    return base::Result();
-  };
-
-  auto r = timer(tmr, handler(closure0));
-  if (r) r = tmr->set_delay(delay);
-  if (r) task->on_finished(callback(closure1));
-  if (!r) closure1();
-  return r;
+  auto* helper = new DeadlineHelper(dispatcher(), task);
+  return helper->initialize(*this, delay);
 }
 
 namespace {
