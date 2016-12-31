@@ -571,6 +571,17 @@ class Manager {
     dispatcher()->dispatch(std::move(callback));
   }
 
+  // Convenience method for |dispatcher()->dispose(finalizer)|.
+  void dispose(CallbackPtr finalizer) const {
+    dispatcher()->dispose(std::move(finalizer));
+  }
+
+  // Convenience method for |dispatcher()->dispose(ptr)|.
+  template <typename T>
+  void dispose(T* ptr) const {
+    dispatcher()->dispose(ptr);
+  }
+
   // Registers an event handler for a file descriptor.
   base::Result fd(FileDescriptor* out, base::FD fd, Set set,
                   HandlerPtr handler) const;
