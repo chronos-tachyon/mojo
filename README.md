@@ -11,13 +11,56 @@ Exported features fall into one of the following categories:
 * RC: APIs are provisional and subject to change.
 * BETA: APIs are in flux.
 
-### base/backport.h
+### Strings
+
+* base/concat.h
+
+STABLE.  Provides `base::concat(...)` and `base::concat_to(str, ...)` functions for building strings through concatenation of pieces.  Also defines an interface for objects to declare themselves stringable.
+
+### Results
+
+* base/result.h
+* base/result_testing.h
+
+RC.  Provides a `base::Result` value type representing success or failure of an operation, plus macros for checking such values in tests.
+
+### Logging
+
+* base/logging.h
+
+BETA.  Provides macros for generating log messages, including logged assertions.  Also provides an API for consuming/intercepting logs.
+
+(The API for log generation is RC, but the log consumption API is BETA.)
+
+* base/debug.h
+
+STABLE.  Check and change the global debugging mode.  Assertions are always checked, but the global debugging mode affects whether or not assertion failures are fatal.
+
+### Date/Time
+
+* base/duration.h
+* base/time.h
+* base/clock.h
+* base/clockfake.h
+* base/stopwatch.h
+
+RC.  Provides a `base::Duration` value type to represent a span of time, `base::Time` and `base::MonotonicTime` value types to represent an instant of time, `base::Clock` and `base::MonotonicClock` classes to obtain time values, and a `base::Stopwatch` class for measuring spans of elapsed time.
+
+### Files
+
+* base/fd.h
+
+RC.  Provides `base::FDHolder` (a wrapper for file descriptors) and `base::FD` (a smart pointer for `base::FDHolder`).  Wrapping a file descriptor ensures that it gets closed when no longer in use, and also protects against the recycling of file descriptor numbers.
+
+### Miscellaneous
+
+#### base/backport.h
 
 STABLE.  Provides backports of C++14 and/or C++17 features.
 
 Currently provides `base::backport::integer_sequence`, `base::backport::make_integer_sequence`, `base::backport::index_sequence`, and `base::backport::make_index_sequence` (for indexing tuples).
 
-### base/cleanup.h
+#### base/cleanup.h
 
 STABLE.  RAII class to run code upon leaving a scope.
 
@@ -27,52 +70,10 @@ Example:
     ++foo;
     auto cleanup = base::cleanup([&] { --foo; });
 
-### base/clock.h and base/clockfake.h
-
-RC.  Interface for obtaining `base::Time` and `base::MonotonicTime` values.
-
-### base/concat.h
-
-STABLE.  Concatenate strings and stringable objects.
-
-### base/debug.h
-
-STABLE.  Check and change the global debugging mode.
-
-### base/duration.h
-
-RC.  `base::Duration` value type representing a span of time.
-
-### base/fd.h
-
-RC.  Wrapper for file descriptors.  Ensures that the file descriptor gets closed when no longer in use, and protects against the recycling of file descriptor numbers.
-
-### base/logging.h
-
-BETA.  Facility for logging error messages.
-
-API for generating logs is RC.  API for consuming/intercepting logs is BETA.
-
-### base/result.h
-
-RC.  `base::Result` value type representing success or failure of an operation.
-
-### base/result_testing.h
-
-STABLE.  Macros for checking `base::Result` values in tests.
-
-### base/stopwatch.h
-
-RC.  `base::Stopwatch` class for measuring spans of time.
-
-### base/time.h
-
-RC.  `base::Time` and `base::MonotonicTime` value types representing an instant of time.
-
-### base/token.h
+#### base/token.h
 
 STABLE.  `base::token_t` value type representing a unique opaque token.
 
-### base/util.h
+#### base/util.h
 
 BETA.  Miscellaneous small utility functions.  These will probably retain their current APIs but move to new headers.
