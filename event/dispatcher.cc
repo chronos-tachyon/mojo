@@ -516,7 +516,8 @@ class ThreadPoolDispatcher : public Dispatcher {
 }  // anonymous namespace
 
 namespace internal {
-void assert_depth() { CHECK_EQ(l_depth, 0U); }
+bool is_shallow() noexcept { return l_depth == 0; }
+void assert_depth() noexcept { CHECK_EQ(l_depth, 0U); }
 }  // namespace internal
 
 base::Result new_dispatcher(DispatcherPtr* out, const DispatcherOptions& opts) {

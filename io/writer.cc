@@ -427,14 +427,19 @@ void FDWriter::process(base::Lock& lock) {
     auto op = std::move(q_.front());
     q_.pop_front();
     lock.unlock();
-    auto cleanup1 = base::cleanup([&lock] { lock.lock(); });
+    auto reacquire = base::cleanup([&lock] { lock.lock(); });
     bool completed = op->process(this);
-    cleanup1.run();
+    reacquire.run();
     if (!completed) {
       q_.push_front(std::move(op));
       break;
     }
     VLOG(5) << "io::FDWriter::process: consumed";
+  }
+
+  if (event::internal::is_shallow()) {
+    auto p = std::move(purge_);
+    for (auto& evt : p) evt.wait();
   }
 
   VLOG(4) << "io::FDWriter::process: end";
