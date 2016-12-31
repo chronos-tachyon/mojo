@@ -284,11 +284,18 @@ void Record::wait() noexcept {
   CHECK(disabled) << ": must call event.disable() first!";
   auto x = outstanding;
   VLOG(6) << x << " " << S(x, "callback") << " to wait on";
+  bool threaded = (dispatcher->type() == event::DispatcherType::threaded_dispatcher);
   std::chrono::milliseconds timeout(1);
+  if (outstanding != 0 && !threaded) {
+    VLOG(5) << "event::Record::wait: donating";
+    lock.unlock();
+    dispatcher->donate(false);
+    lock.lock();
+  }
   while (outstanding != 0) {
-    VLOG(6) << "Blocking on CV";
+    VLOG(5) << "event::Record::wait: blocking";
     if (cv.wait_for(lock, timeout) == std::cv_status::timeout) {
-      VLOG(6) << "Gave up waiting; donating this thread to the dispatcher";
+      VLOG(5) << "event::Record::wait: donating";
       lock.unlock();
       dispatcher->donate(false);
       lock.lock();
@@ -1334,13 +1341,13 @@ void wait_n(std::vector<Manager> mv, std::vector<Task*> tv, std::size_t n) {
   while (data->done < n) {
     VLOG(5) << "event::wait_n: blocking";
     if (data->cv.wait_for(lock, timeout) == std::cv_status::timeout) {
-      timeout *= 2;
       VLOG(5) << "event::wait_n: donating";
       lock.unlock();
       for (const Manager& m : mv) {
         m.donate(false);
       }
       lock.lock();
+      timeout *= 2;
     }
   }
 }
