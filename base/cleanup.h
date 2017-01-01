@@ -49,20 +49,6 @@ class Cleanup {
     return *this;
   }
 
-  // Cleanup supports type conversions if G can convert to F.
-  template <typename G>
-  Cleanup(Cleanup<G>&& x) noexcept : func_(std::move(x.func_)), need_(x.need_) {
-    x.need_ = false;
-  }
-
-  template <typename G>
-  Cleanup& operator=(Cleanup<G>&& x) noexcept {
-    func_ = std::move(x.func_);
-    need_ = x.need_;
-    x.need_ = false;
-    return *this;
-  }
-
   // Cleanup runs its functor at destruction time.
   ~Cleanup() noexcept(noexcept(std::declval<F>()())) { run(); }
 
