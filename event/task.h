@@ -12,8 +12,8 @@
 #include <ostream>
 #include <vector>
 
+#include "base/mutex.h"
 #include "base/result.h"
-#include "base/util.h"
 #include "event/callback.h"
 
 namespace event {

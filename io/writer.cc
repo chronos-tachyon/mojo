@@ -14,7 +14,7 @@
 
 #include "base/cleanup.h"
 #include "base/logging.h"
-#include "base/util.h"
+#include "base/mutex.h"
 #include "io/reader.h"
 
 static constexpr std::size_t kDefaultIdealBlockSize = 1U << 20;  // 1 MiB

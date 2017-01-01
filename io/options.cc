@@ -5,7 +5,7 @@
 
 #include <mutex>
 
-#include "base/util.h"
+#include "base/mutex.h"
 
 namespace io {
 

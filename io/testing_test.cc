@@ -7,8 +7,8 @@
 #include <mutex>
 #include <thread>
 
+#include "base/mutex.h"
 #include "base/result_testing.h"
-#include "base/util.h"
 #include "event/manager.h"
 #include "io/testing.h"
 #include "io/util.h"

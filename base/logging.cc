@@ -20,8 +20,8 @@
 
 #include "base/concat.h"
 #include "base/debug.h"
+#include "base/mutex.h"
 #include "base/result.h"
-#include "base/util.h"
 
 namespace base {
 

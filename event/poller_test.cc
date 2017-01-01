@@ -14,9 +14,9 @@
 #include <thread>
 
 #include "base/cleanup.h"
+#include "base/mutex.h"
 #include "base/result_testing.h"
 #include "base/token.h"
-#include "base/util.h"
 #include "event/poller.h"
 
 static void write_some_data(base::FD fd, uint32_t* counter) {

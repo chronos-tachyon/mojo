@@ -18,7 +18,7 @@
 
 #include "base/cleanup.h"
 #include "base/logging.h"
-#include "base/util.h"
+#include "base/mutex.h"
 
 static thread_local std::size_t l_depth = 0;
 

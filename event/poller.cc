@@ -11,7 +11,7 @@
 #include <unistd.h>
 
 #include "base/logging.h"
-#include "base/util.h"
+#include "base/mutex.h"
 
 static short poll_mask(event::Set set) noexcept {
   short result = 0;

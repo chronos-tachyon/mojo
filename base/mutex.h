@@ -1,9 +1,9 @@
-// base/util.h - Miscellaneous small utility functions
+// base/mutex.h - Mutex and lock implementations
 // Copyright © 2016 by Donald King <chronos@chronos-tachyon.net>
 // Available under the MIT License. See LICENSE for details.
 
-#ifndef BASE_UTIL_H
-#define BASE_UTIL_H
+#ifndef BASE_MUTEX_H
+#define BASE_MUTEX_H
 
 #include <condition_variable>
 #include <cstdint>
@@ -125,4 +125,4 @@ inline RLock acquire_read(RWMutex& rwmu) { return RLock(rwmu); }
 
 }  // namespace base
 
-#endif  // BASE_UTIL_H
+#endif  // BASE_MUTEX_H

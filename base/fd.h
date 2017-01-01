@@ -12,8 +12,8 @@
 #include <utility>
 #include <vector>
 
+#include "base/mutex.h"
 #include "base/result.h"
-#include "base/util.h"
 
 namespace base {
 

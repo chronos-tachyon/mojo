@@ -6,7 +6,7 @@
 #include <cstring>
 
 #include "base/logging.h"
-#include "base/util.h"
+#include "base/mutex.h"
 
 namespace io {
 

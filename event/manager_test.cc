@@ -19,8 +19,8 @@
 #include "base/clock.h"
 #include "base/fd.h"
 #include "base/logging.h"
+#include "base/mutex.h"
 #include "base/result_testing.h"
-#include "base/util.h"
 #include "event/manager.h"
 #include "event/task.h"
 

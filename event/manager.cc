@@ -21,7 +21,7 @@
 #include "base/backport.h"
 #include "base/cleanup.h"
 #include "base/logging.h"
-#include "base/util.h"
+#include "base/mutex.h"
 
 using TeeVec = std::vector<base::FD>;
 using TeeMap = std::unordered_map<int, TeeVec>;

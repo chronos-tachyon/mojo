@@ -13,7 +13,7 @@
 #include <exception>
 
 #include "base/logging.h"
-#include "base/util.h"
+#include "base/mutex.h"
 
 namespace base {
 

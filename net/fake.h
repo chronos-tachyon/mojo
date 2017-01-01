@@ -14,7 +14,7 @@
 #include <utility>
 #include <vector>
 
-#include "base/util.h"
+#include "base/mutex.h"
 #include "event/task.h"
 #include "net/addr.h"
 #include "net/conn.h"

@@ -15,7 +15,7 @@
 #include <vector>
 
 #include "base/logging.h"
-#include "base/util.h"
+#include "base/mutex.h"
 #include "io/reader.h"
 #include "io/writer.h"
 
