@@ -18,7 +18,7 @@ Exported features fall into one of the following categories:
 
 ### Strings
 
-* base/concat.h
+#### base/concat.h
 
 STABLE.  Provides `base::concat(...)` and `base::concat_to(str, ...)`
 functions for building strings through concatenation of pieces.  Also defines
@@ -26,22 +26,22 @@ an interface for objects to declare themselves stringable.
 
 ### Results
 
-* base/result.h
-* base/result_testing.h
+#### base/result.h
+#### base/result_testing.h
 
 RC.  Provides a `base::Result` value type representing success or failure of
 an operation, plus macros for checking such values in tests.
 
 ### Logging
 
-* base/logging.h
+#### base/logging.h
 
 BETA.  Provides macros for generating log messages, including logged
 assertions.  Also provides an API for consuming/intercepting logs.
 
 (The API for log generation is RC, but the log consumption API is BETA.)
 
-* base/debug.h
+#### base/debug.h
 
 STABLE.  Check and change the global debugging mode.  Assertions are always
 checked, but the global debugging mode affects whether or not assertion
@@ -49,20 +49,35 @@ failures are fatal.
 
 ### Date/Time
 
-* base/duration.h
-* base/time.h
-* base/clock.h
-* base/clockfake.h
-* base/stopwatch.h
+#### base/duration.h
 
-RC.  Provides a `base::Duration` value type to represent a span of time,
-`base::Time` and `base::MonotonicTime` value types to represent an instant of
-time, `base::Clock` and `base::MonotonicClock` classes to obtain time values,
-and a `base::Stopwatch` class for measuring spans of elapsed time.
+RC.  Provides a `base::Duration` value type to represent a span of time.
+
+#### base/time.h
+
+RC.  Provides `base::Time` and `base::MonotonicTime` value types to represent
+an instant of time.
+
+#### base/clock.h
+
+RC.  Provides `base::Clock` and `base::MonotonicClock` classes to obtain time
+values.  Also defines `base::ClockImpl` and `base::MonotonicClockImpl`, which
+are the base classes for clock implementations.
+
+Also provides `base::wallclock_now()` and `base::monotonic_now()` convenience
+functions for accessing the system clock.
+
+#### base/clockfake.h
+
+RC.  Provides `base::FakeClock` and `base::FakeMonotonicClock` for testing.
+
+#### base/stopwatch.h
+
+RC.  Provides a `base::Stopwatch` class for measuring spans of elapsed time.
 
 ### Files
 
-* base/fd.h
+#### base/fd.h
 
 RC.  Provides `base::FDHolder` (a wrapper for file descriptors) and `base::FD`
 (a smart pointer for `base::FDHolder`).  Wrapping a file descriptor ensures
@@ -75,9 +90,9 @@ recycling of file descriptor numbers.
 
 **NOTE**: These APIs are frequently used with the I/O APIs.
 
-* event/callback.h
-* event/task.h
-* event/dispatcher.h
+#### event/callback.h
+#### event/task.h
+#### event/dispatcher.h
 
 RC.  Defines the following:
 
@@ -113,16 +128,16 @@ Quick example:
     // Spin the event loop.
     while (!done) dispatcher->donate(false);
 
-* event/set.h
-* event/poller.h
+#### event/set.h
+#### event/poller.h
 
 RC.  Provides `event::Poller`, a base class that abstracts over event polling
 techniques, and helper class `event::Set`, a value type representing a set of
 events.
 
-* event/data.h
-* event/handler.h
-* event/manager.h
+#### event/data.h
+#### event/handler.h
+#### event/manager.h
 
 RC.  Defines the following:
 
@@ -170,15 +185,15 @@ Example:
 
 ### Generic I/O
 
-* io/options.h
+#### io/options.h
 
 RC.  Defines `io::Options`, which holds options for how to perform I/O.
 Important knobs include setting the preferred I/O blocksize, specifying the
-`event::Manager` on which async I/O will be scheduled, and specifying a buffer
-pool to use (advanced performance feature).
+`event::Manager` on which async I/O will be scheduled, and (advanced
+performance feature) specifying a buffer pool to use.
 
-* io/reader.h
-* io/writer.h
+#### io/reader.h
+#### io/writer.h
 
 RC.  Provides `io::Reader` and `io::Writer`, which provide a higher-level API
 for reading and writing data.  Also defines `io::ReaderImpl` and
@@ -186,23 +201,23 @@ for reading and writing data.  Also defines `io::ReaderImpl` and
 implementations, respectively.  A number of pre-made implementations are
 available, including ones that direct I/O to strings and to file descriptors.
 
-* io/util.h
+#### io/util.h
 
 RC.  Provides `io::copy()`, a function that knows the most efficient way to
 copy data from an `io::Reader` to an `io::Writer`.
 
-* io/pipe.h
+#### io/pipe.h
 
 RC.  Provides `io::make_pipe()`, a function that produces an `io::Reader` /
 `io::Writer` linked pair, such that data written to the Writer will become
 available to the Reader.
 
-* io/testing.h
+#### io/testing.h
 
 BETA.  Provides `io::MockReader`, an `io::ReaderImpl` that allows strict API
 mocking.
 
-* io/buffer.h
+#### io/buffer.h
 
 RC.  Provides `io::ConstBuffer` and `io::Buffer` (pointers to existing
 fixed-size byte buffers), `io::OwnedBuffer` (a newly allocated fixed-size byte
@@ -231,6 +246,16 @@ Quick example:
 #### base/token.h
 
 STABLE.  `base::token_t` value type representing a unique opaque token.
+
+Quick example:
+
+    base::token_t token1 = base::next_token();
+    base::token_t token2 = base::next_token();
+    CHECK_EQ(token1, token1);           // tokens are comparable
+    CHECK_NE(token1, token2);           // tokens are distinct from each other
+    CHECK_NE(token1, base::token_t());  // default is distinct from any other
+    CHECK_NE(token2, base::token_t());
+    auto hash = std::hash<base::token_t>()(token1);  // tokens are hashable
 
 #### base/util.h
 
