@@ -5,6 +5,9 @@
 
 #include <poll.h>
 #include <sys/epoll.h>
+#include <sys/select.h>
+#include <sys/time.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 #include "base/logging.h"
@@ -50,32 +53,153 @@ namespace event {
 
 namespace {
 
-class PollPoller : public Poller {
+struct Item {
+  base::FD filedesc;
+  base::token_t token;
+  Set set;
+
+  Item() noexcept = default;
+  Item(base::FD fd, base::token_t t, Set s) noexcept : filedesc(std::move(fd)),
+                                                       token(t),
+                                                       set(s) {}
+};
+
+struct Activation {
+  base::RLock lock;
+  int fdnum;
+  base::token_t token;
+  Set set;
+
+  Activation(base::RLock lk, int n, base::token_t t, Set s) noexcept
+      : lock(std::move(lk)),
+        fdnum(n),
+        token(t),
+        set(s) {}
+};
+
+class LegacyPoller : public Poller {
+ protected:
+  explicit LegacyPoller(bool maintain_nfds) : nfds_(0), maint_(maintain_nfds) {}
+
  public:
-  PollPoller() = default;
-
-  PollerType type() const noexcept override { return PollerType::poll_poller; }
-
   base::Result add(base::FD fd, base::token_t t, Set set) override {
     auto lock = base::acquire_lock(mu_);
     auto fdpair = fd->acquire_fd();
+    auto it = map_.find(fdpair.first);
+    if (it != map_.end()) {
+      return base::Result::from_errno(EEXIST, "net::Poller::add");
+    }
     map_[fdpair.first] = Item(std::move(fd), t, set);
+    if (maint_ && fdpair.first >= nfds_) nfds_ = fdpair.first + 1;
     return base::Result();
   }
 
   base::Result modify(base::FD fd, base::token_t t, Set set) override {
     auto lock = base::acquire_lock(mu_);
     auto fdpair = fd->acquire_fd();
-    map_[fdpair.first] = Item(std::move(fd), t, set);
+    auto it = map_.find(fdpair.first);
+    if (it == map_.end()) {
+      return base::Result::from_errno(ENOENT, "net::Poller::modify");
+    }
+    auto& item = it->second;
+    item.token = t;
+    item.set = set;
     return base::Result();
   }
 
   base::Result remove(base::FD fd) override {
     auto lock = base::acquire_lock(mu_);
     auto fdpair = fd->acquire_fd();
-    map_.erase(fdpair.first);
+    auto it = map_.find(fdpair.first);
+    if (it == map_.end()) {
+      return base::Result::from_errno(ENOENT, "net::Poller::remove");
+    }
+    map_.erase(it);
+    if (maint_ && nfds_ == fdpair.first + 1) {
+      int new_nfds = 0;
+      for (const auto& pair : map_) {
+        if (pair.first >= new_nfds) new_nfds = pair.first + 1;
+      }
+      nfds_ = new_nfds;
+    }
     return base::Result();
   }
+
+ protected:
+  mutable std::mutex mu_;
+  std::map<int, Item> map_;
+  int nfds_;
+  bool maint_;
+};
+
+class SelectPoller : public LegacyPoller {
+ public:
+  SelectPoller() : LegacyPoller(true) {}
+
+  PollerType type() const noexcept override {
+    return PollerType::select_poller;
+  }
+
+  base::Result wait(EventVec* out, int timeout_ms) const override {
+    auto lock = base::acquire_lock(mu_);
+    const std::size_t n = map_.size();
+
+    fd_set rset, wset, eset;
+    FD_ZERO(&rset);
+    FD_ZERO(&wset);
+    FD_ZERO(&eset);
+
+    std::vector<Activation> acts;
+    acts.reserve(n);
+    for (const auto& pair : map_) {
+      const auto& item = pair.second;
+      int fdnum;
+      base::RLock rlock;
+      std::tie(fdnum, rlock) = item.filedesc->acquire_fd();
+      acts.emplace_back(std::move(rlock), fdnum, item.token, item.set);
+      if (fdnum < 0 || fdnum >= FD_SETSIZE) {
+        return base::Result::invalid_argument("fd ", fdnum,
+                                              " is out of range 0..",
+                                              FD_SETSIZE - 1, " for select(2)");
+      }
+      if (item.set.readable()) FD_SET(fdnum, &rset);
+      if (item.set.writable()) FD_SET(fdnum, &wset);
+      FD_SET(fdnum, &eset);
+    }
+
+    struct timeval tv;
+    struct timeval* tvptr = nullptr;
+    if (timeout_ms >= 0) {
+      ::bzero(&tv, sizeof(tv));
+      tv.tv_sec = timeout_ms / 1000;
+      tv.tv_usec = (timeout_ms % 1000) * 1000;
+      tvptr = &tv;
+    }
+
+    int rc = ::select(nfds_, &rset, &wset, &eset, tvptr);
+    if (rc < 0) {
+      int err_no = errno;
+      if (err_no == EINTR) return base::Result();
+      return base::Result::from_errno(err_no, "select(2)");
+    }
+    if (rc > 0) {
+      for (auto& act : acts) {
+        Set set;
+        set.set_readable(FD_ISSET(act.fdnum, &rset));
+        set.set_writable(FD_ISSET(act.fdnum, &wset));
+        set.set_error(FD_ISSET(act.fdnum, &eset));
+        if (set) out->emplace_back(act.token, set);
+      }
+    }
+    return base::Result();
+  }
+};
+
+class PollPoller : public LegacyPoller {
+ public:
+  PollPoller() : LegacyPoller(false) {}
+
+  PollerType type() const noexcept override { return PollerType::poll_poller; }
 
   base::Result wait(EventVec* out, int timeout_ms) const override {
     auto lock = base::acquire_lock(mu_);
@@ -120,35 +244,6 @@ class PollPoller : public Poller {
     }
     return base::Result();
   }
-
- private:
-  struct Item {
-    base::FD filedesc;
-    base::token_t token;
-    Set set;
-
-    Item() noexcept = default;
-    Item(base::FD fd, base::token_t t, Set s) noexcept
-        : filedesc(std::move(fd)),
-          token(t),
-          set(s) {}
-  };
-
-  struct Activation {
-    base::RLock lock;
-    int fdnum;
-    base::token_t token;
-    Set set;
-
-    Activation(base::RLock lk, int n, base::token_t t, Set s) noexcept
-        : lock(std::move(lk)),
-          fdnum(n),
-          token(t),
-          set(s) {}
-  };
-
-  mutable std::mutex mu_;
-  std::map<int, Item> map_;
 };
 
 class EPollPoller : public Poller {
@@ -226,6 +321,11 @@ class EPollPoller : public Poller {
   const int epoll_fd_;
 };
 
+base::Result new_select_poller(PollerPtr* out, const PollerOptions& opts) {
+  *out = std::make_shared<SelectPoller>();
+  return base::Result();
+}
+
 base::Result new_poll_poller(PollerPtr* out, const PollerOptions& opts) {
   *out = std::make_shared<PollPoller>();
   return base::Result();
@@ -247,6 +347,9 @@ base::Result new_poller(PollerPtr* out, const PollerOptions& opts) {
   DCHECK_NOTNULL(out)->reset();
   auto type = opts.type();
   switch (type) {
+    case PollerType::select_poller:
+      return new_select_poller(out, opts);
+
     case PollerType::poll_poller:
       return new_poll_poller(out, opts);
 
