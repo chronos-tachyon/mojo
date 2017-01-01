@@ -27,11 +27,6 @@ static const sockaddr* RICSA(const void* ptr) {
   return reinterpret_cast<const sockaddr*>(ptr);
 }
 
-template <typename T, typename... Args>
-static std::unique_ptr<T> make_unique(Args&&... args) {
-  return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
-}
-
 class FDConnReader : public io::ReaderImpl {
  public:
   explicit FDConnReader(base::FD fd) : r_(io::fdreader(std::move(fd))) {}

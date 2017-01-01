@@ -18,12 +18,14 @@
 #include <utility>
 #include <vector>
 
+#include "base/backport.h"
 #include "base/cleanup.h"
 #include "base/logging.h"
 #include "base/util.h"
 
 using TeeVec = std::vector<base::FD>;
 using TeeMap = std::unordered_map<int, TeeVec>;
+using namespace base::backport;
 
 namespace event {
 
@@ -36,11 +38,6 @@ static base::Result not_running() {
 static int get_fdnum(const base::FD& fd) {
   auto pair = fd->acquire_fd();
   return pair.first;
-}
-
-template <typename T, typename... Args>
-static std::unique_ptr<T> make_unique(Args&&... args) {
-  return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
 }
 
 template <typename T>
