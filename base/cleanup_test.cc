@@ -33,10 +33,10 @@ TEST(Cleanup, Flow) {
   {
     auto cleanup = base::cleanup(IncCleanupFunction(&a));
     EXPECT_EQ(0, a);
-    EXPECT_TRUE(cleanup.need());
+    EXPECT_TRUE(cleanup);
     cleanup.cancel();
     EXPECT_EQ(0, a);
-    EXPECT_FALSE(cleanup.need());
+    EXPECT_FALSE(cleanup);
   }
   EXPECT_EQ(0, a);
 
@@ -45,10 +45,10 @@ TEST(Cleanup, Flow) {
   {
     auto cleanup = base::cleanup(IncCleanupFunction(&a));
     EXPECT_EQ(0, a);
-    EXPECT_TRUE(cleanup.need());
+    EXPECT_TRUE(cleanup);
     cleanup.run();
     EXPECT_EQ(1, a);
-    EXPECT_FALSE(cleanup.need());
+    EXPECT_FALSE(cleanup);
   }
   EXPECT_EQ(1, a);
 
@@ -59,11 +59,11 @@ TEST(Cleanup, Flow) {
     auto cleanup = base::cleanup(IncCleanupFunction(&a));
     EXPECT_EQ(42, a);
     EXPECT_EQ(23, b);
-    EXPECT_TRUE(cleanup.need());
+    EXPECT_TRUE(cleanup);
     cleanup = IncCleanupFunction(&b);
     EXPECT_EQ(42, a);
     EXPECT_EQ(23, b);
-    EXPECT_TRUE(cleanup.need());
+    EXPECT_TRUE(cleanup);
   }
   EXPECT_EQ(42, a);
   EXPECT_EQ(24, b);

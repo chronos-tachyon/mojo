@@ -74,7 +74,6 @@ class Cleanup {
 
   // Checks if this Cleanup still needs to run.
   explicit operator bool() const noexcept { return need_; }
-  bool need() const noexcept { return !!*this; }
 
   // Cancels this Cleanup, i.e. marks it as not needing to run.
   void cancel() noexcept { need_ = false; }
