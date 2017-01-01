@@ -338,6 +338,10 @@ Quick example:
     ++foo;
     auto cleanup = base::cleanup([&] { --foo; });
 
+### base/mutex.h
+
+RC.  Mutexes, locks, and other concurrency tools.
+
 ### base/token.h
 
 STABLE.  `base::token_t` value type representing a unique opaque token.
@@ -351,8 +355,3 @@ Quick example:
     CHECK_NE(token1, base::token_t());  // default is distinct from any other
     CHECK_NE(token2, base::token_t());
     auto hash = std::hash<base::token_t>()(token1);  // tokens are hashable
-
-### base/util.h
-
-BETA.  Miscellaneous small utility functions.  These will probably retain
-their current APIs but move to new headers.
