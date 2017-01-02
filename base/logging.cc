@@ -177,7 +177,7 @@ LogEntry::LogEntry(const char* file, unsigned int line, level_t level,
   tid = (*g_gtid)();
 }
 
-void LogEntry::append_to(std::string& out) const {
+void LogEntry::append_to(std::string* out) const {
   char ch;
   if (level >= LOG_LEVEL_DFATAL) {
     ch = 'F';
@@ -206,7 +206,7 @@ void LogEntry::append_to(std::string& out) const {
 
 std::string LogEntry::as_string() const {
   std::string out;
-  append_to(out);
+  append_to(&out);
   return out;
 }
 

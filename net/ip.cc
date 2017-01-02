@@ -216,7 +216,7 @@ base::Result IP::parse(IP* out, const std::string& str) {
   return base::Result::from_errno(err_no, "inet_pton(3)");
 }
 
-void IP::append_to(std::string& out) const {
+void IP::append_to(std::string* out) const {
   char buf[INET6_ADDRSTRLEN];
   int domain;
 
@@ -233,7 +233,7 @@ void IP::append_to(std::string& out) const {
       break;
 
     default:
-      out.append("<error>");
+      out->append("<error>");
       return;
   }
   const char* str = ::inet_ntop(domain, data(), buf, sizeof(buf));
@@ -241,15 +241,15 @@ void IP::append_to(std::string& out) const {
     int err_no = errno;
     base::Result r = base::Result::from_errno(err_no, "inet_ntop(3)");
     r.expect_ok(__FILE__, __LINE__);
-    out.append("<error>");
+    out->append("<error>");
     return;
   }
-  out.append(str);
+  out->append(str);
 }
 
 std::string IP::as_string() const {
   std::string out;
-  append_to(out);
+  append_to(&out);
   return out;
 }
 
@@ -371,14 +371,14 @@ bool CIDR::contains(IP ip) const noexcept {
   return true;
 }
 
-void CIDR::append_to(std::string& out) const {
+void CIDR::append_to(std::string* out) const {
   if (!ip_) return;
   base::concat_to(out, ip_, '/', bits_);
 }
 
 std::string CIDR::as_string() const {
   std::string out;
-  append_to(out);
+  append_to(&out);
   return out;
 }
 

@@ -7,16 +7,16 @@
 
 namespace base {
 
-void Duration::append_to(std::string& out) const {
+void Duration::append_to(std::string* out) const {
   std::ostringstream os;
   os << std::boolalpha << "Duration(" << neg_ << ", " << s_ << ", " << ns_
      << ")";
-  out.append(os.str());
+  out->append(os.str());
 }
 
 std::string Duration::as_string() const {
   std::string out;
-  append_to(out);
+  append_to(&out);
   return out;
 }
 

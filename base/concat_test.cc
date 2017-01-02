@@ -28,11 +28,11 @@ TEST(StrCat, Basic) {
 }
 
 struct Foo {
-  void append_to(std::string& out) const { out.append("foo"); }
+  void append_to(std::string* out) const { out->append("foo"); }
 };
 
 struct Bar {
-  void append_to(std::string& out) const { out.append("bar"); }
+  void append_to(std::string* out) const { out->append("bar"); }
   std::size_t length_hint() const { return 3; }
 };
 

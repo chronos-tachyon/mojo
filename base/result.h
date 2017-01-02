@@ -318,7 +318,7 @@ class Result {
   }
 
   // Stringifies this Result into a human-friendly form.
-  void append_to(std::string& buffer) const;
+  void append_to(std::string* out) const;
   std::string as_string() const;
 
  private:
@@ -326,8 +326,11 @@ class Result {
 };
 
 inline void swap(Result& a, Result& b) noexcept { a.swap(b); }
-inline void append_to(std::string& buffer, Result::Code code) {
-  buffer.append(Result::code_name(code));
+inline void append_to(std::string* out, Result::Code code) {
+  out->append(Result::code_name(code));
+}
+inline std::size_t length_hint(Result::Code) noexcept {
+  return 20;
 }
 
 // TODO: make these go away, subsumed by base/concat.h

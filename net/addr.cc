@@ -14,17 +14,17 @@ static const char* const kProtocolTypeNames[] = {
     "(invalid)", "raw", "datagram", "rdm", "seqpacket", "stream",
 };
 
-void append_to(std::string& out, ProtocolType p) {
-  out.append(kProtocolTypeNames[static_cast<uint8_t>(p)]);
+void append_to(std::string* out, ProtocolType p) {
+  out->append(kProtocolTypeNames[static_cast<uint8_t>(p)]);
 }
 
-void Addr::append_to(std::string& out) const {
+void Addr::append_to(std::string* out) const {
   base::concat_to(out, protocol(), "://", address());
 }
 
 std::string Addr::as_string() const {
   std::string out;
-  append_to(out);
+  append_to(&out);
   return out;
 }
 

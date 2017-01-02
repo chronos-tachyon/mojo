@@ -31,7 +31,7 @@ class SockOpt {
   base::Result get(base::FD fd, void* optval, unsigned int* optlen) const;
   base::Result set(base::FD fd, const void* optval, unsigned int optlen) const;
 
-  void append_to(std::string& buffer) const;
+  void append_to(std::string* buffer) const;
   std::string as_string() const;
   operator std::string() const { return as_string(); }
 

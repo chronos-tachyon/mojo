@@ -58,7 +58,7 @@ class Time {
 
   // }}}
 
-  void append_to(std::string& out) const;
+  void append_to(std::string* out) const;
   std::string as_string() const;
 
  private:
@@ -146,7 +146,7 @@ class MonotonicTime {
 
   // }}}
 
-  void append_to(std::string& out) const;
+  void append_to(std::string* out) const;
   std::string as_string() const;
 
  private:

@@ -335,7 +335,7 @@ struct Duration {
     return neg_ ? -safe_s64(abs_hours()) : safe_s64(abs_hours());
   }
 
-  void append_to(std::string& out) const;
+  void append_to(std::string* out) const;
   std::string as_string() const;
 
  private:

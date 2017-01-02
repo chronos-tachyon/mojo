@@ -11,27 +11,27 @@
 
 namespace base {
 
-void Time::append_to(std::string& out) const {
+void Time::append_to(std::string* out) const {
   std::ostringstream os;
   os << "Time(" << d_.as_string() << ")";  // TODO: friendlier output
-  out.append(os.str());
+  out->append(os.str());
 }
 
 std::string Time::as_string() const {
   std::string out;
-  append_to(out);
+  append_to(&out);
   return out;
 }
 
-void MonotonicTime::append_to(std::string& out) const {
+void MonotonicTime::append_to(std::string* out) const {
   std::ostringstream os;
   os << "MonotonicTime(" << d_.as_string() << ")";
-  out.append(os.str());
+  out->append(os.str());
 }
 
 std::string MonotonicTime::as_string() const {
   std::string out;
-  append_to(out);
+  append_to(&out);
   return out;
 }
 

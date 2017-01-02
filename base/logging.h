@@ -39,7 +39,7 @@ struct LogEntry {
 
   LogEntry(const char* file, unsigned int line, level_t level,
            std::string message) noexcept;
-  void append_to(std::string& out) const;
+  void append_to(std::string* out) const;
   std::string as_string() const;
 };
 

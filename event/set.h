@@ -143,7 +143,7 @@ class Set {
   static constexpr Set timer_bit() noexcept { return Set(bit_timer); }
   static constexpr Set event_bit() noexcept { return Set(bit_event); }
 
-  void append_to(std::string& out) const;
+  void append_to(std::string* out) const;
   std::string as_string() const;
 
  private:

@@ -163,37 +163,37 @@ base::Result SockOpt::set(base::FD fd, const void* optval,
   return base::Result();
 }
 
-void SockOpt::append_to(std::string& buffer) const {
-  buffer += '<';
+void SockOpt::append_to(std::string* out) const {
+  out->push_back('<');
 
   bool found = false;
   for (const auto& mapping : kSocketLevels) {
     if (mapping.level == level_) {
-      buffer += mapping.name;
+      out->append(mapping.name);
       found = true;
       break;
     }
   }
-  if (!found) buffer += '?';
+  if (!found) out->push_back('?');
 
-  buffer += ", ";
+  out->append(", ");
 
   found = false;
   for (const auto& mapping : kSocketOptnames) {
     if (mapping.level == level_ && mapping.optname == optname_) {
-      buffer += mapping.name;
+      out->append(mapping.name);
       found = true;
       break;
     }
   }
-  if (!found) buffer += '?';
+  if (!found) out->push_back('?');
 
-  buffer += '>';
+  out->push_back('>');
 }
 
 std::string SockOpt::as_string() const {
   std::string out;
-  append_to(out);
+  append_to(&out);
   return out;
 }
 

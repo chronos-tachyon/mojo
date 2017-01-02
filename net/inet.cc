@@ -104,7 +104,7 @@ static base::Result result_from_gaierror(int gaierror, int err_no,
       return base::Result::unknown(what, " gaierror=", gaierror);
     const auto& err = it->second;
     std::string msg;
-    base::concat_to(msg, what, " gaierror=[", err.name, "(", gaierror, "): ",
+    base::concat_to(&msg, what, " gaierror=[", err.name, "(", gaierror, "): ",
                     gai_strerror(gaierror), "]");
     return base::Result(err.code, std::move(msg));
   }

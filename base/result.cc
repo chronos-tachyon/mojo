@@ -197,37 +197,37 @@ Result Result::from_errno(int err_no, std::string what) {
   return Result(code, std::move(what), err_no);
 }
 
-void Result::append_to(std::string& buffer) const {
+void Result::append_to(std::string* out) const {
   if (guts_) {
     Code code = guts_->code;
     int err_no = guts_->err_no;
     const auto& message = guts_->message;
 
-    concat_to(buffer, code_name(code), '(', static_cast<uint16_t>(code), ')');
+    concat_to(out, code_name(code), '(', static_cast<uint16_t>(code), ')');
     if (!message.empty()) {
-      concat_to(buffer, ": ", message);
+      concat_to(out, ": ", message);
     }
     if (err_no != 0 && err_no != -1) {
       const auto& map = errno_map();
       auto it = map.find(err_no);
       if (it == map.end())
-        concat_to(buffer, " errno:[#", err_no);
+        concat_to(out, " errno:[#", err_no);
       else
-        concat_to(buffer, " errno:[", it->second.name);
+        concat_to(out, " errno:[", it->second.name);
       auto errstr = strerror_sane(err_no);
       if (errstr.empty())
-        concat_to(buffer, ']');
+        concat_to(out, ']');
       else
-        concat_to(buffer, ' ', errstr, ']');
+        concat_to(out, ' ', errstr, ']');
     }
   } else {
-    concat_to(buffer, "OK(0)");
+    concat_to(out, "OK(0)");
   }
 }
 
 std::string Result::as_string() const {
   std::string out;
-  append_to(out);
+  append_to(&out);
   return out;
 }
 

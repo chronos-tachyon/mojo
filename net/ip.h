@@ -330,7 +330,7 @@ class IP {
   }
 
   // IP is stringable.
-  void append_to(std::string& out) const;
+  void append_to(std::string* out) const;
   std::string as_string() const;
   friend inline std::ostream& operator<<(std::ostream& o, IP ip) {
     return (o << ip.as_string());
@@ -449,7 +449,7 @@ class CIDR {
   }
 
   // CIDR is stringable.
-  void append_to(std::string& out) const;
+  void append_to(std::string* out) const;
   std::string as_string() const;
   friend inline std::ostream& operator<<(std::ostream& o, CIDR cidr) {
     return (o << cidr.as_string());

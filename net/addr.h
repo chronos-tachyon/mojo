@@ -74,12 +74,12 @@ enum class ProtocolType : uint8_t {
 };
 
 // ProtocolType is stringable.
-void append_to(std::string& out, ProtocolType p);
+void append_to(std::string* out, ProtocolType p);
 inline std::size_t length_hint(ProtocolType) { return 9; }
 
 inline std::ostream& operator<<(std::ostream& o, ProtocolType p) {
   std::string tmp;
-  append_to(tmp, p);
+  append_to(&tmp, p);
   return (o << tmp);
 }
 
@@ -182,7 +182,7 @@ class Addr {
   }
 
   // Addr is stringable.
-  void append_to(std::string&) const;
+  void append_to(std::string*) const;
   std::string as_string() const;
   friend inline std::ostream& operator<<(std::ostream& o, const Addr& addr) {
     return (o << addr.as_string());
