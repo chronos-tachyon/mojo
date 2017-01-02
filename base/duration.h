@@ -133,7 +133,7 @@ class Duration {
 
  public:
   // Duration is default constructible, copyable, and moveable.
-  constexpr Duration() : Duration(false, 0, 0) {}
+  constexpr Duration() noexcept : Duration(false, 0, 0) {}
   constexpr Duration(const Duration&) noexcept = default;
   constexpr Duration(Duration&&) noexcept = default;
   Duration& operator=(const Duration&) noexcept = default;
