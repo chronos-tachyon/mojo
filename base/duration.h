@@ -63,7 +63,7 @@ inline constexpr int64_t safe_s64(uint64_t x) {
 // Duration represents the width of a span of time.
 // - It is guaranteed to have nanosecond precision.
 // - It is guaranteed to have a range equal to time_t or better.
-struct Duration {
+class Duration {
  private:
   explicit constexpr Duration(bool neg, uint64_t s, uint32_t ns) noexcept
       : s_(s),
