@@ -82,7 +82,7 @@ Result make_pipe(Pipe* out) {
     int err_no = errno;
     return Result::from_errno(err_no, "pipe2(2)");
   }
-  *out = Pipe(FDHolder::make(fds[0]), FDHolder::make(fds[1]));
+  *out = Pipe(wrapfd(fds[0]), wrapfd(fds[1]));
   return Result();
 }
 
@@ -96,7 +96,7 @@ Result make_socketpair(SocketPair* out, int domain, int type, int protocol) {
     int err_no = errno;
     return Result::from_errno(err_no, "socketpair(2)");
   }
-  *out = SocketPair(FDHolder::make(fds[0]), FDHolder::make(fds[1]));
+  *out = SocketPair(wrapfd(fds[0]), wrapfd(fds[1]));
   return Result();
 }
 
@@ -227,7 +227,7 @@ Result make_tempfile(std::string* path, FD* fd, const char* tmpl) {
     return base::Result::from_errno(err_no, "mkostemp(3)");
   }
   path->assign(buf.data(), buf.size() - 1);
-  *fd = base::FDHolder::make(fdnum);
+  *fd = base::wrapfd(fdnum);
   return base::Result();
 }
 

@@ -28,11 +28,6 @@ class FDHolder {
  public:
   using HookFn = std::function<void()>;
 
-  // Embeds the given file descriptor into a new FDHolder.
-  static std::shared_ptr<FDHolder> make(int fd) {
-    return std::make_shared<FDHolder>(fd);
-  }
-
   // Constructs an FDHolder that takes ownership of the given file descriptor.
   explicit FDHolder(int fd) noexcept;
 
@@ -96,6 +91,11 @@ struct SocketPair {
   SocketPair() noexcept = default;
   SocketPair(FD l, FD r) noexcept : left(std::move(l)), right(std::move(r)) {}
 };
+
+// Embeds the given file descriptor into a new FDHolder.
+inline FD wrapfd(int fdnum) {
+  return std::make_shared<FDHolder>(fdnum);
+}
 
 Result make_pipe(Pipe* out);
 Result make_socketpair(SocketPair* out, int domain, int type, int protocol);

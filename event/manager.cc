@@ -714,7 +714,7 @@ base::Result ManagerImpl::timer_add(std::unique_ptr<Record>* out,
     int err_no = errno;
     return base::Result::from_errno(err_no, "timerfd_create(2)");
   }
-  base::FD fd = base::FDHolder::make(fdnum);
+  base::FD fd = base::wrapfd(fdnum);
 
   auto lock = base::acquire_lock(mu_);
   if (!running_) return not_running();

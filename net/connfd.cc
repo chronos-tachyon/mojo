@@ -248,7 +248,7 @@ base::Result FDListenConn::handle(event::Data data) const {
           .expect_ok(__FILE__, __LINE__);
       break;
     }
-    base::FD fd = base::FDHolder::make(fdnum);
+    base::FD fd = base::wrapfd(fdnum);
 
     ProtocolType p = aa_.protocol_type();
 
@@ -402,7 +402,7 @@ void FDProtocol::listen(event::Task* task, ListenConn* out, const Addr& bind,
     task->finish(base::Result::from_errno(err_no, "socket(2)"));
     return;
   }
-  base::FD fd = base::FDHolder::make(fdnum);
+  base::FD fd = base::wrapfd(fdnum);
 
   if (opts.reuseaddr()) {
     int x = 1;
@@ -491,7 +491,7 @@ void FDProtocol::dial(event::Task* task, Conn* out, const Addr& peer,
     task->finish(base::Result::from_errno(err_no, "socket(2)"));
     return;
   }
-  base::FD fd = base::FDHolder::make(fdnum);
+  base::FD fd = base::wrapfd(fdnum);
 
   if (bind) {
     auto raw = bind.raw();

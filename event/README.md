@@ -71,7 +71,7 @@ Example:
 
     // Set up a non-blocking socket.
     int fdnum = accept4(..., SOCK_NONBLOCK);
-    base::FD fd = base::FDHolder::make(fdnum);
+    base::FD fd = base::wrapfd(fdnum);
 
     // Operate on socket asynchronously.
     event::FileDescriptor evt;
