@@ -7,13 +7,13 @@
 
 TEST(Clock, Basics) {
   base::Clock clock = base::system_wallclock();
-  EXPECT_TRUE(clock.valid());
+  EXPECT_TRUE(clock);
   EXPECT_NO_THROW(clock.now());
 }
 
 TEST(MonotonicClock, Basics) {
   base::MonotonicClock clock = base::system_monotonic_clock();
-  EXPECT_TRUE(clock.valid());
+  EXPECT_TRUE(clock);
   EXPECT_NO_THROW(clock.now());
   EXPECT_NO_THROW(clock.convert(base::MonotonicTime()));
   EXPECT_NO_THROW(clock.convert(base::Time()));

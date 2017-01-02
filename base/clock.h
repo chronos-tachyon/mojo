@@ -48,7 +48,6 @@ class Clock {
 
   // A valid Clock is one that has an implementation.
   explicit operator bool() const noexcept { return !!ptr_; }
-  bool valid() const noexcept { return !!*this; }
   void assert_valid() const;
 
   // Obtains the current Unix-epoch wallclock time.
@@ -114,7 +113,6 @@ class MonotonicClock {
 
   // A valid MonotonicClock is one that has an implementation.
   explicit operator bool() const noexcept { return !!ptr_; }
-  bool valid() const noexcept { return !!*this; }
   void assert_valid() const;
 
   // Obtains the current monotonic time.
