@@ -77,6 +77,9 @@ class Cleanup {
   bool need_;
 };
 
+template <typename F>
+void swap(Cleanup<F>& a, Cleanup<F>& b) noexcept { a.swap(b); }
+
 // Function for constructing Cleanup objects.  Supports type inference.
 template <typename F>
 inline Cleanup<F> cleanup(F f) {
