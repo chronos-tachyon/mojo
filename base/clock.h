@@ -164,7 +164,7 @@ MonotonicClock system_monotonic_clock();
 //
 // THREAD SAFETY: These functions are thread-safe.
 //
-inline Time wallclock_now() { return system_wallclock().now(); }
+inline Time now() { return system_wallclock().now(); }
 inline MonotonicTime monotonic_now() { return system_monotonic_clock().now(); }
 
 // Replaces the specified clock.

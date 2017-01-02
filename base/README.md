@@ -46,8 +46,8 @@ RC.  Provides `base::Clock` and `base::MonotonicClock` classes to obtain time
 values.  Also defines `base::ClockImpl` and `base::MonotonicClockImpl`, which
 are the base classes for clock implementations.
 
-Also provides `base::wallclock_now()` and `base::monotonic_now()` convenience
-functions for accessing the system clock.
+Also provides `base::now()` and `base::monotonic_now()` convenience functions
+for accessing the system clock.
 
 ### base/clockfake.h
 
