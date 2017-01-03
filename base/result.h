@@ -6,9 +6,7 @@
 #define BASE_RESULT_H
 
 #include <cstdint>
-#include <map>
 #include <memory>
-#include <mutex>
 #include <string>
 
 #include "base/concat.h"

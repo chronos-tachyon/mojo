@@ -10,6 +10,8 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <map>
+
 #include "base/logging.h"
 #include "base/mutex.h"
 
