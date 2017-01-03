@@ -86,7 +86,7 @@ struct AcceptHelper {
     auto r = task.result();
     bool eof = false;
     if (r.code() == RC::END_OF_FILE) {
-      r.clear();
+      r.reset();
       eof = true;
     }
     EXPECT_OK(r);

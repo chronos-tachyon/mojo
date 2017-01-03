@@ -242,12 +242,12 @@ class Result {
       : rep_(make(code, err_no, std::move(message))) {}
 
   Result(std::nullptr_t) noexcept : Result() {}
-  Result& operator=(std::nullptr_t) {
+  Result& operator=(std::nullptr_t) noexcept {
     rep_.reset();
     return *this;
   }
 
-  void clear() noexcept { *this = nullptr; }
+  void reset() noexcept { *this = nullptr; }
   void swap(Result& other) noexcept { rep_.swap(other.rep_); }
 
   // Checks if the Result was successful.
