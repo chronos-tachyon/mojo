@@ -121,10 +121,6 @@ class Result {
  public:
   using Code = ResultCode;
 
-  static const std::string& code_name(Code code) noexcept {
-    return resultcode_name(code);
-  }
-
  private:
   using Rep = internal::ResultRep;
   using RepPtr = std::shared_ptr<const Rep>;
