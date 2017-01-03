@@ -322,8 +322,9 @@ class Result {
   }
 
   // Stringifies this Result into a human-friendly form.
-  std::string as_string() const;
   void append_to(std::string* out) const;
+  std::size_t length_hint() const noexcept;
+  std::string as_string() const;
 
  private:
   RepPtr rep_;

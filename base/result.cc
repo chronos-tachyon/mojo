@@ -227,6 +227,24 @@ void Result::append_to(std::string* out) const {
   }
 }
 
+std::size_t Result::length_hint() const noexcept {
+  if (!rep_) return 5;
+  RC code = rep_->code;
+  int err_no = rep_->err_no;
+  const auto& message = rep_->message;
+
+  using base::length_hint;
+  std::size_t sum = length_hint(code) + 5;
+  if (!message.empty()) {
+    sum += message.size() + 2;
+  }
+  if (err_no != -1) {
+    auto errstr = strerror_sane(err_no);
+    sum += errstr.size() + 25;
+  }
+  return sum;
+}
+
 std::string Result::as_string() const {
   std::string out;
   append_to(&out);
