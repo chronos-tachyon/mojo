@@ -11,7 +11,7 @@
 
 #include "base/logging.h"
 
-using Code = base::ResultCode;
+using RC = base::ResultCode;
 using Rep = base::internal::ResultRep;
 using RepPtr = std::shared_ptr<const Rep>;
 
@@ -30,12 +30,12 @@ static std::string strerror_sane(int err_no) {
 
 struct Errno {
   const char* name;
-  Code code;
+  RC code;
 };
 
 static const std::map<int, Errno>& errno_map() {
   static const auto& ref = *new std::map<int, Errno>{
-#define MAP(x, y) {x, {#x, Code::y}}
+#define MAP(x, y) {x, {#x, RC::y}}
       MAP(EPERM, PERMISSION_DENIED),
       MAP(ENOENT, NOT_FOUND),
       MAP(ESRCH, NOT_FOUND),
@@ -110,9 +110,9 @@ static const std::map<int, Errno>& errno_map() {
   return ref;
 }
 
-static const std::map<Code, std::string>& name_map() {
-  static const auto& ref = *new std::map<Code, std::string>{
-#define MAP(x) {Code::x, #x}
+static const std::map<RC, std::string>& name_map() {
+  static const auto& ref = *new std::map<RC, std::string>{
+#define MAP(x) {RC::x, #x}
       MAP(OK),
       MAP(UNKNOWN),
       MAP(INTERNAL),
@@ -137,10 +137,10 @@ static const std::map<Code, std::string>& name_map() {
   return ref;
 }
 
-static const std::map<Code, RepPtr>& memo_map() {
-  static const auto& ref = *new std::map<Code, RepPtr>{
-#define MAP(x) {Code::x, \
-                std::make_shared<const Rep>(Code::x, -1, std::string())}
+static const std::map<RC, RepPtr>& memo_map() {
+  static const auto& ref = *new std::map<RC, RepPtr>{
+#define MAP(x) {RC::x, \
+                std::make_shared<const Rep>(RC::x, -1, std::string())}
       MAP(UNKNOWN),
       MAP(INTERNAL),
       MAP(CANCELLED),
@@ -173,15 +173,15 @@ const std::string& empty_string() noexcept {
 }
 }  // namespace internal
 
-const std::string& resultcode_name(Code code) noexcept {
+const std::string& resultcode_name(RC code) noexcept {
   const auto& map = name_map();
   auto it = map.find(code);
   if (it != map.end()) return it->second;
   return internal::empty_string();
 }
 
-RepPtr Result::make(Code code, int err_no, std::string message) {
-  if (code == Code::OK) return nullptr;
+RepPtr Result::make(RC code, int err_no, std::string message) {
+  if (code == RC::OK) return nullptr;
   if (err_no == -1 && message.empty()) {
     const auto& map = memo_map();
     auto it = map.find(code);
@@ -192,7 +192,7 @@ RepPtr Result::make(Code code, int err_no, std::string message) {
 
 Result Result::from_errno(int err_no, std::string what) {
   if (err_no == 0) return Result();
-  Code code = Code::UNKNOWN;
+  RC code = RC::UNKNOWN;
   const auto& map = errno_map();
   auto it = map.find(err_no);
   if (it != map.end()) code = it->second.code;
@@ -201,7 +201,7 @@ Result Result::from_errno(int err_no, std::string what) {
 
 void Result::append_to(std::string* out) const {
   if (rep_) {
-    Code code = rep_->code;
+    RC code = rep_->code;
     int err_no = rep_->err_no;
     const auto& message = rep_->message;
 

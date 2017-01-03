@@ -93,7 +93,7 @@ struct CopyHelper {
             << "*copied=" << *copied << ", "
             << "n=" << n << ", "
             << "r=" << r;
-    if (r.code() != base::Result::Code::NOT_IMPLEMENTED) {
+    if (r.code() != base::ResultCode::NOT_IMPLEMENTED) {
       task->finish(std::move(r));
       delete this;
       return base::Result();
@@ -113,7 +113,7 @@ struct CopyHelper {
             << "*copied=" << *copied << ", "
             << "n=" << n << ", "
             << "r=" << r;
-    if (r.code() != base::Result::Code::NOT_IMPLEMENTED) {
+    if (r.code() != base::ResultCode::NOT_IMPLEMENTED) {
       task->finish(std::move(r));
       delete this;
       return base::Result();
@@ -137,11 +137,11 @@ struct CopyHelper {
             << "n=" << n << ", "
             << "r=" << r;
     switch (r.code()) {
-      case base::Result::Code::OK:
+      case base::ResultCode::OK:
         eof = (n == 0);
         break;
 
-      case base::Result::Code::END_OF_FILE:
+      case base::ResultCode::END_OF_FILE:
         eof = true;
         break;
 

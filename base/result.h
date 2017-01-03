@@ -86,7 +86,7 @@ enum class ResultCode : uint8_t {
   END_OF_FILE = 0x12,
 };
 
-// Returns the string representation of a Code.
+// Returns the string representation of a ResultCode.
 const std::string& resultcode_name(ResultCode code) noexcept;
 
 // ResultCode is stringable.
@@ -118,106 +118,104 @@ const std::string& empty_string() noexcept;
 // Result represents the success or failure of an operation.
 // Failures are further categorized by the type of failure.
 class Result {
- public:
-  using Code = ResultCode;
-
  private:
+  using RC = ResultCode;
   using Rep = internal::ResultRep;
   using RepPtr = std::shared_ptr<const Rep>;
 
-  RepPtr make(Code code, int err_no, std::string message);
+  RepPtr make(RC code, int err_no, std::string message);
 
  public:
-  // Constructors for fixed Code values {{{
+  // Constructors for fixed ResultCode values {{{
 
   template <typename... Args>
   static Result unknown(const Args&... args) {
-    return Result(Code::UNKNOWN, concat(args...));
+    return Result(RC::UNKNOWN, concat(args...));
   }
 
   template <typename... Args>
   static Result internal(const Args&... args) {
-    return Result(Code::INTERNAL, concat(args...));
+    return Result(RC::INTERNAL, concat(args...));
   }
 
   template <typename... Args>
   static Result cancelled(const Args&... args) {
-    return Result(Code::CANCELLED, concat(args...));
+    return Result(RC::CANCELLED, concat(args...));
   }
 
   template <typename... Args>
   static Result failed_precondition(const Args&... args) {
-    return Result(Code::FAILED_PRECONDITION, concat(args...));
+    return Result(RC::FAILED_PRECONDITION, concat(args...));
   }
 
   template <typename... Args>
   static Result not_found(const Args&... args) {
-    return Result(Code::NOT_FOUND, concat(args...));
+    return Result(RC::NOT_FOUND, concat(args...));
   }
 
   template <typename... Args>
   static Result already_exists(const Args&... args) {
-    return Result(Code::ALREADY_EXISTS, concat(args...));
+    return Result(RC::ALREADY_EXISTS, concat(args...));
   }
 
   template <typename... Args>
   static Result wrong_type(const Args&... args) {
-    return Result(Code::WRONG_TYPE, concat(args...));
+    return Result(RC::WRONG_TYPE, concat(args...));
   }
 
   template <typename... Args>
   static Result permission_denied(const Args&... args) {
-    return Result(Code::PERMISSION_DENIED, concat(args...));
+    return Result(RC::PERMISSION_DENIED, concat(args...));
   }
 
   template <typename... Args>
   static Result unauthenticated(const Args&... args) {
-    return Result(Code::UNAUTHENTICATED, concat(args...));
+    return Result(RC::UNAUTHENTICATED, concat(args...));
   }
 
   template <typename... Args>
   static Result invalid_argument(const Args&... args) {
-    return Result(Code::INVALID_ARGUMENT, concat(args...));
+    return Result(RC::INVALID_ARGUMENT, concat(args...));
   }
 
   template <typename... Args>
   static Result out_of_range(const Args&... args) {
-    return Result(Code::OUT_OF_RANGE, concat(args...));
+    return Result(RC::OUT_OF_RANGE, concat(args...));
   }
 
   template <typename... Args>
   static Result not_implemented(const Args&... args) {
-    return Result(Code::NOT_IMPLEMENTED, concat(args...));
+    return Result(RC::NOT_IMPLEMENTED, concat(args...));
   }
 
   template <typename... Args>
   static Result unavailable(const Args&... args) {
-    return Result(Code::UNAVAILABLE, concat(args...));
+    return Result(RC::UNAVAILABLE, concat(args...));
   }
 
   template <typename... Args>
   static Result aborted(const Args&... args) {
-    return Result(Code::ABORTED, concat(args...));
+    return Result(RC::ABORTED, concat(args...));
   }
 
   template <typename... Args>
   static Result resource_exhausted(const Args&... args) {
-    return Result(Code::RESOURCE_EXHAUSTED, concat(args...));
+    return Result(RC::RESOURCE_EXHAUSTED, concat(args...));
   }
 
   template <typename... Args>
   static Result deadline_exceeded(const Args&... args) {
-    return Result(Code::DEADLINE_EXCEEDED, concat(args...));
+    return Result(RC::DEADLINE_EXCEEDED, concat(args...));
   }
 
   template <typename... Args>
   static Result data_loss(const Args&... args) {
-    return Result(Code::DATA_LOSS, concat(args...));
+    return Result(RC::DATA_LOSS, concat(args...));
   }
 
   template <typename... Args>
   static Result eof(const Args&... args) {
-    return Result(Code::END_OF_FILE, concat(args...));
+    return Result(RC::END_OF_FILE, concat(args...));
   }
 
   // }}}
@@ -240,7 +238,7 @@ class Result {
   Result& operator=(const Result&) noexcept = default;
   Result& operator=(Result&&) noexcept = default;
 
-  Result(Code code, std::string message = std::string(), int err_no = -1)
+  Result(ResultCode code, std::string message = std::string(), int err_no = -1)
       : rep_(make(code, err_no, std::move(message))) {}
 
   Result(std::nullptr_t) noexcept : Result() {}
@@ -257,10 +255,10 @@ class Result {
   void expect_ok(const char* file, unsigned int line) const;
   void ignore_ok() const;
 
-  // Returns the Code for this Result.
-  Code code() const noexcept {
+  // Returns the ResultCode for this Result.
+  ResultCode code() const noexcept {
     if (rep_) return rep_->code;
-    return Code::OK;
+    return RC::OK;
   }
 
   // Returns the value of errno(3) associated with this Result.

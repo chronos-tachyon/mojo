@@ -17,7 +17,7 @@
 #include "net/testing.h"
 
 using P = net::ProtocolType;
-using RC = base::Result::Code;
+using RC = base::ResultCode;
 
 static const sockaddr* RICSA(const void* ptr) {
   return reinterpret_cast<const sockaddr*>(ptr);

@@ -9,7 +9,7 @@
 #include "base/logging.h"
 #include "event/dispatcher.h"
 
-using RC = base::Result::Code;
+using RC = base::ResultCode;
 using Work = event::Task::Work;
 
 static const char* const kTaskStateNames[] = {

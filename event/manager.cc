@@ -153,7 +153,7 @@ static void signal_thread_body() {
   base::Result r;
   while (true) {
     r = base::read_exactly(*g_sig_pipe_rfd, &si, sizeof(si), "signal pipe");
-    if (r.code() == base::Result::Code::END_OF_FILE) break;
+    if (r.code() == base::ResultCode::END_OF_FILE) break;
     r.expect_ok(__FILE__, __LINE__);
     if (!r) continue;
 
@@ -1028,7 +1028,7 @@ void ManagerImpl::handle_pipe_event(CallbackVec* cbvec) {
   base::Result r;
   while (true) {
     r = base::read_exactly(pipe_.read, &data, sizeof(data), "event pipe");
-    if (r.code() == base::Result::Code::END_OF_FILE) return;
+    if (r.code() == base::ResultCode::END_OF_FILE) return;
     if (r.errno_value() == EAGAIN || r.errno_value() == EWOULDBLOCK) return;
     r.expect_ok(__FILE__, __LINE__);
     if (!r) return;

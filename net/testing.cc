@@ -14,7 +14,7 @@
 #include "event/task.h"
 #include "gtest/gtest.h"
 
-using RC = base::Result::Code;
+using RC = base::ResultCode;
 
 namespace net {
 

@@ -15,7 +15,7 @@
 #include "net/registry.h"
 
 using P = net::ProtocolType;
-using RC = base::Result::Code;
+using RC = base::ResultCode;
 
 static const char* RICCH(const uint32_t* ptr) {
   return reinterpret_cast<const char*>(ptr);

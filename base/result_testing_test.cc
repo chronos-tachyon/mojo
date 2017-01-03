@@ -34,7 +34,7 @@ TEST(ResultTesting, AssertionMessage) {
 
   result = base::Result::internal("foo");
   auto x = base::testing::ResultCodeEQ("<ignored>", "<expr>",
-                                       base::Result::Code::OK, result);
+                                       base::ResultCode::OK, result);
   ok = x;
   message = x.message();
   EXPECT_FALSE(ok);
@@ -45,7 +45,7 @@ TEST(ResultTesting, AssertionMessage) {
       message);
 
   x = base::testing::ResultCodeEQ("<ignored>", "<expr>",
-                                  base::Result::Code::INTERNAL, result);
+                                  base::ResultCode::INTERNAL, result);
   ok = x;
   message = x.message();
   EXPECT_TRUE(ok);

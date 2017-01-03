@@ -25,7 +25,7 @@
 #include "net/registry.h"
 
 using P = net::ProtocolType;
-using RC = base::Result::Code;
+using RC = base::ResultCode;
 
 namespace net {
 

@@ -31,7 +31,7 @@
 #include "base/mutex.h"
 #include "io/writer.h"
 
-using RC = base::Result::Code;
+using RC = base::ResultCode;
 
 static constexpr std::size_t kDefaultIdealBlockSize = 1U << 20;  // 1 MiB
 static constexpr std::size_t kSendfileMax = 4U << 20;            // 4 MiB
