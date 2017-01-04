@@ -119,6 +119,8 @@ class RLock {
   bool held_;
 };
 
+inline void swap(RLock& a, RLock& b) noexcept { a.swap(b); }
+
 inline Lock acquire_lock(std::mutex& mu) { return Lock(mu); }
 inline WLock acquire_write(RWMutex& rwmu) { return WLock(rwmu); }
 inline RLock acquire_read(RWMutex& rwmu) { return RLock(rwmu); }
