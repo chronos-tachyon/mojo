@@ -196,10 +196,16 @@ struct simple_appender<char[]> {
 };
 
 inline void charptr_append_to(std::string* out, const char* arg) {
-  out->append(arg);
+  if (arg)
+    out->append(arg);
+  else
+    out->append("<null>");
 }
 inline std::size_t charptr_length_hint(const char* arg) {
-  return ::strlen(arg);
+  if (arg)
+    return ::strlen(arg);
+  else
+    return 6;
 }
 template <>
 struct simple_appender<const char*> {
