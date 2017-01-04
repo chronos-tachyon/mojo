@@ -262,13 +262,13 @@ class Result {
   }
 
   // Returns the value of errno(3) associated with this Result.
-  int errno_value() const {
+  int errno_value() const noexcept {
     if (rep_) return rep_->err_no;
     return 0;
   }
 
   // Returns the message associated with this Result.
-  const std::string& message() const {
+  const std::string& message() const noexcept {
     if (rep_) return rep_->message;
     return internal::empty_string();
   }
