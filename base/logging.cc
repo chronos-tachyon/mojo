@@ -44,7 +44,6 @@ static bool operator<(Key a, Key b) noexcept {
   int cmp = ::strcmp(a.file, b.file);
   return cmp < 0 || (cmp == 0 && a.line < b.line);
 }
-}  // anonymous namespace
 
 using Map = std::map<Key, std::size_t>;
 using Vec = std::vector<LogTarget*>;
@@ -59,6 +58,7 @@ enum ThreadState {
 static std::once_flag g_once;
 static std::mutex g_mu;
 static std::mutex g_queue_mu;
+static level_t g_flush = LOG_LEVEL_ERROR;         // protected by g_mu
 static level_t g_stderr = LOG_LEVEL_INFO;         // protected by g_mu
 static GetTidFunc g_gtid = nullptr;               // protected by g_mu
 static GetTimeOfDayFunc g_gtod = nullptr;         // protected by g_mu
@@ -69,9 +69,74 @@ static std::condition_variable g_queue_put_cv;    // protected by g_queue_mu
 static std::condition_variable g_queue_empty_cv;  // protected by g_queue_mu
 static Queue* g_queue = nullptr;                  // protected by g_queue_mu
 
-static base::LogTarget* make_stderr();
+class LogSTDERR : public LogTarget {
+ public:
+  LogSTDERR() noexcept = default;
+  bool want(const char* file, unsigned int line, level_t level) const override {
+    // g_mu held by base::want()
+    return level >= g_stderr;
+  }
+  void log(const LogEntry& entry) override {
+    // g_mu held by base::thread_body()
+    auto str = entry.as_string();
+    ::write(2, str.data(), str.size());
+  }
+  void flush() override { ::fdatasync(2); }
+};
 
-static void thread_body() noexcept;
+static base::LogTarget* make_stderr() {
+  static base::LogTarget* const ptr = new LogSTDERR;
+  return ptr;
+}
+
+template <typename F, typename... Args>
+static void ignore_exceptions(F func, Args&&... args) {
+  try {
+    func(std::forward<Args>(args)...);
+  } catch (...) {
+    // discard exception
+  }
+}
+
+static void process(base::Lock& main_lock, const LogEntry& entry) {
+  if (entry) {
+    for (LogTarget* target : *g_vec) {
+      ignore_exceptions([&entry, target] {
+        if (target->want(entry.file, entry.line, entry.level)) {
+          target->log(entry);
+        }
+      });
+    }
+  }
+  if (entry.level >= g_flush) {
+    for (LogTarget* target : *g_vec) {
+      ignore_exceptions([target] { target->flush(); });
+    }
+  }
+  if (entry.level >= LOG_LEVEL_DFATAL) {
+    if (entry.level >= LOG_LEVEL_FATAL || debug()) {
+      std::terminate();
+    }
+  }
+}
+
+static void thread_body() noexcept {
+  auto queue_lock = base::acquire_lock(g_queue_mu);
+  while (true) {
+    if (g_queue->empty()) {
+      g_queue_empty_cv.notify_all();
+      while (g_queue->empty()) g_queue_put_cv.wait(queue_lock);
+    }
+    auto entry = std::move(g_queue->front());
+    g_queue->pop_front();
+    auto main_lock = base::acquire_lock(g_mu);
+    process(main_lock, entry);
+  }
+}
+
+static void log_wait(base::Lock& queue_lock) {
+  while (!g_queue->empty()) g_queue_empty_cv.wait(queue_lock);
+}
 
 static void init() {
   auto queue_lock = acquire_lock(g_queue_mu);
@@ -89,84 +154,7 @@ static void init() {
   }
 }
 
-static void process(base::Lock& main_lock, LogEntry entry) {
-  for (LogTarget* target : *g_vec) {
-    if (target->want(entry.file, entry.line, entry.level)) {
-      target->log(entry);
-    }
-  }
-}
-
-static void thread_body() noexcept {
-  auto queue_lock = base::acquire_lock(g_queue_mu);
-  while (true) {
-    if (g_queue->empty()) {
-      g_queue_empty_cv.notify_all();
-      while (g_queue->empty()) g_queue_put_cv.wait(queue_lock);
-    }
-    auto entry = std::move(g_queue->front());
-    g_queue->pop_front();
-    auto main_lock = base::acquire_lock(g_mu);
-    process(main_lock, std::move(entry));
-  }
-}
-
-static bool want(const char* file, unsigned int line, unsigned int n,
-                 level_t level) {
-  std::call_once(g_once, [] { init(); });
-  if (level >= LOG_LEVEL_DFATAL) return true;
-  auto main_lock = base::acquire_lock(g_mu);
-  if (n > 1) {
-    Key key(file, line);
-    auto pair = g_map->insert(std::make_pair(key, 0));
-    auto& count = pair.first->second;
-    bool x = (count == 0);
-    count = (count + 1) % n;
-    if (!x) return false;
-  }
-  for (const auto& target : *g_vec) {
-    if (target->want(file, line, level)) return true;
-  }
-  return false;
-}
-
-static void log(LogEntry entry) {
-  std::call_once(g_once, [] { init(); });
-  auto queue_lock = base::acquire_lock(g_queue_mu);
-  if (g_thread_state == kSingleThreaded) {
-    auto main_lock = base::acquire_lock(g_mu);
-    process(main_lock, std::move(entry));
-    return;
-  }
-  g_queue->push_back(std::move(entry));
-  g_queue_put_cv.notify_one();
-}
-
-namespace {
-class LogSTDERR : public LogTarget {
- public:
-  LogSTDERR() noexcept = default;
-  bool want(const char* file, unsigned int line, level_t level) const
-      noexcept override {
-    // g_mu held by base::want()
-    return level >= g_stderr;
-  }
-  void log(const LogEntry& entry) noexcept override {
-    // g_mu held by base::thread_body()
-    auto str = entry.as_string();
-    ::write(2, str.data(), str.size());
-  }
-};
 }  // anonymous namespace
-
-static base::LogTarget* make_stderr() {
-  static base::LogTarget* const ptr = new LogSTDERR;
-  return ptr;
-}
-
-LogEntry::LogEntry() noexcept : tid(0), file(nullptr), line(0) {
-  ::bzero(&time, sizeof(time));
-}
 
 LogEntry::LogEntry(const char* file, unsigned int line, level_t level,
                    std::string message) noexcept : file(file),
@@ -178,55 +166,6 @@ LogEntry::LogEntry(const char* file, unsigned int line, level_t level,
   ::bzero(&time, sizeof(time));
   (*g_gtod)(&time, nullptr);
   tid = (*g_gtid)();
-}
-
-LogEntry::LogEntry(const LogEntry& other)
-    : tid(other.tid),
-      file(other.file),
-      line(other.line),
-      level(other.level),
-      message(other.message) {
-  ::memcpy(&time, &other.time, sizeof(time));
-}
-
-LogEntry::LogEntry(LogEntry&& other) noexcept
-    : tid(other.tid),
-      file(other.file),
-      line(other.line),
-      level(other.level),
-      message(std::move(other.message)) {
-  ::memcpy(&time, &other.time, sizeof(time));
-}
-
-LogEntry& LogEntry::operator=(const LogEntry& other) {
-  ::memcpy(&time, &other.time, sizeof(time));
-  tid = other.tid;
-  file = other.file;
-  line = other.line;
-  level = other.level;
-  message = other.message;
-  return *this;
-}
-
-LogEntry& LogEntry::operator=(LogEntry&& other) noexcept {
-  ::memcpy(&time, &other.time, sizeof(time));
-  ::bzero(&other.time, sizeof(time));
-
-  tid = other.tid;
-  other.tid = 0;
-
-  file = other.file;
-  other.file = nullptr;
-
-  line = other.line;
-  other.line = 0;
-
-  level = other.level;
-  other.level = level_t();
-
-  message = std::move(other.message);
-
-  return *this;
 }
 
 void LogEntry::append_to(std::string* out) const {
@@ -252,6 +191,7 @@ void LogEntry::append_to(std::string* out) const {
   ::snprintf(buf.data(), buf.size(), "%c%02u%02u %02u:%02u:%02u.%06lu  ", ch,
              tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec,
              time.tv_usec);
+
   concat_to(out, std::string(buf.data()), tid, ' ', file, ':', line, "] ",
             message, '\n');
 }
@@ -266,13 +206,14 @@ static std::unique_ptr<std::ostringstream> make_ss(const char* file,
                                                    unsigned int line,
                                                    unsigned int n,
                                                    level_t level) {
+  if (file == nullptr) std::terminate();
+  if (line == 0) std::terminate();
+  if (n == 0) std::terminate();
+
   std::unique_ptr<std::ostringstream> ptr;
   if (want(file, line, n, level)) ptr.reset(new std::ostringstream);
   return ptr;
 }
-
-Logger::Logger(std::nullptr_t)
-    : file_(nullptr), line_(0), n_(0), level_(0), ss_(nullptr) {}
 
 Logger::Logger(const char* file, unsigned int line, unsigned int every_n,
                level_t level)
@@ -282,28 +223,83 @@ Logger::Logger(const char* file, unsigned int line, unsigned int every_n,
       level_(level),
       ss_(make_ss(file, line, every_n, level)) {}
 
-Logger::~Logger() noexcept(false) {
-  if (ss_) {
-    log(LogEntry(file_, line_, level_, ss_->str()));
-    if (level_ >= LOG_LEVEL_DFATAL) {
-      log_flush();
-      if (level_ >= LOG_LEVEL_FATAL || debug()) {
-        std::terminate();
-      }
-    }
+bool want(const char* file, unsigned int line, unsigned int n, level_t level) {
+  std::call_once(g_once, [] { init(); });
+  if (level >= LOG_LEVEL_DFATAL) return true;
+  auto main_lock = base::acquire_lock(g_mu);
+  if (n > 1) {
+    Key key(file, line);
+    auto pair = g_map->insert(std::make_pair(key, 0));
+    auto& count = pair.first->second;
+    bool x = (count == 0);
+    count = (count + 1) % n;
+    if (!x) return false;
+  }
+  bool result = false;
+  for (const LogTarget* target : *g_vec) {
+    ignore_exceptions([file, line, level, target, &result] {
+      result = target->want(file, line, level);
+    });
+    if (result) break;
+  }
+  return result;
+}
+
+void log(const LogEntry& entry) {
+  std::call_once(g_once, [] { init(); });
+  auto queue_lock = base::acquire_lock(g_queue_mu);
+  if (g_thread_state == kSingleThreaded) {
+    auto main_lock = base::acquire_lock(g_mu);
+    process(main_lock, entry);
+    return;
+  }
+  g_queue->push_back(entry);
+  g_queue_put_cv.notify_one();
+  if (entry.level >= LOG_LEVEL_DFATAL) log_wait(queue_lock);
+}
+
+void log_single_threaded() {
+  auto queue_lock = acquire_lock(g_queue_mu);
+  if (g_thread_state == kThreadStarted)
+    throw std::logic_error("logging thread is already running!");
+  g_thread_state = kSingleThreaded;
+}
+
+void log_flush() {
+  auto queue_lock = base::acquire_lock(g_queue_mu);
+  log_wait(queue_lock);
+  auto main_lock = base::acquire_lock(g_mu);
+  for (LogTarget* target : *g_vec) {
+    ignore_exceptions([target] { target->flush(); });
   }
 }
 
-LogEntry Logger::entry() {
-  if (ss_) {
-    LogEntry entry(file_, line_, level_, ss_->str());
-    file_ = nullptr;
-    line_ = 0;
-    level_ = level_t();
-    ss_.reset();
-    return std::move(entry);
+void log_flush_set_level(level_t level) {
+  auto main_lock = acquire_lock(g_mu);
+  g_flush = level;
+}
+
+void log_stderr_set_level(level_t level) {
+  auto main_lock = acquire_lock(g_mu);
+  g_stderr = level;
+}
+
+void log_target_add(LogTarget* target) {
+  auto main_lock = acquire_lock(g_mu);
+  g_vec->push_back(target);
+}
+
+void log_target_remove(LogTarget* target) {
+  auto queue_lock = base::acquire_lock(g_queue_mu);
+  log_wait(queue_lock);
+  auto main_lock = acquire_lock(g_mu);
+  auto& v = *g_vec;
+  for (auto it = v.begin(), end = v.end(); it != end; ++it) {
+    if (*it == target) {
+      v.erase(it);
+      break;
+    }
   }
-  return LogEntry();
 }
 
 void log_set_gettid(GetTidFunc func) {
@@ -320,41 +316,6 @@ void log_set_gettimeofday(GetTimeOfDayFunc func) {
     g_gtod = func;
   else
     g_gtod = gettimeofday;
-}
-
-void log_single_threaded() {
-  auto queue_lock = acquire_lock(g_queue_mu);
-  if (g_thread_state == kThreadStarted)
-    throw std::logic_error("logging thread is already running!");
-  g_thread_state = kSingleThreaded;
-}
-
-void log_flush() {
-  auto queue_lock = base::acquire_lock(g_queue_mu);
-  while (!g_queue->empty()) g_queue_empty_cv.wait(queue_lock);
-}
-
-void log_stderr_set_level(level_t level) {
-  auto main_lock = acquire_lock(g_mu);
-  g_stderr = level;
-}
-
-void log_target_add(LogTarget* target) {
-  auto main_lock = acquire_lock(g_mu);
-  g_vec->push_back(target);
-}
-
-void log_target_remove(LogTarget* target) {
-  auto queue_lock = base::acquire_lock(g_queue_mu);
-  while (!g_queue->empty()) g_queue_empty_cv.wait(queue_lock);
-  auto main_lock = acquire_lock(g_mu);
-  auto& v = *g_vec;
-  for (auto it = v.begin(), end = v.end(); it != end; ++it) {
-    if (*it == target) {
-      v.erase(it);
-      break;
-    }
-  }
 }
 
 namespace internal {
@@ -379,7 +340,7 @@ void log_exception(const char* file, unsigned int line, std::exception_ptr e) {
 
 Logger log_check(const char* file, unsigned int line, const char* expr,
                  bool cond) {
-  if (cond) return Logger(nullptr);
+  if (cond) return Logger();
   Logger logger(file, line, 1, LOG_LEVEL_DFATAL);
   logger << "CHECK FAILED: " << expr;
   return logger;
@@ -387,7 +348,7 @@ Logger log_check(const char* file, unsigned int line, const char* expr,
 
 Logger log_check_ok(const char* file, unsigned int line, const char* expr,
                     const Result& rslt) {
-  if (rslt) return Logger(nullptr);
+  if (rslt) return Logger();
   Logger logger(file, line, 1, LOG_LEVEL_DFATAL);
   logger << "CHECK FAILED: " << expr << ": " << rslt.as_string();
   return logger;

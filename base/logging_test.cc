@@ -29,16 +29,18 @@ class LogCapture : public base::LogTarget {
     CHECK_OK(base::make_pipe(&pipe_));
   }
 
-  bool want(const char* file, unsigned int line, base::level_t level) const
-      noexcept override {
+  bool want(const char* file, unsigned int line,
+            base::level_t level) const override {
     return level >= LOG_LEVEL_INFO;
   }
 
-  void log(const base::LogEntry& entry) noexcept override {
+  void log(const base::LogEntry& entry) override {
     auto str = entry.as_string();
     auto pair = pipe_.write->acquire_fd();
     ::write(pair.first, str.data(), str.size());
   }
+
+  void flush() override {}
 
   void finish() {
     CHECK_OK(pipe_.write->close());

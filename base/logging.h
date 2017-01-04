@@ -8,6 +8,7 @@
 #include <sys/time.h>
 #include <sys/types.h>
 
+#include <cstring>
 #include <exception>
 #include <memory>
 #include <ostream>
@@ -60,20 +61,20 @@
 
 #ifdef NDEBUG
 
-#define DLOG(name) ::base::Logger(nullptr)
-#define DVLOG(vlevel) ::base::Logger(nullptr)
-#define DLOG_EVERY_N(name, n) ::base::Logger(nullptr)
-#define DVLOG_EVERY_N(vlevel, n) ::base::Logger(nullptr)
+#define DLOG(name) ::base::Logger()
+#define DVLOG(vlevel) ::base::Logger()
+#define DLOG_EVERY_N(name, n) ::base::Logger()
+#define DVLOG_EVERY_N(vlevel, n) ::base::Logger()
 
-#define DCHECK(x) ::base::Logger(nullptr)
-#define DCHECK_OK(x) ::base::Logger(nullptr)
+#define DCHECK(x) ::base::Logger()
+#define DCHECK_OK(x) ::base::Logger()
 
-#define DCHECK_EQ(x, y) ::base::Logger(nullptr)
-#define DCHECK_NE(x, y) ::base::Logger(nullptr)
-#define DCHECK_LT(x, y) ::base::Logger(nullptr)
-#define DCHECK_GT(x, y) ::base::Logger(nullptr)
-#define DCHECK_LE(x, y) ::base::Logger(nullptr)
-#define DCHECK_GE(x, y) ::base::Logger(nullptr)
+#define DCHECK_EQ(x, y) ::base::Logger()
+#define DCHECK_NE(x, y) ::base::Logger()
+#define DCHECK_LT(x, y) ::base::Logger()
+#define DCHECK_GT(x, y) ::base::Logger()
+#define DCHECK_LE(x, y) ::base::Logger()
+#define DCHECK_GE(x, y) ::base::Logger()
 
 #define DCHECK_NOTNULL(ptr) (ptr)
 
@@ -144,13 +145,65 @@ struct LogEntry {
   level_t level;
   std::string message;
 
-  LogEntry() noexcept;
+  LogEntry() noexcept : tid(0), file(nullptr), line(0) {
+    ::bzero(&time, sizeof(time));
+  }
+
   LogEntry(const char* file, unsigned int line, level_t level,
            std::string message) noexcept;
-  LogEntry(const LogEntry& other);
-  LogEntry(LogEntry&& other) noexcept;
-  LogEntry& operator=(const LogEntry& other);
-  LogEntry& operator=(LogEntry&& other) noexcept;
+
+  LogEntry(const LogEntry& other)
+    : tid(other.tid),
+      file(other.file),
+      line(other.line),
+      level(other.level),
+      message(other.message) {
+    ::memcpy(&time, &other.time, sizeof(time));
+  }
+
+  LogEntry(LogEntry&& other) noexcept
+    : tid(other.tid),
+      file(other.file),
+      line(other.line),
+      level(other.level),
+      message(std::move(other.message)) {
+    ::memcpy(&time, &other.time, sizeof(time));
+  }
+
+  LogEntry& operator=(const LogEntry& other) {
+    ::memcpy(&time, &other.time, sizeof(time));
+    tid = other.tid;
+    file = other.file;
+    line = other.line;
+    level = other.level;
+    message = other.message;
+    return *this;
+  }
+
+  LogEntry& operator=(LogEntry&& other) noexcept {
+    ::memcpy(&time, &other.time, sizeof(time));
+    ::bzero(&other.time, sizeof(time));
+
+    tid = other.tid;
+    other.tid = 0;
+
+    file = other.file;
+    other.file = nullptr;
+
+    line = other.line;
+    other.line = 0;
+
+    level = other.level;
+    other.level = level_t();
+
+    message = std::move(other.message);
+
+    return *this;
+  }
+
+  explicit operator bool() const noexcept {
+    return file != nullptr && line != 0;
+  }
 
   void append_to(std::string* out) const;
   std::string as_string() const;
@@ -162,9 +215,11 @@ class Logger {
   using BasicManip = std::ostream& (*)(std::ostream&);
 
  public:
-  Logger(std::nullptr_t);
+  Logger() : file_(nullptr), line_(0), n_(0), level_(), ss_() {}
+
   Logger(const char* file, unsigned int line, unsigned int every_n,
          level_t level);
+
   ~Logger() noexcept(false);
 
   // Logger is move-only.
@@ -172,6 +227,15 @@ class Logger {
   Logger(Logger&&) noexcept = default;
   Logger& operator=(const Logger&) = delete;
   Logger& operator=(Logger&&) noexcept = default;
+
+  // Clears this Logger to the default-constructed state.
+  void clear() noexcept {
+    file_ = nullptr;
+    line_ = 0;
+    n_ = 0;
+    level_ = level_t();
+    ss_.reset();
+  }
 
   const char* file() const noexcept { return file_; }
   unsigned int line() const noexcept { return line_; }
@@ -198,7 +262,13 @@ class Logger {
     return *this;
   }
 
-  LogEntry entry();
+  // Returns the LogEntry produced so far by this Logger.
+  LogEntry entry() const {
+    if (ss_)
+      return LogEntry(file_, line_, level_, ss_->str());
+    else
+      return LogEntry();
+  }
 
  private:
   const char* file_;
@@ -214,10 +284,18 @@ class LogTarget {
 
  public:
   virtual ~LogTarget() noexcept = default;
-  virtual bool want(const char* file, unsigned int line, level_t level) const
-      noexcept = 0;
-  virtual void log(const LogEntry& entry) noexcept = 0;
+  virtual bool want(const char* file, unsigned int line,
+                    level_t level) const = 0;
+  virtual void log(const LogEntry& entry) = 0;
+  virtual void flush() = 0;
 };
+
+// Returns true if a LogEntry with this metadata would be interesting.
+bool want(const char* file, unsigned int line, unsigned int every_n,
+          level_t level);
+
+// Logs a single LogEntry.
+void log(const LogEntry& entry);
 
 // Force logs to be written synchronously or asynchronously.
 void log_single_threaded();
@@ -225,9 +303,14 @@ void log_single_threaded();
 // Wait for all pending logs to reach disk.
 void log_flush();
 
+// Set the threshold for automatic flushing.
+void log_flush_set_level(level_t level);
+
+// Set the threshold for logging to STDERR.
+void log_stderr_set_level(level_t level);
+
 // Low-level functions for routing logs {{{
 
-void log_stderr_set_level(level_t level);
 void log_target_add(LogTarget* target);
 void log_target_remove(LogTarget* target);
 
@@ -256,7 +339,7 @@ template <typename T, typename U, typename Predicate>
 Logger log_check_op(const char* file, unsigned int line, Predicate pred,
                     const char* lhsexpr, const T& lhs, const char* rhsexpr,
                     const U& rhs) {
-  if (pred(lhs, rhs)) return Logger(nullptr);
+  if (pred(lhs, rhs)) return Logger();
   const char* op = pred.name();
   Logger logger(file, line, 1, LOG_LEVEL_DFATAL);
   logger << "CHECK FAILED: " << lhsexpr << " " << op << " " << rhsexpr << " "
@@ -335,6 +418,10 @@ std::shared_ptr<T> log_check_notnull(const char* file, unsigned int line,
 }
 
 }  // namespace internal
+
+inline Logger::~Logger() noexcept(false) {
+  if (ss_) log(entry());
+}
 
 }  // namespace base
 
