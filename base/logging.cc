@@ -59,7 +59,7 @@ enum ThreadState {
 static std::once_flag g_once;
 static std::mutex g_mu;
 static std::mutex g_queue_mu;
-static level_t g_stderr = 0;                      // protected by g_mu
+static level_t g_stderr = LOG_LEVEL_INFO;         // protected by g_mu
 static GetTidFunc g_gtid = nullptr;               // protected by g_mu
 static GetTimeOfDayFunc g_gtod = nullptr;         // protected by g_mu
 static Map* g_map = nullptr;                      // protected by g_mu
@@ -77,7 +77,6 @@ static void init() {
   auto queue_lock = acquire_lock(g_queue_mu);
   auto main_lock = acquire_lock(g_mu);
 
-  if (!g_stderr) g_stderr = LOG_LEVEL_INFO;
   if (!g_gtid) g_gtid = my_gettid;
   if (!g_gtod) g_gtod = gettimeofday;
   if (!g_map) g_map = new Map;
@@ -165,6 +164,10 @@ static base::LogTarget* make_stderr() {
   return ptr;
 }
 
+LogEntry::LogEntry() noexcept : tid(0), file(nullptr), line(0) {
+  ::bzero(&time, sizeof(time));
+}
+
 LogEntry::LogEntry(const char* file, unsigned int line, level_t level,
                    std::string message) noexcept : file(file),
                                                    line(line),
@@ -175,6 +178,55 @@ LogEntry::LogEntry(const char* file, unsigned int line, level_t level,
   ::bzero(&time, sizeof(time));
   (*g_gtod)(&time, nullptr);
   tid = (*g_gtid)();
+}
+
+LogEntry::LogEntry(const LogEntry& other)
+    : tid(other.tid),
+      file(other.file),
+      line(other.line),
+      level(other.level),
+      message(other.message) {
+  ::memcpy(&time, &other.time, sizeof(time));
+}
+
+LogEntry::LogEntry(LogEntry&& other) noexcept
+    : tid(other.tid),
+      file(other.file),
+      line(other.line),
+      level(other.level),
+      message(std::move(other.message)) {
+  ::memcpy(&time, &other.time, sizeof(time));
+}
+
+LogEntry& LogEntry::operator=(const LogEntry& other) {
+  ::memcpy(&time, &other.time, sizeof(time));
+  tid = other.tid;
+  file = other.file;
+  line = other.line;
+  level = other.level;
+  message = other.message;
+  return *this;
+}
+
+LogEntry& LogEntry::operator=(LogEntry&& other) noexcept {
+  ::memcpy(&time, &other.time, sizeof(time));
+  ::bzero(&other.time, sizeof(time));
+
+  tid = other.tid;
+  other.tid = 0;
+
+  file = other.file;
+  other.file = nullptr;
+
+  line = other.line;
+  other.line = 0;
+
+  level = other.level;
+  other.level = level_t();
+
+  message = std::move(other.message);
+
+  return *this;
 }
 
 void LogEntry::append_to(std::string* out) const {
@@ -242,6 +294,18 @@ Logger::~Logger() noexcept(false) {
   }
 }
 
+LogEntry Logger::entry() {
+  if (ss_) {
+    LogEntry entry(file_, line_, level_, ss_->str());
+    file_ = nullptr;
+    line_ = 0;
+    level_ = level_t();
+    ss_.reset();
+    return std::move(entry);
+  }
+  return LogEntry();
+}
+
 void log_set_gettid(GetTidFunc func) {
   auto main_lock = acquire_lock(g_mu);
   if (func)
@@ -293,6 +357,8 @@ void log_target_remove(LogTarget* target) {
   }
 }
 
+namespace internal {
+
 void log_exception(const char* file, unsigned int line, std::exception_ptr e) {
   Logger logger(file, line, 1, LOG_LEVEL_ERROR);
   try {
@@ -327,6 +393,6 @@ Logger log_check_ok(const char* file, unsigned int line, const char* expr,
   return logger;
 }
 
-Logger force_eval(bool) { return Logger(nullptr); }
+}  // namespace internal
 
 }  // namespace base

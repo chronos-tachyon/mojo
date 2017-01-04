@@ -14,19 +14,126 @@
 #include <sstream>
 #include <string>
 
+#define LOG_LEVEL_INFO ::base::level_t(1)
+#define LOG_LEVEL_WARN ::base::level_t(2)
+#define LOG_LEVEL_ERROR ::base::level_t(3)
+#define LOG_LEVEL_DFATAL ::base::level_t(4)
+#define LOG_LEVEL_FATAL ::base::level_t(5)
+#define LOG_LEVEL(name) LOG_LEVEL_##name
+#define VLOG_LEVEL(vlevel) ::base::level_t(-(vlevel))
+
+#define LOG(name) ::base::Logger(__FILE__, __LINE__, 1, LOG_LEVEL(name))
+#define VLOG(vlevel) ::base::Logger(__FILE__, __LINE__, 1, VLOG_LEVEL(vlevel))
+
+#define LOG_EVERY_N(name, n) \
+  ::base::Logger(__FILE__, __LINE__, (n), LOG_LEVEL(name))
+#define VLOG_EVERY_N(vlevel, n) \
+  ::base::Logger(__FILE__, __LINE__, (n), VLOG_LEVEL(vlevel))
+
+#define LOG_EXCEPTION(e) \
+  ::base::internal::log_exception(__FILE__, __LINE__, (e))
+
+#define CHECK(x) ::base::internal::log_check(__FILE__, __LINE__, #x, !!(x))
+#define CHECK_OK(x) ::base::internal::log_check_ok(__FILE__, __LINE__, #x, (x))
+
+#define CHECK_EQ(x, y)                                                         \
+  ::base::internal::log_check_op(__FILE__, __LINE__, ::base::internal::OpEQ(), \
+                                 #x, (x), #y, (y))
+#define CHECK_NE(x, y)                                                         \
+  ::base::internal::log_check_op(__FILE__, __LINE__, ::base::internal::OpNE(), \
+                                 #x, (x), #y, (y))
+#define CHECK_LT(x, y)                                                         \
+  ::base::internal::log_check_op(__FILE__, __LINE__, ::base::internal::OpLT(), \
+                                 #x, (x), #y, (y))
+#define CHECK_LE(x, y)                                                         \
+  ::base::internal::log_check_op(__FILE__, __LINE__, ::base::internal::OpLE(), \
+                                 #x, (x), #y, (y))
+#define CHECK_GT(x, y)                                                         \
+  ::base::internal::log_check_op(__FILE__, __LINE__, ::base::internal::OpGT(), \
+                                 #x, (x), #y, (y))
+#define CHECK_GE(x, y)                                                         \
+  ::base::internal::log_check_op(__FILE__, __LINE__, ::base::internal::OpGE(), \
+                                 #x, (x), #y, (y))
+
+#define CHECK_NOTNULL(ptr) \
+  ::base::internal::log_check_notnull(__FILE__, __LINE__, #ptr, (ptr))
+
+#ifdef NDEBUG
+
+#define DLOG(name) ::base::Logger(nullptr)
+#define DVLOG(vlevel) ::base::Logger(nullptr)
+#define DLOG_EVERY_N(name, n) ::base::Logger(nullptr)
+#define DVLOG_EVERY_N(vlevel, n) ::base::Logger(nullptr)
+
+#define DCHECK(x) ::base::Logger(nullptr)
+#define DCHECK_OK(x) ::base::Logger(nullptr)
+
+#define DCHECK_EQ(x, y) ::base::Logger(nullptr)
+#define DCHECK_NE(x, y) ::base::Logger(nullptr)
+#define DCHECK_LT(x, y) ::base::Logger(nullptr)
+#define DCHECK_GT(x, y) ::base::Logger(nullptr)
+#define DCHECK_LE(x, y) ::base::Logger(nullptr)
+#define DCHECK_GE(x, y) ::base::Logger(nullptr)
+
+#define DCHECK_NOTNULL(ptr) (ptr)
+
+#else
+
+#define DLOG(name) LOG(name)
+#define DVLOG(vlevel) VLOG(vlevel)
+#define DLOG_EVERY_N(name, n) LOG_EVERY_N(name, (n))
+#define DVLOG_EVERY_N(vlevel, n) VLOG_EVERY_N((vlevel), (n))
+
+#define DCHECK(x) CHECK(x)
+#define DCHECK_OK(x) CHECK_OK(x)
+
+#define DCHECK_EQ(x, y) CHECK_EQ((x), (y))
+#define DCHECK_NE(x, y) CHECK_NE((x), (y))
+#define DCHECK_LT(x, y) CHECK_LT((x), (y))
+#define DCHECK_GT(x, y) CHECK_GT((x), (y))
+#define DCHECK_LE(x, y) CHECK_LE((x), (y))
+#define DCHECK_GE(x, y) CHECK_GE((x), (y))
+
+#define DCHECK_NOTNULL(ptr) CHECK_NOTNULL(ptr)
+
+#endif
+
 namespace base {
 
 class Result;  // forward declaration
 
-using level_t = signed char;
+class level_t {
+ public:
+  constexpr level_t() noexcept : value_(0) {}
+  explicit constexpr level_t(signed char value) noexcept : value_(value) {}
+  constexpr level_t(const level_t&) noexcept = default;
+  constexpr level_t(level_t&&) noexcept = default;
+  level_t& operator=(const level_t&) noexcept = default;
+  level_t& operator=(level_t&&) noexcept = default;
+  explicit constexpr operator signed char() const noexcept { return value_; }
 
-#define LOG_LEVEL_INFO 1
-#define LOG_LEVEL_WARN 2
-#define LOG_LEVEL_ERROR 3
-#define LOG_LEVEL_DFATAL 4
-#define LOG_LEVEL_FATAL 5
-#define LOG_LEVEL(name) LOG_LEVEL_##name
-#define VLOG_LEVEL(vlevel) (-(vlevel))
+ private:
+  signed char value_;
+};
+
+inline constexpr bool operator==(level_t a, level_t b) noexcept {
+  return static_cast<signed char>(a) == static_cast<signed char>(b);
+}
+inline constexpr bool operator!=(level_t a, level_t b) noexcept {
+  return !(a == b);
+}
+inline constexpr bool operator<(level_t a, level_t b) noexcept {
+  return static_cast<signed char>(a) < static_cast<signed char>(b);
+}
+inline constexpr bool operator>(level_t a, level_t b) noexcept {
+  return (b < a);
+}
+inline constexpr bool operator<=(level_t a, level_t b) noexcept {
+  return !(b < a);
+}
+inline constexpr bool operator>=(level_t a, level_t b) noexcept {
+  return !(a < b);
+}
 
 // LogEntry represents a single log message.
 struct LogEntry {
@@ -37,8 +144,14 @@ struct LogEntry {
   level_t level;
   std::string message;
 
+  LogEntry() noexcept;
   LogEntry(const char* file, unsigned int line, level_t level,
            std::string message) noexcept;
+  LogEntry(const LogEntry& other);
+  LogEntry(LogEntry&& other) noexcept;
+  LogEntry& operator=(const LogEntry& other);
+  LogEntry& operator=(LogEntry&& other) noexcept;
+
   void append_to(std::string* out) const;
   std::string as_string() const;
 };
@@ -85,11 +198,13 @@ class Logger {
     return *this;
   }
 
+  LogEntry entry();
+
  private:
-  const char* const file_;
-  const unsigned int line_;
-  const unsigned int n_;
-  const level_t level_;
+  const char* file_;
+  unsigned int line_;
+  unsigned int n_;
+  level_t level_;
   std::unique_ptr<std::ostringstream> ss_;
 };
 
@@ -126,6 +241,8 @@ void log_set_gettid(GetTidFunc func);
 void log_set_gettimeofday(GetTimeOfDayFunc func);
 
 // }}}
+
+namespace internal {
 
 void log_exception(const char* file, unsigned int line, std::exception_ptr e);
 
@@ -217,76 +334,7 @@ std::shared_ptr<T> log_check_notnull(const char* file, unsigned int line,
   std::terminate();
 }
 
-Logger force_eval(bool);
-
-#define LOG(name) ::base::Logger(__FILE__, __LINE__, 1, LOG_LEVEL(name))
-#define VLOG(vlevel) ::base::Logger(__FILE__, __LINE__, 1, VLOG_LEVEL(vlevel))
-
-#define LOG_EVERY_N(name, n) \
-  ::base::Logger(__FILE__, __LINE__, (n), LOG_LEVEL(name))
-#define VLOG_EVERY_N(vlevel, n) \
-  ::base::Logger(__FILE__, __LINE__, (n), VLOG_LEVEL(vlevel))
-
-#define LOG_EXCEPTION(e) ::base::log_exception(__FILE__, __LINE__, (e))
-
-#define CHECK(x) ::base::log_check(__FILE__, __LINE__, #x, !!(x))
-#define CHECK_OK(x) ::base::log_check_ok(__FILE__, __LINE__, #x, (x))
-
-#define CHECK_EQ(x, y) \
-  ::base::log_check_op(__FILE__, __LINE__, ::base::OpEQ(), #x, (x), #y, (y))
-#define CHECK_NE(x, y) \
-  ::base::log_check_op(__FILE__, __LINE__, ::base::OpNE(), #x, (x), #y, (y))
-#define CHECK_LT(x, y) \
-  ::base::log_check_op(__FILE__, __LINE__, ::base::OpLT(), #x, (x), #y, (y))
-#define CHECK_LE(x, y) \
-  ::base::log_check_op(__FILE__, __LINE__, ::base::OpLE(), #x, (x), #y, (y))
-#define CHECK_GT(x, y) \
-  ::base::log_check_op(__FILE__, __LINE__, ::base::OpGT(), #x, (x), #y, (y))
-#define CHECK_GE(x, y) \
-  ::base::log_check_op(__FILE__, __LINE__, ::base::OpGE(), #x, (x), #y, (y))
-
-#define CHECK_NOTNULL(ptr) \
-  ::base::log_check_notnull(__FILE__, __LINE__, #ptr, (ptr))
-
-#ifdef NDEBUG
-
-#define DLOG(name) ::base::Logger(nullptr)
-#define DVLOG(vlevel) ::base::Logger(nullptr)
-#define DLOG_EVERY_N(name, n) ::base::Logger(nullptr)
-#define DVLOG_EVERY_N(vlevel, n) ::base::Logger(nullptr)
-
-#define DCHECK(x) ::base::force_eval(!!(x))
-#define DCHECK_OK(x) ::base::force_eval(!!(x))
-
-#define DCHECK_EQ(x, y) ::base::force_eval((x) == (y))
-#define DCHECK_NE(x, y) ::base::force_eval(!((x) == (y)))
-#define DCHECK_LT(x, y) ::base::force_eval((x) < (y))
-#define DCHECK_GT(x, y) ::base::force_eval((y) < (x))
-#define DCHECK_LE(x, y) ::base::force_eval(!((y) < (x)))
-#define DCHECK_GE(x, y) ::base::force_eval(!((x) < (y)))
-
-#define DCHECK_NOTNULL(ptr) (ptr)
-
-#else
-
-#define DLOG(name) LOG(name)
-#define DVLOG(vlevel) VLOG(vlevel)
-#define DLOG_EVERY_N(name, n) LOG_EVERY_N(name, (n))
-#define DVLOG_EVERY_N(vlevel, n) VLOG_EVERY_N((vlevel), (n))
-
-#define DCHECK(x) CHECK(x)
-#define DCHECK_OK(x) CHECK_OK(x)
-
-#define DCHECK_EQ(x, y) CHECK_EQ((x), (y))
-#define DCHECK_NE(x, y) CHECK_NE((x), (y))
-#define DCHECK_LT(x, y) CHECK_LT((x), (y))
-#define DCHECK_GT(x, y) CHECK_GT((x), (y))
-#define DCHECK_LE(x, y) CHECK_LE((x), (y))
-#define DCHECK_GE(x, y) CHECK_GE((x), (y))
-
-#define DCHECK_NOTNULL(ptr) CHECK_NOTNULL(ptr)
-
-#endif
+}  // namespace internal
 
 }  // namespace base
 
