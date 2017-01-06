@@ -173,9 +173,7 @@ class IP {
 
  public:
   // IP is default constructible.
-  IP() noexcept : len_(kEmptyLen), cls_() {
-    ::bzero(raw_, sizeof(raw_));
-  }
+  IP() noexcept : len_(kEmptyLen), cls_() { ::bzero(raw_, sizeof(raw_)); }
 
   // IP is copyable and moveable.
   IP(const IP&) noexcept = default;
@@ -312,9 +310,7 @@ class IP {
   }
 
   // Returns a pointer to this IP address's bytes.
-  const uint8_t* data() const noexcept {
-    return raw_ + 16 - len_;
-  }
+  const uint8_t* data() const noexcept { return raw_ + 16 - len_; }
 
   // Returns the number of bytes in this IP address: 0, 4, or 16.
   std::size_t size() const noexcept { return len_; }
@@ -471,9 +467,7 @@ inline bool operator==(CIDR a, CIDR b) noexcept {
   b.widen();
   return a.bits() == b.bits() && a.ip() == b.ip();
 }
-inline bool operator!=(CIDR a, CIDR b) noexcept {
-  return !(a == b);
-}
+inline bool operator!=(CIDR a, CIDR b) noexcept { return !(a == b); }
 inline bool operator<(CIDR a, CIDR b) noexcept {
   if (a.empty()) return !b.empty();
   if (b.empty()) return false;
@@ -481,15 +475,9 @@ inline bool operator<(CIDR a, CIDR b) noexcept {
   b.widen();
   return a.bits() < b.bits() || (a.bits() == b.bits() && a.ip() < b.ip());
 }
-inline bool operator>(CIDR a, CIDR b) noexcept {
-  return (b < a);
-}
-inline bool operator<=(CIDR a, CIDR b) noexcept {
-  return !(b < a);
-}
-inline bool operator>=(CIDR a, CIDR b) noexcept {
-  return !(a < b);
-}
+inline bool operator>(CIDR a, CIDR b) noexcept { return (b < a); }
+inline bool operator<=(CIDR a, CIDR b) noexcept { return !(b < a); }
+inline bool operator>=(CIDR a, CIDR b) noexcept { return !(a < b); }
 
 }  // namespace net
 

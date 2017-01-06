@@ -183,14 +183,13 @@ class FakeAddr : public AddrImpl {
 class FakeConn : public ConnImpl {
  public:
   FakeConn(FakeData* data, ProtocolType p, uint32_t lx, uint32_t rx,
-           io::Reader r, io::Writer w) noexcept
-      : data_(data),
-        p_(p),
-        lx_(lx),
-        rx_(rx),
-        r_(std::move(r)),
-        w_(std::move(w)),
-        closed_(false) {}
+           io::Reader r, io::Writer w) noexcept : data_(data),
+                                                  p_(p),
+                                                  lx_(lx),
+                                                  rx_(rx),
+                                                  r_(std::move(r)),
+                                                  w_(std::move(w)),
+                                                  closed_(false) {}
 
   ~FakeConn() noexcept {
     auto lock = base::acquire_lock(data_->mu);

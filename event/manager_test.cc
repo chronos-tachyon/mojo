@@ -315,7 +315,8 @@ static void TestManagerImplementation_TaskTimeouts(event::Manager m) {
   LOG(INFO) << "after release";
 }
 
-static void TestManagerImplementation(const event::ManagerOptions& mo, const char* name) {
+static void TestManagerImplementation(const event::ManagerOptions& mo,
+                                      const char* name) {
   event::Manager m;
 
   LOG(INFO) << "[new:" << name << "]";

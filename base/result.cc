@@ -35,7 +35,10 @@ struct Errno {
 
 static const std::map<int, Errno>& errno_map() {
   static const auto& ref = *new std::map<int, Errno>{
-#define MAP(x, y) {x, {#x, RC::y}}
+#define MAP(x, y)    \
+  {                  \
+    x, { #x, RC::y } \
+  }
       MAP(EPERM, PERMISSION_DENIED),
       MAP(ENOENT, NOT_FOUND),
       MAP(ESRCH, NOT_FOUND),
@@ -112,7 +115,8 @@ static const std::map<int, Errno>& errno_map() {
 
 static const std::map<RC, std::string>& name_map() {
   static const auto& ref = *new std::map<RC, std::string>{
-#define MAP(x) {RC::x, #x}
+#define MAP(x) \
+  { RC::x, #x }
       MAP(OK),
       MAP(UNKNOWN),
       MAP(INTERNAL),
@@ -139,8 +143,8 @@ static const std::map<RC, std::string>& name_map() {
 
 static const std::map<RC, RepPtr>& memo_map() {
   static const auto& ref = *new std::map<RC, RepPtr>{
-#define MAP(x) {RC::x, \
-                std::make_shared<const Rep>(RC::x, -1, std::string())}
+#define MAP(x) \
+  { RC::x, std::make_shared<const Rep>(RC::x, -1, std::string()) }
       MAP(UNKNOWN),
       MAP(INTERNAL),
       MAP(CANCELLED),
@@ -205,7 +209,8 @@ void Result::append_to(std::string* out) const {
     int err_no = rep_->err_no;
     const auto& message = rep_->message;
 
-    concat_to(out, resultcode_name(code), '(', static_cast<uint16_t>(code), ')');
+    concat_to(out, resultcode_name(code), '(', static_cast<uint16_t>(code),
+              ')');
     if (!message.empty()) {
       concat_to(out, ": ", message);
     }

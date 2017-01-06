@@ -1,7 +1,7 @@
 #include <string>
 
-#include "gtest/gtest.h"
 #include "base/options.h"
+#include "gtest/gtest.h"
 
 struct A : public base::OptionsType {
   int foo;
@@ -16,17 +16,11 @@ struct B : public base::OptionsType {
   B() noexcept : baz("23") {}
 };
 
-int get_foo(const A& a) {
-  return a.foo;
-}
+int get_foo(const A& a) { return a.foo; }
 
-bool get_bar(const A& a) {
-  return a.bar;
-}
+bool get_bar(const A& a) { return a.bar; }
 
-std::string get_baz(const B& b) {
-  return b.baz;
-}
+std::string get_baz(const B& b) { return b.baz; }
 
 TEST(Options, Basics) {
   base::Options o;

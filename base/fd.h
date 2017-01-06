@@ -93,9 +93,7 @@ struct SocketPair {
 };
 
 // Embeds the given file descriptor into a new FDHolder.
-inline FD wrapfd(int fdnum) {
-  return std::make_shared<FDHolder>(fdnum);
-}
+inline FD wrapfd(int fdnum) { return std::make_shared<FDHolder>(fdnum); }
 
 Result make_pipe(Pipe* out);
 Result make_socketpair(SocketPair* out, int domain, int type, int protocol);

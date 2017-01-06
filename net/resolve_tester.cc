@@ -1,7 +1,7 @@
 #include <cstdio>
 
-#include "base/result.h"
 #include "base/logging.h"
+#include "base/result.h"
 #include "event/manager.h"
 #include "net/net.h"
 
@@ -22,7 +22,8 @@ int main(int argc, char** argv) {
 
   fprintf(stdout, "%zd result(s)\n", out.size());
   for (const auto& addr : out) {
-    fprintf(stdout, "\t%s\t%s\n", addr.protocol().c_str(), addr.address().c_str());
+    fprintf(stdout, "\t%s\t%s\n", addr.protocol().c_str(),
+            addr.address().c_str());
   }
   return 0;
 }

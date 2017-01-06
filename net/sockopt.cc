@@ -140,7 +140,8 @@ static const OptnameMapping kSocketOptnames[] = {
 
 }  // anonymous namespace
 
-base::Result SockOpt::get(base::FD fd, void* optval, unsigned int* optlen) const {
+base::Result SockOpt::get(base::FD fd, void* optval,
+                          unsigned int* optlen) const {
   CHECK_NOTNULL(fd);
   auto pair = fd->acquire_fd();
   int rc = ::getsockopt(pair.first, level_, optname_, optval, optlen);

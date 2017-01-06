@@ -33,8 +33,8 @@
 
 using RC = base::ResultCode;
 
-static constexpr std::size_t kSendfileMax = 4U << 20;            // 4 MiB
-static constexpr std::size_t kSpliceMax = 4U << 20;              // 4 MiB
+static constexpr std::size_t kSendfileMax = 4U << 20;  // 4 MiB
+static constexpr std::size_t kSpliceMax = 4U << 20;    // 4 MiB
 
 static void propagate_result(event::Task* dst, const event::Task* src) {
   try {

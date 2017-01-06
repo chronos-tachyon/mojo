@@ -10,8 +10,8 @@
 #include "base/result_testing.h"
 #include "net/addr.h"
 #include "net/registry.h"
-#include "net/unix.h"
 #include "net/testing.h"
+#include "net/unix.h"
 
 using P = net::ProtocolType;
 
@@ -37,7 +37,8 @@ TEST(UnixProtocol, InterpretAndStringify) {
   sun.sun_family = AF_UNIX;
 
   net::Addr addr;
-  base::Result r = p->interpret(&addr, P::stream, RICSA(&sun), sizeof(sa_family_t));
+  base::Result r =
+      p->interpret(&addr, P::stream, RICSA(&sun), sizeof(sa_family_t));
   EXPECT_OK(r);
   if (r) {
     EXPECT_EQ("unix", addr.protocol());

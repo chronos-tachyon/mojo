@@ -152,13 +152,12 @@ struct LogEntry {
 
   LogEntry(const LogEntry& other) = default;
 
-  LogEntry(LogEntry&& other) noexcept
-    : time(other.time),
-      tid(other.tid),
-      file(other.file),
-      line(other.line),
-      level(other.level),
-      message(std::move(other.message)) {
+  LogEntry(LogEntry&& other) noexcept : time(other.time),
+                                        tid(other.tid),
+                                        file(other.file),
+                                        line(other.line),
+                                        level(other.level),
+                                        message(std::move(other.message)) {
     other.clear();
   }
 

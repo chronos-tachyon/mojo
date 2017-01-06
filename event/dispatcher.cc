@@ -222,8 +222,9 @@ struct thread_monitor {
   std::size_t* const current;
   bool is_live;
 
-  explicit thread_monitor(std::mutex* mu, std::condition_variable* cv, std::size_t* mn,
-                   std::size_t* mx, std::size_t* d, std::size_t* c) noexcept
+  explicit thread_monitor(std::mutex* mu, std::condition_variable* cv,
+                          std::size_t* mn, std::size_t* mx, std::size_t* d,
+                          std::size_t* c) noexcept
       : mutex(DCHECK_NOTNULL(mu)),
         condvar(DCHECK_NOTNULL(cv)),
         min(DCHECK_NOTNULL(mn)),

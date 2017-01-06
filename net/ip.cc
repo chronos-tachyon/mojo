@@ -268,7 +268,8 @@ static std::size_t cidr_max_bits(unsigned int iplen) {
   }
 }
 
-static void cidr_build_mask(uint8_t* ptr, unsigned int bits, unsigned int iplen) {
+static void cidr_build_mask(uint8_t* ptr, unsigned int bits,
+                            unsigned int iplen) {
   DCHECK_NOTNULL(ptr);
   DCHECK_LE(iplen, 16U);
   DCHECK_LE(bits, cidr_max_bits(iplen));
@@ -346,9 +347,7 @@ CIDR::CIDR(IP ip, unsigned int bits) noexcept : ip_(ip), bits_(bits) {
   }
 }
 
-IP CIDR::first() const noexcept {
-  return ip_;
-}
+IP CIDR::first() const noexcept { return ip_; }
 
 IP CIDR::last() const noexcept {
   IP copy(ip_);

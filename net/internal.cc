@@ -31,4 +31,3 @@ std::size_t mix(std::size_t a, std::size_t b) noexcept {
 
 }  // namespace internal
 }  // namespace net
-
