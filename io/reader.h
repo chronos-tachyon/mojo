@@ -361,6 +361,8 @@ Reader fdreader(base::FD fd);
 // Returns a Reader that concatenates multiple streams into one.
 Reader multireader(std::vector<Reader> readers);
 
+base::Result reader_closed();
+
 }  // namespace io
 
 #endif  // IO_READER_H

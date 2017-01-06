@@ -301,6 +301,9 @@ Writer fullwriter();
 // Returns a Writer that writes bytes to a file descriptor.
 Writer fdwriter(base::FD fd);
 
+base::Result writer_closed();
+base::Result writer_full();
+
 }  // namespace io
 
 #endif  // IO_WRITER_H

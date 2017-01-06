@@ -17,16 +17,6 @@
 #include "base/mutex.h"
 #include "io/reader.h"
 
-static constexpr std::size_t kDefaultIdealBlockSize = 1U << 20;  // 1 MiB
-
-static base::Result writer_closed() {
-  return base::Result::failed_precondition("io::Writer is closed");
-}
-
-static base::Result writer_full() {
-  return base::Result::from_errno(ENOSPC, "io::Writer is full");
-}
-
 namespace io {
 
 bool WriterImpl::prologue(event::Task* task, std::size_t* n, const char* ptr,
@@ -571,6 +561,14 @@ Writer fullwriter() { return Writer(std::make_shared<FullWriter>()); }
 
 Writer fdwriter(base::FD fd) {
   return Writer(std::make_shared<FDWriter>(std::move(fd)));
+}
+
+base::Result writer_closed() {
+  return base::Result::from_errno(EBADF, "io::Writer is closed");
+}
+
+base::Result writer_full() {
+  return base::Result::from_errno(ENOSPC, "io::Writer is full");
 }
 
 }  // namespace io

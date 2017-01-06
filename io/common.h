@@ -13,6 +13,8 @@
 
 namespace io {
 
+constexpr std::size_t kDefaultIdealBlockSize = 1U << 20;  // 1 MiB
+
 using CloseFn = std::function<void(event::Task*, const io::Options& opts)>;
 using SyncCloseFn = std::function<base::Result(const io::Options& opts)>;
 

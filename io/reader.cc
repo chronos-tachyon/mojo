@@ -33,13 +33,8 @@
 
 using RC = base::ResultCode;
 
-static constexpr std::size_t kDefaultIdealBlockSize = 1U << 20;  // 1 MiB
 static constexpr std::size_t kSendfileMax = 4U << 20;            // 4 MiB
 static constexpr std::size_t kSpliceMax = 4U << 20;              // 4 MiB
-
-static base::Result reader_closed() {
-  return base::Result::failed_precondition("io::Reader is closed");
-}
 
 static void propagate_result(event::Task* dst, const event::Task* src) {
   try {
@@ -1092,6 +1087,10 @@ Reader fdreader(base::FD fd) {
 
 Reader multireader(std::vector<Reader> readers) {
   return Reader(std::make_shared<MultiReader>(std::move(readers)));
+}
+
+base::Result reader_closed() {
+  return base::Result::from_errno(EBADF, "io::Reader is closed");
 }
 
 }  // namespace io
