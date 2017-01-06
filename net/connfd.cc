@@ -36,16 +36,16 @@ class FDConnReader : public io::ReaderImpl {
   }
 
   void read(event::Task* task, char* out, std::size_t* n, std::size_t min,
-            std::size_t max, const io::Options& opts) override {
+            std::size_t max, const base::Options& opts) override {
     r_.read(task, out, n, min, max, opts);
   }
 
   void write_to(event::Task* task, std::size_t* n, std::size_t max,
-                const io::Writer& w, const io::Options& opts) override {
+                const io::Writer& w, const base::Options& opts) override {
     r_.write_to(task, n, max, w, opts);
   }
 
-  void close(event::Task* task, const io::Options& opts) override {
+  void close(event::Task* task, const base::Options& opts) override {
     if (!prologue(task)) return;
     auto fd = internal_readerfd();
     task->finish(base::shutdown(fd, SHUT_RD));
@@ -68,16 +68,16 @@ class FDConnWriter : public io::WriterImpl {
   }
 
   void write(event::Task* task, std::size_t* n, const char* ptr,
-             std::size_t len, const io::Options& opts) override {
+             std::size_t len, const base::Options& opts) override {
     w_.write(task, n, ptr, len, opts);
   }
 
   void read_from(event::Task* task, std::size_t* n, std::size_t max,
-                 const io::Reader& r, const io::Options& opts) override {
+                 const io::Reader& r, const base::Options& opts) override {
     w_.read_from(task, n, max, r, opts);
   }
 
-  void close(event::Task* task, const io::Options& opts) override {
+  void close(event::Task* task, const base::Options& opts) override {
     if (!prologue(task)) return;
     auto fd = internal_writerfd();
     task->finish(base::shutdown(fd, SHUT_WR));
@@ -112,7 +112,7 @@ class FDConn : public ConnImpl {
   io::Reader reader() override { return r_; }
   io::Writer writer() override { return w_; }
 
-  void close(event::Task* task, const io::Options& opts) override {
+  void close(event::Task* task, const base::Options& opts) override {
     VLOG(6) << "net::FDConn::close";
     base::Result r = fd()->close();
     if (task->start()) task->finish(std::move(r));
@@ -120,13 +120,13 @@ class FDConn : public ConnImpl {
 
   void get_option(event::Task* task, SockOpt opt, void* optval,
                   unsigned int* optlen,
-                  const io::Options& opts) const override {
+                  const base::Options& opts) const override {
     if (!task->start()) return;
     task->finish(opt.get(fd(), optval, optlen));
   }
 
   void set_option(event::Task* task, SockOpt opt, const void* optval,
-                  unsigned int optlen, const io::Options& opts) override {
+                  unsigned int optlen, const base::Options& opts) override {
     if (!task->start()) return;
     task->finish(opt.set(fd(), optval, optlen));
   }
@@ -164,13 +164,14 @@ class FDListenConn : public ListenConnImpl {
   }
 
   Addr listen_addr() const override { return aa_; }
-  void start(event::Task* task, const io::Options& opts) override;
-  void stop(event::Task* task, const io::Options& opts) override;
-  void close(event::Task* task, const io::Options& opts) override;
+  void start(event::Task* task, const base::Options& opts) override;
+  void stop(event::Task* task, const base::Options& opts) override;
+  void close(event::Task* task, const base::Options& opts) override;
   void get_option(event::Task* task, SockOpt opt, void* optval,
-                  unsigned int* optlen, const io::Options& opts) const override;
+                  unsigned int* optlen,
+                  const base::Options& opts) const override;
   void set_option(event::Task* task, SockOpt opt, const void* optval,
-                  unsigned int optlen, const io::Options& opts) override;
+                  unsigned int optlen, const base::Options& opts) override;
 
  private:
   base::Result handle(event::Data) const;
@@ -185,7 +186,7 @@ class FDListenConn : public ListenConnImpl {
   bool accepting_;
 };
 
-void FDListenConn::start(event::Task* task, const io::Options& opts) {
+void FDListenConn::start(event::Task* task, const base::Options& opts) {
   VLOG(6) << "net::FDListenConn::start";
   auto lock = base::acquire_lock(mu_);
   accepting_ = true;
@@ -195,7 +196,7 @@ void FDListenConn::start(event::Task* task, const io::Options& opts) {
   if (task->start()) task->finish(std::move(r));
 }
 
-void FDListenConn::stop(event::Task* task, const io::Options& opts) {
+void FDListenConn::stop(event::Task* task, const base::Options& opts) {
   VLOG(6) << "net::FDListenConn::stop";
   auto lock = base::acquire_lock(mu_);
   accepting_ = false;
@@ -204,7 +205,7 @@ void FDListenConn::stop(event::Task* task, const io::Options& opts) {
   if (task->start()) task->finish(std::move(r));
 }
 
-void FDListenConn::close(event::Task* task, const io::Options& opts) {
+void FDListenConn::close(event::Task* task, const base::Options& opts) {
   VLOG(6) << "net::FDListenConn::close";
   auto lock = base::acquire_lock(mu_);
   accepting_ = false;
@@ -216,14 +217,14 @@ void FDListenConn::close(event::Task* task, const io::Options& opts) {
 
 void FDListenConn::get_option(event::Task* task, SockOpt opt, void* optval,
                               unsigned int* optlen,
-                              const io::Options& opts) const {
+                              const base::Options& opts) const {
   if (!task->start()) return;
   task->finish(opt.get(fd_, optval, optlen));
 }
 
 void FDListenConn::set_option(event::Task* task, SockOpt opt,
                               const void* optval, unsigned int optlen,
-                              const io::Options& opts) {
+                              const base::Options& opts) {
   if (!task->start()) return;
   task->finish(opt.set(fd_, optval, optlen));
 }
@@ -384,7 +385,7 @@ struct DialHelper {
 }  // anonymous namespace
 
 void FDProtocol::listen(event::Task* task, ListenConn* out, const Addr& bind,
-                        const Options& opts, AcceptFn fn) {
+                        const base::Options& opts, AcceptFn fn) {
   CHECK(task);
   CHECK(out);
   CHECK(bind);
@@ -404,7 +405,8 @@ void FDProtocol::listen(event::Task* task, ListenConn* out, const Addr& bind,
   }
   base::FD fd = base::wrapfd(fdnum);
 
-  if (opts.reuseaddr()) {
+  const auto ra = opts.get<net::Options>().reuseaddr;
+  if (ra) {
     int x = 1;
     base::Result r = sockopt_reuseaddr.set(fd, &x, sizeof(x));
     r.expect_ok(__FILE__, __LINE__);
@@ -412,7 +414,8 @@ void FDProtocol::listen(event::Task* task, ListenConn* out, const Addr& bind,
 
   bool apply = false;
   int value;
-  switch (opts.duallisten()) {
+  const auto dl = opts.get<net::Options>().duallisten;
+  switch (dl) {
     case DualListen::system_default:
       break;
 
@@ -428,7 +431,7 @@ void FDProtocol::listen(event::Task* task, ListenConn* out, const Addr& bind,
 
     default:
       LOG(DFATAL) << "BUG! Unknown DualListen value: "
-                  << static_cast<uint8_t>(opts.duallisten());
+                  << static_cast<uint8_t>(dl);
   }
   if (apply) {
     base::Result r = sockopt_ipv6_v6only.set(fd, &value, sizeof(value));
@@ -473,7 +476,7 @@ void FDProtocol::listen(event::Task* task, ListenConn* out, const Addr& bind,
 }
 
 void FDProtocol::dial(event::Task* task, Conn* out, const Addr& peer,
-                      const Addr& bind, const Options& opts) {
+                      const Addr& bind, const base::Options& opts) {
   CHECK(task);
   CHECK(out);
   CHECK(peer);
@@ -517,7 +520,7 @@ redo:
   if (err_no == EINTR) goto redo;
   base::Result r;
   if (err_no == EINPROGRESS) {
-    event::Manager m = opts.io().manager();
+    event::Manager m = io::get_manager(opts);
     r = m.fd(&h->evt, fd, event::Set::writable_bit(), event::handler(closure));
     if (r) return;
   } else {
@@ -552,16 +555,16 @@ base::Result fdconn(Conn* out, Addr la, Addr ra, base::FD fd) {
 }
 
 base::Result fdlistenconn(ListenConn* out, std::shared_ptr<Protocol> pr,
-                          Addr aa, base::FD fd, net::Options opts,
+                          Addr aa, base::FD fd, const base::Options& opts,
                           AcceptFn fn) {
   CHECK(out);
   CHECK(pr);
   CHECK(aa);
   CHECK(fd);
   CHECK(fn);
-  auto ptr = std::make_shared<FDListenConn>(opts.io().manager(), std::move(pr),
-                                            std::move(aa), std::move(fd),
-                                            std::move(fn));
+  auto ptr = std::make_shared<FDListenConn>(io::get_manager(opts),
+                                            std::move(pr), std::move(aa),
+                                            std::move(fd), std::move(fn));
   auto r = ptr->initialize();
   if (r) {
     *out = ListenConn(std::move(ptr));

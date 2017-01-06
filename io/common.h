@@ -15,14 +15,14 @@ namespace io {
 
 constexpr std::size_t kDefaultIdealBlockSize = 1U << 20;  // 1 MiB
 
-using CloseFn = std::function<void(event::Task*, const io::Options& opts)>;
-using SyncCloseFn = std::function<base::Result(const io::Options& opts)>;
+using CloseFn = std::function<void(event::Task*, const base::Options& opts)>;
+using SyncCloseFn = std::function<base::Result(const base::Options& opts)>;
 
 struct NoOpClose {
-  void operator()(event::Task* task, const io::Options& opts) const {
+  void operator()(event::Task* task, const base::Options& opts) const {
     if (task->start()) task->finish_ok();
   }
-  base::Result operator()(const io::Options& opts) const {
+  base::Result operator()(const base::Options& opts) const {
     return base::Result();
   }
 };

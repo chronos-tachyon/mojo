@@ -88,7 +88,7 @@ class MockReader : public ReaderImpl {
   }
 
   void read(event::Task* task, char* out, std::size_t* n, std::size_t min,
-            std::size_t max, const Options& opts) noexcept override {
+            std::size_t max, const base::Options& opts) noexcept override {
     if (!prologue(task, out, n, min, max)) return;
     auto mock = next();
     if (mock.verb != Mock::Verb::read)
@@ -102,7 +102,7 @@ class MockReader : public ReaderImpl {
   }
 
   void write_to(event::Task* task, std::size_t* n, std::size_t max,
-                const Writer& w, const Options& opts) noexcept override {
+                const Writer& w, const base::Options& opts) noexcept override {
     if (!prologue(task, n, max, w)) return;
     auto mock = next();
     if (mock.verb != Mock::Verb::write_to)
@@ -116,7 +116,7 @@ class MockReader : public ReaderImpl {
     task->finish(mock.result);
   }
 
-  void close(event::Task* task, const Options& opts) noexcept override {
+  void close(event::Task* task, const base::Options& opts) noexcept override {
     if (!prologue(task)) return;
     auto mock = next();
     if (mock.verb != Mock::Verb::close)

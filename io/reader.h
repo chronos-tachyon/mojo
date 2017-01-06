@@ -34,7 +34,7 @@ class ReaderImpl {
   //
   //    void read(event::Task* task, char* out, std::size_t* n,
   //              std::size_t min, std::size_t max,
-  //              const io::Options& opts) override {
+  //              const base::Options& opts) override {
   //      if (!prologue(task, out, n, min, max)) return;
   //      ...;  // actual implementation
   //      task->finish(result);
@@ -49,7 +49,7 @@ class ReaderImpl {
   //
   //    void write_to(event::Task* task, std::size_t* n,
   //                  std::size_t max, const io::Writer& w,
-  //                  const io::Options& opts) override {
+  //                  const base::Options& opts) override {
   //      if (!prologue(task, n, max, w)) return;
   //      ...;  // actual implementation
   //      task->finish(result);
@@ -63,7 +63,7 @@ class ReaderImpl {
   // Typical usage:
   //
   //    void close(event::Task* task,
-  //               const io::Options& opts) override {
+  //               const base::Options& opts) override {
   //      if (!prologue(task)) return;
   //      ...;  // actual implementation
   //      task->finish(result);
@@ -113,7 +113,8 @@ class ReaderImpl {
   // THREAD SAFETY: Implementations of this function MUST be thread-safe.
   //
   virtual void read(event::Task* task, char* out, std::size_t* n,
-                    std::size_t min, std::size_t max, const Options& opts) = 0;
+                    std::size_t min, std::size_t max,
+                    const base::Options& opts) = 0;
 
   // OPTIONAL. Copies up to |max| bytes of this Reader's data into |w|.
   // - NEVER copies more than |max| bytes
@@ -132,7 +133,7 @@ class ReaderImpl {
   // THREAD SAFETY: Implementations of this function MUST be thread-safe.
   //
   virtual void write_to(event::Task* task, std::size_t* n, std::size_t max,
-                        const Writer& w, const Options& opts);
+                        const Writer& w, const base::Options& opts);
 
   // Closes this Reader, potentially freeing resources.
   // - May be synchronous: implementations may block until the call is complete
@@ -142,7 +143,7 @@ class ReaderImpl {
   //
   // THREAD SAFETY: Implementations of this function MUST be thread-safe.
   //
-  virtual void close(event::Task* task, const Options& opts) = 0;
+  virtual void close(event::Task* task, const base::Options& opts) = 0;
 
   // FOR INTERNAL USE ONLY.  DO NOT CALL DIRECTLY.
   virtual base::FD internal_readerfd() const { return nullptr; }
@@ -209,43 +210,45 @@ class Reader {
   // Reads |min| to |max| bytes into the buffer at |out|, updating |n|.
   // - See |ReaderImpl::read| for details of the API contract.
   void read(event::Task* task, char* out, std::size_t* n, std::size_t min,
-            std::size_t max, const Options& opts = default_options()) const {
+            std::size_t max,
+            const base::Options& opts = base::default_options()) const {
     assert_valid();
     ptr_->read(task, out, n, min, max, opts);
   }
 
   // Like |read| above, but reads into a std::string.
   void read(event::Task* task, std::string* out, std::size_t min,
-            std::size_t max, const Options& opts = default_options()) const;
+            std::size_t max,
+            const base::Options& opts = base::default_options()) const;
 
   // Synchronous versions of the functions above.
   base::Result read(char* out, std::size_t* n, std::size_t min, std::size_t max,
-                    const Options& opts = default_options()) const;
+                    const base::Options& opts = base::default_options()) const;
   base::Result read(std::string* out, std::size_t min, std::size_t max,
-                    const Options& opts = default_options()) const;
+                    const base::Options& opts = base::default_options()) const;
 
   // }}}
   // Read up to N bytes {{{
 
   // Reads up to |len| bytes into the buffer at |out|, updating |n|.
   void read(event::Task* task, char* out, std::size_t* n, std::size_t len,
-            const Options& opts = default_options()) const {
+            const base::Options& opts = base::default_options()) const {
     read(task, out, n, computed_min(len), len, opts);
   }
 
   // Like |read| above, but reads into a std::string.
   void read(event::Task* task, std::string* out, std::size_t len,
-            const Options& opts = default_options()) const {
+            const base::Options& opts = base::default_options()) const {
     read(task, out, computed_min(len), len, opts);
   }
 
   // Synchronous versions of the functions above.
   base::Result read(char* out, std::size_t* n, std::size_t len,
-                    const Options& opts = default_options()) const {
+                    const base::Options& opts = base::default_options()) const {
     return read(out, n, computed_min(len), len, opts);
   }
   base::Result read(std::string* out, std::size_t len,
-                    const Options& opts = default_options()) const {
+                    const base::Options& opts = base::default_options()) const {
     return read(out, computed_min(len), len, opts);
   }
 
@@ -255,23 +258,25 @@ class Reader {
   // Reads exactly |len| bytes into the buffer at |out|, updating |*n|.
   void read_exactly(event::Task* task, char* out, std::size_t* n,
                     std::size_t len,
-                    const Options& opts = default_options()) const {
+                    const base::Options& opts = base::default_options()) const {
     read(task, out, n, len, len, opts);
   }
 
   // Like |read_exactly| above, but reads into a std::string.
   void read_exactly(event::Task* task, std::string* out, std::size_t len,
-                    const Options& opts = default_options()) const {
+                    const base::Options& opts = base::default_options()) const {
     read(task, out, len, len, opts);
   }
 
   // Synchronous versions of the functions above.
-  base::Result read_exactly(char* out, std::size_t* n, std::size_t len,
-                            const Options& opts = default_options()) const {
+  base::Result read_exactly(
+      char* out, std::size_t* n, std::size_t len,
+      const base::Options& opts = base::default_options()) const {
     return read(out, n, len, len, opts);
   }
-  base::Result read_exactly(std::string* out, std::size_t len,
-                            const Options& opts = default_options()) const {
+  base::Result read_exactly(
+      std::string* out, std::size_t len,
+      const base::Options& opts = base::default_options()) const {
     return read(out, len, len, opts);
   }
 
@@ -283,26 +288,28 @@ class Reader {
   //       See io::copy in io/util.h for a user-friendly interface.
   void write_to(event::Task* task, std::size_t* n, std::size_t max,
                 const Writer& w,
-                const Options& opts = default_options()) const {
+                const base::Options& opts = base::default_options()) const {
     assert_valid();
     ptr_->write_to(task, n, max, w, opts);
   }
 
   // Synchronous version of |write_to| above.
-  base::Result write_to(std::size_t* n, std::size_t max, const Writer& w,
-                        const Options& opts = default_options()) const;
+  base::Result write_to(
+      std::size_t* n, std::size_t max, const Writer& w,
+      const base::Options& opts = base::default_options()) const;
 
   // }}}
   // Close {{{
 
   // Closes this Reader, potentially freeing resources.
-  void close(event::Task* task, const Options& opts = default_options()) const {
+  void close(event::Task* task,
+             const base::Options& opts = base::default_options()) const {
     assert_valid();
     ptr_->close(task, opts);
   }
 
   // Synchronous version of |close| above.
-  base::Result close(const Options& opts = default_options()) const;
+  base::Result close(const base::Options& opts = base::default_options()) const;
 
   // }}}
 
@@ -320,9 +327,9 @@ inline bool operator!=(const Reader& a, const Reader& b) noexcept {
 
 using ReadFn =
     std::function<void(event::Task*, char*, std::size_t*, std::size_t,
-                       std::size_t, const Options& opts)>;
+                       std::size_t, const base::Options& opts)>;
 using SyncReadFn = std::function<base::Result(
-    char*, std::size_t*, std::size_t, std::size_t, const Options& opts)>;
+    char*, std::size_t*, std::size_t, std::size_t, const base::Options& opts)>;
 
 // Returns a Reader that wraps the given functor(s).
 Reader reader(ReadFn rfn, CloseFn cfn);

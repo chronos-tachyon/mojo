@@ -43,7 +43,7 @@ bool WriterImpl::prologue(event::Task* task) {
 }
 
 void WriterImpl::read_from(event::Task* task, std::size_t* n, std::size_t max,
-                           const Reader& r, const Options& opts) {
+                           const Reader& r, const base::Options& opts) {
   if (prologue(task, n, max, r)) task->finish(base::Result::not_implemented());
 }
 
@@ -54,33 +54,33 @@ void Writer::assert_valid() const {
 }
 
 base::Result Writer::write(std::size_t* n, const char* ptr, std::size_t len,
-                           const Options& opts) const {
+                           const base::Options& opts) const {
   event::Task task;
   write(&task, n, ptr, len, opts);
-  event::wait(opts.manager(), &task);
+  event::wait(get_manager(opts), &task);
   return task.result();
 }
 
 base::Result Writer::write(std::size_t* n, const std::string& str,
-                           const Options& opts) const {
+                           const base::Options& opts) const {
   event::Task task;
   write(&task, n, str.data(), str.size(), opts);
-  event::wait(opts.manager(), &task);
+  event::wait(get_manager(opts), &task);
   return task.result();
 }
 
 base::Result Writer::read_from(std::size_t* n, std::size_t max, const Reader& r,
-                               const Options& opts) const {
+                               const base::Options& opts) const {
   event::Task task;
   read_from(&task, n, max, r, opts);
-  event::wait(opts.manager(), &task);
+  event::wait(get_manager(opts), &task);
   return task.result();
 }
 
-base::Result Writer::close(const Options& opts) const {
+base::Result Writer::close(const base::Options& opts) const {
   event::Task task;
   close(&task, opts);
-  event::wait(opts.manager(), &task);
+  event::wait(get_manager(opts), &task);
   return task.result();
 }
 
@@ -95,11 +95,11 @@ class FunctionWriter : public WriterImpl {
   }
 
   void write(event::Task* task, std::size_t* n, const char* ptr,
-             std::size_t len, const Options& opts) override {
+             std::size_t len, const base::Options& opts) override {
     wfn_(task, n, ptr, len, opts);
   }
 
-  void close(event::Task* task, const Options& opts) override {
+  void close(event::Task* task, const base::Options& opts) override {
     cfn_(task, opts);
   }
 
@@ -119,11 +119,11 @@ class SyncFunctionWriter : public WriterImpl {
   }
 
   void write(event::Task* task, std::size_t* n, const char* ptr,
-             std::size_t len, const Options& opts) override {
+             std::size_t len, const base::Options& opts) override {
     if (prologue(task, n, ptr, len)) task->finish(wfn_(n, ptr, len, opts));
   }
 
-  void close(event::Task* task, const Options& opts) override {
+  void close(event::Task* task, const base::Options& opts) override {
     if (prologue(task)) task->finish(cfn_(opts));
   }
 
@@ -143,16 +143,16 @@ class CloseIgnoringWriter : public WriterImpl {
   }
 
   void write(event::Task* task, std::size_t* n, const char* ptr,
-             std::size_t len, const Options& opts) override {
+             std::size_t len, const base::Options& opts) override {
     w_.write(task, n, ptr, len, opts);
   }
 
   void read_from(event::Task* task, std::size_t* n, std::size_t max,
-                 const Reader& r, const Options& opts) override {
+                 const Reader& r, const base::Options& opts) override {
     w_.read_from(task, n, max, r, opts);
   }
 
-  void close(event::Task* task, const Options& opts) override {
+  void close(event::Task* task, const base::Options& opts) override {
     if (prologue(task)) task->finish_ok();
   }
 
@@ -173,7 +173,7 @@ class StringWriter : public WriterImpl {
   }
 
   void write(event::Task* task, std::size_t* n, const char* ptr,
-             std::size_t len, const Options& opts) override {
+             std::size_t len, const base::Options& opts) override {
     if (!prologue(task, n, ptr, len)) return;
     auto lock = base::acquire_lock(mu_);
     if (closed_) {
@@ -186,7 +186,7 @@ class StringWriter : public WriterImpl {
     task->finish_ok();
   }
 
-  void close(event::Task* task, const Options& opts) override {
+  void close(event::Task* task, const base::Options& opts) override {
     auto lock = base::acquire_lock(mu_);
     bool was = closed_;
     closed_ = true;
@@ -218,7 +218,7 @@ class BufferWriter : public WriterImpl {
   }
 
   void write(event::Task* task, std::size_t* n, const char* ptr,
-             std::size_t len, const Options& opts) override {
+             std::size_t len, const base::Options& opts) override {
     if (!prologue(task, n, ptr, len)) return;
     auto lock = base::acquire_lock(mu_);
     if (closed_) {
@@ -239,7 +239,7 @@ class BufferWriter : public WriterImpl {
   }
 
   void read_from(event::Task* task, std::size_t* n, std::size_t max,
-                 const Reader& r, const Options& opts) override {
+                 const Reader& r, const base::Options& opts) override {
     *n = 0;
 
     auto lock = base::acquire_lock(mu_);
@@ -262,7 +262,7 @@ class BufferWriter : public WriterImpl {
     task->on_finished(event::callback(closure));
   }
 
-  void close(event::Task* task, const Options& opts) override {
+  void close(event::Task* task, const base::Options& opts) override {
     auto lock = base::acquire_lock(mu_);
     bool was = closed_;
     closed_ = true;
@@ -293,14 +293,14 @@ class DiscardWriter : public WriterImpl {
   }
 
   void write(event::Task* task, std::size_t* n, const char* ptr,
-             std::size_t len, const Options& opts) override {
+             std::size_t len, const base::Options& opts) override {
     if (!prologue(task, n, ptr, len)) return;
     if (total_) *total_ += len;
     *n = len;
     task->finish_ok();
   }
 
-  void close(event::Task* task, const Options& opts) override {
+  void close(event::Task* task, const base::Options& opts) override {
     if (prologue(task)) task->finish_ok();
   }
 
@@ -315,7 +315,7 @@ class FullWriter : public WriterImpl {
   std::size_t ideal_block_size() const noexcept override { return 64; }
 
   void write(event::Task* task, std::size_t* n, const char* ptr,
-             std::size_t len, const Options& opts) override {
+             std::size_t len, const base::Options& opts) override {
     if (!prologue(task, n, ptr, len)) return;
     *n = 0;
     base::Result r;
@@ -323,7 +323,7 @@ class FullWriter : public WriterImpl {
     task->finish(std::move(r));
   }
 
-  void close(event::Task* task, const Options& opts) override {
+  void close(event::Task* task, const base::Options& opts) override {
     if (prologue(task)) task->finish_ok();
   }
 };
@@ -341,15 +341,15 @@ class FDWriter : public WriterImpl {
     std::size_t* const n;
     const char* const ptr;
     const std::size_t len;
-    const Options options;
+    const base::Options options;
     event::FileDescriptor wrevt;
 
     WriteOp(event::Task* t, std::size_t* n, const char* p, std::size_t l,
-            Options opts) noexcept : task(t),
-                                     n(n),
-                                     ptr(p),
-                                     len(l),
-                                     options(std::move(opts)) {}
+            base::Options opts) noexcept : task(t),
+                                           n(n),
+                                           ptr(p),
+                                           len(l),
+                                           options(std::move(opts)) {}
     void cancel() override { task->cancel(); }
     bool process(FDWriter* writer) override;
   };
@@ -362,15 +362,15 @@ class FDWriter : public WriterImpl {
   }
 
   void write(event::Task* task, std::size_t* n, const char* ptr,
-             std::size_t len, const Options& opts) override;
-  void close(event::Task* task, const Options& opts) override;
+             std::size_t len, const base::Options& opts) override;
+  void close(event::Task* task, const base::Options& opts) override;
   base::FD internal_writerfd() const override { return fd_; }
 
  private:
   void process(base::Lock& lock);
   base::Result wake(event::Set set);
   base::Result arm(event::FileDescriptor* evt, const base::FD& fd,
-                   event::Set set, const Options& o);
+                   event::Set set, const base::Options& o);
 
   const base::FD fd_;
   mutable std::mutex mu_;
@@ -396,7 +396,7 @@ FDWriter::~FDWriter() noexcept {
 }
 
 void FDWriter::write(event::Task* task, std::size_t* n, const char* ptr,
-                     std::size_t len, const Options& opts) {
+                     std::size_t len, const base::Options& opts) {
   if (!prologue(task, n, ptr, len)) return;
   auto lock = base::acquire_lock(mu_);
   VLOG(6) << "io::FDWriter::write: len=" << len;
@@ -404,7 +404,7 @@ void FDWriter::write(event::Task* task, std::size_t* n, const char* ptr,
   process(lock);
 }
 
-void FDWriter::close(event::Task* task, const Options& opts) {
+void FDWriter::close(event::Task* task, const base::Options& opts) {
   VLOG(6) << "io::FDWriter::close";
   base::Result r = fd_->close();
   if (prologue(task)) task->finish(std::move(r));
@@ -448,11 +448,11 @@ base::Result FDWriter::wake(event::Set set) {
 }
 
 base::Result FDWriter::arm(event::FileDescriptor* evt, const base::FD& fd,
-                           event::Set set, const Options& o) {
+                           event::Set set, const base::Options& o) {
   DCHECK_NOTNULL(evt);
   base::Result r;
   if (!*evt) {
-    event::Manager manager = o.manager();
+    event::Manager manager = get_manager(o);
     auto closure = [this](event::Data data) { return wake(data.events); };
     r = manager.fd(evt, fd, set, event::handler(closure));
   }

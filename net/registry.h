@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "base/options.h"
 #include "base/result.h"
 #include "base/token.h"
 #include "event/task.h"
@@ -69,31 +70,32 @@ class Registry {
   // Resolves |address| as a human-readable |protocol| address.
   void resolve(event::Task* task, std::vector<Addr>* out,
                const std::string& protocol, const std::string& address,
-               const Options& opts = default_options()) const;
+               const base::Options& opts = base::default_options()) const;
 
   // Starts listening on |bind|.
   void listen(event::Task* task, ListenConn* out, const Addr& bind,
-              const Options& opts, AcceptFn fn) const;
+              const base::Options& opts, AcceptFn fn) const;
   void listen(event::Task* task, ListenConn* out, const Addr& bind,
               AcceptFn fn) const {
-    return listen(task, out, bind, default_options(), std::move(fn));
+    return listen(task, out, bind, base::default_options(), std::move(fn));
   }
 
   // Connects from |bind| to |peer|.
   void dial(event::Task* task, Conn* out, const Addr& peer, const Addr& bind,
-            const Options& opts = default_options()) const;
+            const base::Options& opts = base::default_options()) const;
 
   // Synchronous versions of the functions above.
-  base::Result resolve(std::vector<Addr>* out, const std::string& protocol,
-                       const std::string& address,
-                       const Options& opts = default_options()) const;
-  base::Result listen(ListenConn* out, const Addr& bind, const Options& opts,
-                      AcceptFn fn) const;
+  base::Result resolve(
+      std::vector<Addr>* out, const std::string& protocol,
+      const std::string& address,
+      const base::Options& opts = base::default_options()) const;
+  base::Result listen(ListenConn* out, const Addr& bind,
+                      const base::Options& opts, AcceptFn fn) const;
   base::Result listen(ListenConn* out, const Addr& bind, AcceptFn fn) const {
-    return listen(out, bind, default_options(), std::move(fn));
+    return listen(out, bind, base::default_options(), std::move(fn));
   }
   base::Result dial(Conn* out, const Addr& peer, const Addr& bind,
-                    const Options& opts = default_options()) const;
+                    const base::Options& opts = base::default_options()) const;
 
  private:
   struct Item {

@@ -336,11 +336,11 @@ TEST(BufferReader, Close) {
 TEST(IgnoreCloseReader, Close) {
   int n = 0;
   auto rfn = [](event::Task* task, char* ptr, std::size_t* len, std::size_t min,
-                std::size_t max, const io::Options& o) {
+                std::size_t max, const base::Options& o) {
     *len = 0;
     if (task->start()) task->finish(base::Result::not_implemented());
   };
-  auto cfn = [&n](event::Task* task, const io::Options& o) {
+  auto cfn = [&n](event::Task* task, const base::Options& o) {
     ++n;
     if (task->start()) task->finish_ok();
   };
@@ -489,7 +489,7 @@ TEST(LimitedReader, WriteTo) {
 
 TEST(NullReader, Read) {
   io::Reader r = io::nullreader();
-  io::Options o;
+  base::Options o;
 
   char buf[16];
   std::size_t n = 42;
@@ -507,7 +507,7 @@ TEST(NullReader, Read) {
 
 TEST(ZeroReader, Read) {
   io::Reader r = io::zeroreader();
-  io::Options o;
+  base::Options o;
 
   char buf[16];
   std::size_t n = 42;
@@ -532,7 +532,7 @@ TEST(ZeroReader, Read) {
 // }}}
 // FDReader {{{
 
-static void TestFDReader_Read(const io::Options& o) {
+static void TestFDReader_Read(const base::Options& o) {
   base::Pipe pipe;
   ASSERT_OK(base::make_pipe(&pipe));
 
@@ -608,7 +608,7 @@ static void TestFDReader_Read(const io::Options& o) {
   LOG(INFO) << "woke T1: x = " << x;
   lock.unlock();
 
-  event::wait(o.manager(), &task);
+  event::wait(io::get_manager(o), &task);
   LOG(INFO) << "read #2 complete";
   EXPECT_OK(task.result());
   EXPECT_EQ(8U, n);
@@ -618,7 +618,7 @@ static void TestFDReader_Read(const io::Options& o) {
   base::log_flush();
 }
 
-static void TestFDReader_WriteTo(const io::Options& o) {
+static void TestFDReader_WriteTo(const base::Options& o) {
   std::string path;
   base::FD fd;
 
@@ -683,7 +683,7 @@ static void TestFDReader_WriteTo(const io::Options& o) {
   cv.notify_all();
   lock.unlock();
 
-  event::wait(o.manager(), &task);
+  event::wait(io::get_manager(o), &task);
   LOG(INFO) << "task done";
   EXPECT_OK(task.result());
   EXPECT_EQ(16U * 4096U, n);
@@ -703,8 +703,8 @@ TEST(FDReader, AsyncRead) {
   event::Manager m;
   ASSERT_OK(event::new_manager(&m, mo));
 
-  io::Options o;
-  o.set_manager(m);
+  base::Options o;
+  o.get<io::Options>().manager = m;
 
   TestFDReader_Read(o);
 
@@ -718,8 +718,8 @@ TEST(FDReader, ThreadedRead) {
   event::Manager m;
   ASSERT_OK(event::new_manager(&m, mo));
 
-  io::Options o;
-  o.set_manager(m);
+  base::Options o;
+  o.get<io::Options>().manager = m;
 
   TestFDReader_Read(o);
 
@@ -733,9 +733,9 @@ TEST(FDReader, WriteToFallback) {
   event::Manager m;
   ASSERT_OK(event::new_manager(&m, mo));
 
-  io::Options o;
-  o.set_manager(m);
-  o.set_transfer_mode(io::TransferMode::read_write);
+  base::Options o;
+  o.get<io::Options>().manager = m;
+  o.get<io::Options>().transfer_mode = io::TransferMode::read_write;
 
   TestFDReader_WriteTo(o);
 
@@ -749,9 +749,9 @@ TEST(FDReader, WriteToSendfile) {
   event::Manager m;
   ASSERT_OK(event::new_manager(&m, mo));
 
-  io::Options o;
-  o.set_manager(m);
-  o.set_transfer_mode(io::TransferMode::sendfile);
+  base::Options o;
+  o.get<io::Options>().manager = m;
+  o.get<io::Options>().transfer_mode = io::TransferMode::sendfile;
 
   TestFDReader_WriteTo(o);
 
@@ -765,9 +765,9 @@ TEST(FDReader, WriteToSplice) {
   event::Manager m;
   ASSERT_OK(event::new_manager(&m, mo));
 
-  io::Options o;
-  o.set_manager(m);
-  o.set_transfer_mode(io::TransferMode::splice);
+  base::Options o;
+  o.get<io::Options>().manager = m;
+  o.get<io::Options>().transfer_mode = io::TransferMode::splice;
 
   TestFDReader_WriteTo(o);
 
@@ -777,7 +777,7 @@ TEST(FDReader, WriteToSplice) {
 // }}}
 // MultiReader {{{
 
-void TestMultiReader_LineUp(io::Options o) {
+void TestMultiReader_LineUp(const base::Options& o) {
   std::string a = "01234567";
   std::string b = "abcdefgh";
   std::string c = "ABCDEFGH";
@@ -809,7 +809,7 @@ void TestMultiReader_LineUp(io::Options o) {
   EXPECT_EQ(expected, actual);
 }
 
-void TestMultiReader_Half(io::Options o) {
+void TestMultiReader_Half(const base::Options& o) {
   std::string a = "01234567";
   std::string b = "abcdefgh";
 
@@ -836,7 +836,7 @@ void TestMultiReader_Half(io::Options o) {
   EXPECT_EQ(expected, actual);
 }
 
-void TestMultiReader_Double(io::Options o) {
+void TestMultiReader_Double(const base::Options& o) {
   std::string a = "01234567";
   std::string b = "abcdefgh";
   std::string c = "ABCDEFGH";
@@ -868,7 +868,7 @@ void TestMultiReader_Double(io::Options o) {
   EXPECT_EQ(expected, actual);
 }
 
-void TestMultiReader_OffAxis(io::Options o) {
+void TestMultiReader_OffAxis(const base::Options& o) {
   std::string a = "01234";
   std::string b = "abcde";
   std::string c = "ABCDE";
@@ -900,7 +900,7 @@ void TestMultiReader_OffAxis(io::Options o) {
   EXPECT_EQ(expected, actual);
 }
 
-void TestMultiReader(io::Options o, const char* what) {
+void TestMultiReader(const base::Options& o, const char* what) {
   LOG(INFO) << "[TestMultiReader_LineUp:" << what << "]";
   TestMultiReader_LineUp(o);
   LOG(INFO) << "[TestMultiReader_Half:" << what << "]";
@@ -919,8 +919,8 @@ TEST(MultiReader, Async) {
   event::Manager m;
   ASSERT_OK(event::new_manager(&m, mo));
 
-  io::Options o;
-  o.set_manager(m);
+  base::Options o;
+  o.get<io::Options>().manager = m;
   TestMultiReader(o, "async");
   m.shutdown();
 }
@@ -933,8 +933,8 @@ TEST(MultiReader, Threaded) {
   event::Manager m;
   ASSERT_OK(event::new_manager(&m, mo));
 
-  io::Options o;
-  o.set_manager(m);
+  base::Options o;
+  o.get<io::Options>().manager = m;
   TestMultiReader(o, "threaded");
   m.shutdown();
 }

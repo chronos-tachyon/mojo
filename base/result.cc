@@ -209,8 +209,7 @@ void Result::append_to(std::string* out) const {
     int err_no = rep_->err_no;
     const auto& message = rep_->message;
 
-    concat_to(out, resultcode_name(code), '(', static_cast<uint16_t>(code),
-              ')');
+    concat_to(out, resultcode_name(code), '(', uint16_t(code), ')');
     if (!message.empty()) {
       concat_to(out, ": ", message);
     }

@@ -17,8 +17,8 @@ TEST(Registry, Thunk) {
   event::Manager m;
   ASSERT_OK(event::new_manager(&m, mo));
 
-  net::Options o;
-  o.io().set_manager(m);
+  base::Options o;
+  o.get<io::Options>().manager = m;
 
   net::FakeData data;
   data.names["foo"] = {0x01020304};

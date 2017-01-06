@@ -84,20 +84,20 @@ class Protocol {
   //                for some ProtocolType |p| and for all indices |i|
   virtual void resolve(event::Task* task, std::vector<Addr>* out,
                        const std::string& protocol, const std::string& address,
-                       const Options& opts) = 0;
+                       const base::Options& opts) = 0;
 
   // Starts listening on |bind|.
   //
   // PRECONDITION: |supports(bind.protocol())| returned true
   virtual void listen(event::Task* task, ListenConn* out, const Addr& bind,
-                      const Options& opts, AcceptFn fn) = 0;
+                      const base::Options& opts, AcceptFn fn) = 0;
 
   // Connects from |bind| to |peer|.
   //
   // PRECONDITION: |supports(peer.protocol())| returned true
   // PRECONDITION: |bind.protocol() == peer.protocol() || !bind|
   virtual void dial(event::Task* task, Conn* out, const Addr& peer,
-                    const Addr& bind, const Options& opts) = 0;
+                    const Addr& bind, const base::Options& opts) = 0;
 };
 
 }  // namespace net

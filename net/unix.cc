@@ -111,7 +111,7 @@ class UnixProtocol : public FDProtocol {
 
   void resolve(event::Task* task, std::vector<Addr>* out,
                const std::string& protocol, const std::string& address,
-               const Options& options) override;
+               const base::Options& options) override;
 
  private:
   std::shared_ptr<Protocol> self() const override { return unixprotocol(); }
@@ -145,7 +145,8 @@ base::Result UnixProtocol::parse(Addr* out, const std::string& protocol,
 
 void UnixProtocol::resolve(event::Task* task, std::vector<Addr>* out,
                            const std::string& protocol,
-                           const std::string& address, const Options& options) {
+                           const std::string& address,
+                           const base::Options& options) {
   CHECK_NOTNULL(task);
   CHECK_NOTNULL(out);
   CHECK(supports(protocol));

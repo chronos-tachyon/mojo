@@ -201,7 +201,7 @@ class FakeConn : public ConnImpl {
   io::Reader reader() override { return r_; }
   io::Writer writer() override { return w_; }
 
-  void close(event::Task* task, const io::Options& opts) override {
+  void close(event::Task* task, const base::Options& opts) override {
     auto lock = base::acquire_lock(data_->mu);
     auto r = close_impl(lock);
     if (task->start()) task->finish(std::move(r));
@@ -209,12 +209,12 @@ class FakeConn : public ConnImpl {
 
   void get_option(event::Task* task, SockOpt opt, void* optval,
                   unsigned int* optlen,
-                  const io::Options& opts) const override {
+                  const base::Options& opts) const override {
     if (task->start()) task->finish(base::Result::not_implemented());
   }
 
   void set_option(event::Task* task, SockOpt opt, const void* optval,
-                  unsigned int optlen, const io::Options& opts) override {
+                  unsigned int optlen, const base::Options& opts) override {
     if (task->start()) task->finish(base::Result::not_implemented());
   }
 
@@ -245,9 +245,9 @@ class FakeListenConn : public ListenConnImpl {
     event::Task* task;
     Conn* out;
     uint32_t x;
-    Options opts;
+    base::Options opts;
 
-    Pending(event::Task* t, Conn* o, uint32_t x, Options opts) noexcept
+    Pending(event::Task* t, Conn* o, uint32_t x, base::Options opts) noexcept
         : task(t),
           out(o),
           x(x),
@@ -255,13 +255,14 @@ class FakeListenConn : public ListenConnImpl {
   };
 
  public:
-  FakeListenConn(FakeData* data, ProtocolType p, uint32_t ax, Options o,
-                 AcceptFn fn) noexcept : data_(data),
-                                         p_(p),
-                                         x_(ax),
-                                         fn_(std::move(fn)),
-                                         closed_(false),
-                                         accepting_(false) {}
+  FakeListenConn(FakeData* data, ProtocolType p, uint32_t ax,
+                 const base::Options& o, AcceptFn fn) noexcept
+      : data_(data),
+        p_(p),
+        x_(ax),
+        fn_(std::move(fn)),
+        closed_(false),
+        accepting_(false) {}
 
   ~FakeListenConn() noexcept {
     auto lock = base::acquire_lock(data_->mu);
@@ -270,7 +271,7 @@ class FakeListenConn : public ListenConnImpl {
 
   Addr listen_addr() const override { return fakeaddr(data_, p_, x_); }
 
-  void start(event::Task* task, const io::Options& opts) override {
+  void start(event::Task* task, const base::Options& opts) override {
     if (!task->start()) return;
     auto lock = base::acquire_lock(data_->mu);
     if (closed_) {
@@ -282,7 +283,7 @@ class FakeListenConn : public ListenConnImpl {
     process(lock);
   }
 
-  void stop(event::Task* task, const io::Options& opts) override {
+  void stop(event::Task* task, const base::Options& opts) override {
     if (!task->start()) return;
     auto lock = base::acquire_lock(data_->mu);
     if (closed_) {
@@ -293,7 +294,7 @@ class FakeListenConn : public ListenConnImpl {
     task->finish_ok();
   }
 
-  void close(event::Task* task, const io::Options& opts) override {
+  void close(event::Task* task, const base::Options& opts) override {
     auto lock = base::acquire_lock(data_->mu);
     base::Result r = close_impl(lock);
     if (task->start()) task->finish(std::move(r));
@@ -301,12 +302,12 @@ class FakeListenConn : public ListenConnImpl {
 
   void get_option(event::Task* task, SockOpt opt, void* optval,
                   unsigned int* optlen,
-                  const io::Options& opts) const override {
+                  const base::Options& opts) const override {
     if (task->start()) task->finish(base::Result::not_implemented());
   }
 
   void set_option(event::Task* task, SockOpt opt, const void* optval,
-                  unsigned int optlen, const io::Options& opts) override {
+                  unsigned int optlen, const base::Options& opts) override {
     if (task->start()) task->finish(base::Result::not_implemented());
   }
 
@@ -332,9 +333,9 @@ class FakeListenConn : public ListenConnImpl {
   }
 
   void do_dial(base::Lock& lock, event::Task* t, Conn* o, uint32_t x,
-               Options opts) {
+               const base::Options& opts) {
     VLOG(4) << "enqueueing dial from 0x" << std::hex << x;
-    q_.emplace_back(t, o, x, std::move(opts));
+    q_.emplace_back(t, o, x, opts);
     process(lock);
   }
 
@@ -427,7 +428,7 @@ class FakeProtocol : public Protocol {
 
   void resolve(event::Task* task, std::vector<Addr>* out,
                const std::string& protocol, const std::string& address,
-               const Options& opts) override {
+               const base::Options& opts) override {
     if (!task->start()) return;
     auto p = protofwd(protocol);
     auto lock = base::acquire_lock(data_->mu);
@@ -443,7 +444,7 @@ class FakeProtocol : public Protocol {
   }
 
   void listen(event::Task* task, ListenConn* out, const Addr& bind,
-              const Options& opts, AcceptFn fn) override {
+              const base::Options& opts, AcceptFn fn) override {
     CHECK_NOTNULL(out);
     CHECK(protohas(bind.protocol()));
 
@@ -457,10 +458,11 @@ class FakeProtocol : public Protocol {
         base::cleanup([this, &lock, p, x] { decref(lock, data_, p, x); });
 
     auto& port = data_->ports[p][x];
+    const auto ra = opts.get<net::Options>().reuseaddr;
     if (port.listener) {
       task->finish(base::Result::from_errno(EADDRINUSE, "in-process bind"));
     }
-    if (port.refcount > 1 && !opts.reuseaddr()) {
+    if (port.refcount > 1 && !ra) {
       task->finish(base::Result::from_errno(EADDRINUSE, "in-process bind"));
     }
 
@@ -468,13 +470,13 @@ class FakeProtocol : public Protocol {
         std::make_shared<FakeListenConn>(data_, p, x, opts, std::move(fn));
     std::weak_ptr<FakeListenConn> weak(impl);
     port.listener = [weak](base::Lock& lock, event::Task* t, Conn* o,
-                           uint32_t x, Options opts) {
+                           uint32_t x, const base::Options& opts) {
       auto strong = weak.lock();
       if (!strong) {
         t->finish_cancel();  // TODO: better error
         return;
       }
-      strong->do_dial(lock, t, o, x, std::move(opts));
+      strong->do_dial(lock, t, o, x, opts);
     };
     *out = ListenConn(std::move(impl));
     task->finish_ok();
@@ -485,7 +487,7 @@ class FakeProtocol : public Protocol {
   }
 
   void dial(event::Task* task, Conn* out, const Addr& peer, const Addr& bind,
-            const Options& opts) override {
+            const base::Options& opts) override {
     CHECK_NOTNULL(task);
     CHECK_NOTNULL(out);
     CHECK(protohas(peer.protocol()));
@@ -530,7 +532,8 @@ class FakeProtocol : public Protocol {
     }
 
     auto& bindport = ports[x];
-    if (bindport.refcount > 2 && !opts.reuseaddr()) {
+    const auto ra = opts.get<net::Options>().reuseaddr;
+    if (bindport.refcount > 2 && !ra) {
       task->finish(base::Result::from_errno(EADDRINUSE, "in-process bind"));
       return;
     }

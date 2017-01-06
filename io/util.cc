@@ -33,7 +33,7 @@ struct CopyHelper {
   const std::size_t max;
   const Writer writer;
   const Reader reader;
-  const Options options;
+  const base::Options options;
   const std::size_t block_size;
   BufferPool pool;
   OwnedBuffer buffer;
@@ -42,7 +42,7 @@ struct CopyHelper {
   bool eof;
 
   CopyHelper(event::Task* t, std::size_t* c, std::size_t x, Writer w, Reader r,
-             Options opts) noexcept
+             base::Options opts) noexcept
       : task(t),
         copied(c),
         max(x),
@@ -60,18 +60,17 @@ struct CopyHelper {
   ~CopyHelper() noexcept { VLOG(6) << "io::CopyHelper::~CopyHelper"; }
 
   static std::size_t compute_block_size(const Writer& w, const Reader& r,
-                                        const Options& o) {
-    bool has_blksz;
-    std::size_t blksz;
-    std::tie(has_blksz, blksz) = o.block_size();
-    if (has_blksz) return blksz;
+                                        const base::Options& o) {
+    std::size_t blksz = o.get<io::Options>().block_size;
+    if (blksz != 0) return blksz;
     std::size_t wblksz = w.ideal_block_size();
     std::size_t rblksz = r.ideal_block_size();
     return lcm(wblksz, rblksz);
   }
 
-  static BufferPool choose_pool(std::size_t block_size, const Options& o) {
-    BufferPool pool = o.pool();
+  static BufferPool choose_pool(std::size_t block_size,
+                                const base::Options& o) {
+    BufferPool pool = o.get<io::Options>().pool;
     if (pool.buffer_size() >= block_size)
       return pool;
     else
@@ -189,7 +188,7 @@ struct CopyHelper {
 }  // anonymous namespace
 
 void copy_n(event::Task* task, std::size_t* copied, std::size_t max, Writer w,
-            Reader r, const Options& opts) {
+            Reader r, const base::Options& opts) {
   *copied = 0;
   if (!task->start()) return;
   auto* helper =

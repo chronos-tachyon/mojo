@@ -297,7 +297,7 @@ class InetProtocol : public FDProtocol {
 
   void resolve(event::Task* task, std::vector<Addr>* out,
                const std::string& protocol, const std::string& address,
-               const Options& opts) override;
+               const base::Options& opts) override;
 
  private:
   std::shared_ptr<Protocol> self() const override { return inetprotocol(); }
@@ -555,7 +555,8 @@ static void my_sev_notify_function(union sigval sv) {
 
 void InetProtocol::resolve(event::Task* task, std::vector<Addr>* out,
                            const std::string& protocol,
-                           const std::string& address, const Options& opts) {
+                           const std::string& address,
+                           const base::Options& opts) {
   CHECK_NOTNULL(task);
   CHECK_NOTNULL(out);
   CHECK(supports(protocol));
@@ -586,7 +587,8 @@ void InetProtocol::resolve(event::Task* task, std::vector<Addr>* out,
       break;
 
     default:
-      switch (opts.dualstack()) {
+      const auto ds = opts.get<net::Options>().dualstack;
+      switch (ds) {
         case DualStack::only_ipv4:
           family = AF_INET;
           break;

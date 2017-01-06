@@ -61,16 +61,16 @@ class ConnImpl {
   virtual io::Writer writer() = 0;
 
   // Fully closes the socket.
-  virtual void close(event::Task* task, const io::Options& opts) = 0;
+  virtual void close(event::Task* task, const base::Options& opts) = 0;
 
   // Retrieves the value of a socket option.
   virtual void get_option(event::Task* task, SockOpt opt, void* optval,
                           unsigned int* optlen,
-                          const io::Options& opts) const = 0;
+                          const base::Options& opts) const = 0;
 
   // Assigns the value of a socket option.
   virtual void set_option(event::Task* task, SockOpt opt, const void* optval,
-                          unsigned int optlen, const io::Options& opts) = 0;
+                          unsigned int optlen, const base::Options& opts) = 0;
 };
 
 // Conn is a handle to a connected socket.
@@ -148,7 +148,7 @@ class Conn {
 
   // Fully closes the socket.
   void close(event::Task* task,
-             const io::Options& opts = io::default_options()) const {
+             const base::Options& opts = base::default_options()) const {
     assert_valid();
     ptr_->close(task, opts);
   }
@@ -156,41 +156,43 @@ class Conn {
   // Retrieves the value of a socket option.
   void get_option(event::Task* task, SockOpt opt, void* optval,
                   unsigned int* optlen,
-                  const io::Options& opts = io::default_options()) const;
-  void get_int_option(event::Task* task, SockOpt opt, int* value,
-                      const io::Options& opts = io::default_options()) const;
+                  const base::Options& opts = base::default_options()) const;
+  void get_int_option(
+      event::Task* task, SockOpt opt, int* value,
+      const base::Options& opts = base::default_options()) const;
   void get_tv_option(event::Task* task, SockOpt opt, struct timeval* value,
-                     const io::Options& opts = io::default_options()) const;
+                     const base::Options& opts = base::default_options()) const;
 
   // Assigns the value of a socket option.
   void set_option(event::Task* task, SockOpt opt, const void* optval,
                   unsigned int optlen,
-                  const io::Options& opts = io::default_options()) const;
-  void set_int_option(event::Task* task, SockOpt opt, int value,
-                      const io::Options& opts = io::default_options()) const;
+                  const base::Options& opts = base::default_options()) const;
+  void set_int_option(
+      event::Task* task, SockOpt opt, int value,
+      const base::Options& opts = base::default_options()) const;
   void set_tv_option(event::Task* task, SockOpt opt, struct timeval value,
-                     const io::Options& opts = io::default_options()) const;
+                     const base::Options& opts = base::default_options()) const;
 
   // Synchronous versions of the above.
-  base::Result close(const io::Options& opts = io::default_options()) const;
+  base::Result close(const base::Options& opts = base::default_options()) const;
   base::Result get_option(
       SockOpt opt, void* optval, unsigned int* optlen,
-      const io::Options& opts = io::default_options()) const;
+      const base::Options& opts = base::default_options()) const;
   base::Result get_int_option(
       SockOpt opt, int* value,
-      const io::Options& opts = io::default_options()) const;
+      const base::Options& opts = base::default_options()) const;
   base::Result get_tv_option(
       SockOpt opt, struct timeval* value,
-      const io::Options& opts = io::default_options()) const;
+      const base::Options& opts = base::default_options()) const;
   base::Result set_option(
       SockOpt opt, const void* optval, unsigned int optlen,
-      const io::Options& opts = io::default_options()) const;
+      const base::Options& opts = base::default_options()) const;
   base::Result set_int_option(
       SockOpt opt, int value,
-      const io::Options& opts = io::default_options()) const;
+      const base::Options& opts = base::default_options()) const;
   base::Result set_tv_option(
       SockOpt opt, struct timeval value,
-      const io::Options& opts = io::default_options()) const;
+      const base::Options& opts = base::default_options()) const;
 
  private:
   Pointer ptr_;
@@ -230,24 +232,24 @@ class ListenConnImpl {
 
   // Starts accepting new connected sockets from peers.
   // - MUST be idempotent
-  virtual void start(event::Task* task, const io::Options& opts) = 0;
+  virtual void start(event::Task* task, const base::Options& opts) = 0;
 
   // Stops accepting new connected sockets from peers.
   // - MUST be idempotent
   // - MUST NOT release the bound address
-  virtual void stop(event::Task* task, const io::Options& opts) = 0;
+  virtual void stop(event::Task* task, const base::Options& opts) = 0;
 
   // Fully closes the socket.
-  virtual void close(event::Task* task, const io::Options& opts) = 0;
+  virtual void close(event::Task* task, const base::Options& opts) = 0;
 
   // Retrieves the value of a socket option.
   virtual void get_option(event::Task* task, SockOpt opt, void* optval,
                           unsigned int* optlen,
-                          const io::Options& opts) const = 0;
+                          const base::Options& opts) const = 0;
 
   // Assigns the value of a socket option.
   virtual void set_option(event::Task* task, SockOpt opt, const void* optval,
-                          unsigned int optlen, const io::Options& opts) = 0;
+                          unsigned int optlen, const base::Options& opts) = 0;
 };
 
 // ListenConn is a handle to a listening socket.
@@ -308,7 +310,7 @@ class ListenConn {
   // - It is a no-op to call |start()| while already in the accepting state.
   //
   void start(event::Task* task,
-             const io::Options& opts = io::default_options()) const {
+             const base::Options& opts = base::default_options()) const {
     assert_valid();
     ptr_->start(task, opts);
   }
@@ -324,14 +326,14 @@ class ListenConn {
   // Userspace protocols may differ in terminology, but not behavior.)
   //
   void stop(event::Task* task,
-            const io::Options& opts = io::default_options()) const {
+            const base::Options& opts = base::default_options()) const {
     assert_valid();
     return ptr_->stop(task, opts);
   }
 
   // Closes the listener.
   void close(event::Task* task,
-             const io::Options& opts = io::default_options()) const {
+             const base::Options& opts = base::default_options()) const {
     assert_valid();
     return ptr_->close(task, opts);
   }
@@ -339,43 +341,45 @@ class ListenConn {
   // Retrieves the value of a socket option.
   void get_option(event::Task* task, SockOpt opt, void* optval,
                   unsigned int* optlen,
-                  const io::Options& opts = io::default_options()) const;
-  void get_int_option(event::Task* task, SockOpt opt, int* value,
-                      const io::Options& opts = io::default_options()) const;
+                  const base::Options& opts = base::default_options()) const;
+  void get_int_option(
+      event::Task* task, SockOpt opt, int* value,
+      const base::Options& opts = base::default_options()) const;
   void get_tv_option(event::Task* task, SockOpt opt, struct timeval* value,
-                     const io::Options& opts = io::default_options()) const;
+                     const base::Options& opts = base::default_options()) const;
 
   // Assigns the value of a socket option.
   void set_option(event::Task* task, SockOpt opt, const void* optval,
                   unsigned int optlen,
-                  const io::Options& opts = io::default_options()) const;
-  void set_int_option(event::Task* task, SockOpt opt, int value,
-                      const io::Options& opts = io::default_options()) const;
+                  const base::Options& opts = base::default_options()) const;
+  void set_int_option(
+      event::Task* task, SockOpt opt, int value,
+      const base::Options& opts = base::default_options()) const;
   void set_tv_option(event::Task* task, SockOpt opt, struct timeval value,
-                     const io::Options& opts = io::default_options()) const;
+                     const base::Options& opts = base::default_options()) const;
 
   // Synchronous versions of the above.
-  base::Result start(const io::Options& opts = io::default_options()) const;
-  base::Result stop(const io::Options& opts = io::default_options()) const;
-  base::Result close(const io::Options& opts = io::default_options()) const;
+  base::Result start(const base::Options& opts = base::default_options()) const;
+  base::Result stop(const base::Options& opts = base::default_options()) const;
+  base::Result close(const base::Options& opts = base::default_options()) const;
   base::Result get_option(
       SockOpt opt, void* optval, unsigned int* optlen,
-      const io::Options& opts = io::default_options()) const;
+      const base::Options& opts = base::default_options()) const;
   base::Result get_int_option(
       SockOpt opt, int* value,
-      const io::Options& opts = io::default_options()) const;
+      const base::Options& opts = base::default_options()) const;
   base::Result get_tv_option(
       SockOpt opt, struct timeval* value,
-      const io::Options& opts = io::default_options()) const;
+      const base::Options& opts = base::default_options()) const;
   base::Result set_option(
       SockOpt opt, const void* optval, unsigned int optlen,
-      const io::Options& opts = io::default_options()) const;
+      const base::Options& opts = base::default_options()) const;
   base::Result set_int_option(
       SockOpt opt, int value,
-      const io::Options& opts = io::default_options()) const;
+      const base::Options& opts = base::default_options()) const;
   base::Result set_tv_option(
       SockOpt opt, struct timeval value,
-      const io::Options& opts = io::default_options()) const;
+      const base::Options& opts = base::default_options()) const;
 
  private:
   Pointer ptr_;

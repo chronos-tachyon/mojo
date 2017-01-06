@@ -51,7 +51,7 @@ TEST(StringWriter, ReadFrom) {
   r = io::bufferreader("abcdefg", 7);
   w = io::stringwriter(&out);
   w.read_from(&task, &copied, 16, r);
-  event::wait(io::default_options().manager(), &task);
+  event::wait(event::system_manager(), &task);
   EXPECT_NOT_IMPLEMENTED(task.result());
   EXPECT_EQ(0U, copied);
 }
@@ -131,11 +131,11 @@ TEST(BufferWriter, Close) {
 TEST(IgnoreCloseWriter, Close) {
   int n = 0;
   auto wfn = [](event::Task* task, std::size_t* copied, const char* ptr,
-                std::size_t len, const io::Options& opts) {
+                std::size_t len, const base::Options& opts) {
     *copied = 0;
     if (task->start()) task->finish(base::Result::not_implemented());
   };
-  auto cfn = [&n](event::Task* task, const io::Options& opts) {
+  auto cfn = [&n](event::Task* task, const base::Options& opts) {
     ++n;
     if (task->start()) task->finish_ok();
   };
@@ -164,7 +164,7 @@ TEST(DiscardWriter, Write) {
   io::Writer w = io::discardwriter(&total);
   EXPECT_EQ(0U, total);
 
-  event::Manager m = io::default_options().manager();
+  event::Manager m = event::system_manager();
 
   event::Task task;
   std::size_t n = 42;
@@ -206,7 +206,7 @@ TEST(DiscardWriter, Write) {
 TEST(FullWriter, Write) {
   io::Writer w = io::fullwriter();
 
-  event::Manager m = io::default_options().manager();
+  event::Manager m = event::system_manager();
 
   event::Task task;
   std::size_t n = 42;
@@ -242,8 +242,8 @@ static void FDWriterTest(event::ManagerOptions mo) {
   ASSERT_OK(event::new_manager(&m, mo));
   ASSERT_TRUE(m);
 
-  io::Options o;
-  o.set_manager(m);
+  base::Options o;
+  o.get<io::Options>().manager = m;
 
   LOG(INFO) << "made manager";
 

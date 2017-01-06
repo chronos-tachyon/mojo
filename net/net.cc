@@ -18,7 +18,7 @@ base::Result parse(Addr* out, const std::string& protocol,
 
 void resolve(event::Task* task, std::vector<Addr>* out,
              const std::string& protocol, const std::string& address,
-             const Options& opts) {
+             const base::Options& opts) {
   system_registry().resolve(task, out, protocol, address, opts);
 }
 
@@ -28,7 +28,7 @@ void resolve(event::Task* task, std::vector<Addr>* out,
 }
 
 void listen(event::Task* task, ListenConn* out, const Addr& bind,
-            const Options& opts, AcceptFn fn) {
+            const base::Options& opts, AcceptFn fn) {
   system_registry().listen(task, out, bind, opts, std::move(fn));
 }
 
@@ -37,7 +37,7 @@ void listen(event::Task* task, ListenConn* out, const Addr& bind, AcceptFn fn) {
 }
 
 void dial(event::Task* task, Conn* out, const Addr& peer, const Addr& bind,
-          const Options& opts) {
+          const base::Options& opts) {
   system_registry().dial(task, out, peer, bind, opts);
 }
 
@@ -46,7 +46,7 @@ void dial(event::Task* task, Conn* out, const Addr& peer, const Addr& bind) {
 }
 
 base::Result resolve(std::vector<Addr>* out, const std::string& protocol,
-                     const std::string& address, const Options& opts) {
+                     const std::string& address, const base::Options& opts) {
   return system_registry().resolve(out, protocol, address, opts);
 }
 
@@ -55,8 +55,8 @@ base::Result resolve(std::vector<Addr>* out, const std::string& protocol,
   return system_registry().resolve(out, protocol, address);
 }
 
-base::Result listen(ListenConn* out, const Addr& bind, const Options& opts,
-                    AcceptFn fn) {
+base::Result listen(ListenConn* out, const Addr& bind,
+                    const base::Options& opts, AcceptFn fn) {
   return system_registry().listen(out, bind, opts, std::move(fn));
 }
 
@@ -65,7 +65,7 @@ base::Result listen(ListenConn* out, const Addr& bind, AcceptFn fn) {
 }
 
 base::Result dial(Conn* out, const Addr& peer, const Addr& bind,
-                  const Options& opts) {
+                  const base::Options& opts) {
   return system_registry().dial(out, peer, bind, opts);
 }
 

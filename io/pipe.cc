@@ -25,15 +25,16 @@ struct PipeGuts {
     std::size_t* const n;
     const std::size_t min;
     const std::size_t max;
-    const Options options;
+    const base::Options options;
 
     ReadOp(event::Task* t, char* o, std::size_t* n, std::size_t mn,
-           std::size_t mx, Options opts) noexcept : task(t),
-                                                    out(o),
-                                                    n(n),
-                                                    min(mn),
-                                                    max(mx),
-                                                    options(std::move(opts)) {}
+           std::size_t mx, base::Options opts) noexcept
+        : task(t),
+          out(o),
+          n(n),
+          min(mn),
+          max(mx),
+          options(std::move(opts)) {}
 
     bool process(base::Lock& lock, PipeGuts* guts);
   };
@@ -99,7 +100,7 @@ class PipeReader : public ReaderImpl {
   }
 
   void read(event::Task* task, char* out, std::size_t* n, std::size_t min,
-            std::size_t max, const Options& opts) override {
+            std::size_t max, const base::Options& opts) override {
     if (!prologue(task, out, n, min, max)) return;
     auto lock = base::acquire_lock(guts_->mu);
     if (guts_->read_closed) {
@@ -111,7 +112,7 @@ class PipeReader : public ReaderImpl {
     guts_->process(lock);
   }
 
-  void close(event::Task* task, const Options& opts) override {
+  void close(event::Task* task, const base::Options& opts) override {
     if (!prologue(task)) return;
     base::Result r;
     auto lock = base::acquire_lock(guts_->mu);
@@ -156,7 +157,7 @@ class PipeWriter : public WriterImpl {
   }
 
   void write(event::Task* task, std::size_t* n, const char* ptr,
-             std::size_t len, const Options& opts) override {
+             std::size_t len, const base::Options& opts) override {
     if (!prologue(task, n, ptr, len)) return;
     base::Result r;
     auto lock = base::acquire_lock(guts_->mu);
@@ -172,7 +173,7 @@ class PipeWriter : public WriterImpl {
     task->finish(std::move(r));
   }
 
-  void close(event::Task* task, const Options& opts) override {
+  void close(event::Task* task, const base::Options& opts) override {
     base::Result r;
     auto lock = base::acquire_lock(guts_->mu);
     if (guts_->write_closed) {

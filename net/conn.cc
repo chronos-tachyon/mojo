@@ -25,7 +25,7 @@ struct GetOptHelper {
 void Conn::assert_valid() const { CHECK(ptr_) << ": net::Conn is empty"; }
 
 void Conn::get_option(event::Task* task, SockOpt opt, void* optval,
-                      unsigned int* optlen, const io::Options& opts) const {
+                      unsigned int* optlen, const base::Options& opts) const {
   CHECK_NOTNULL(task);
   CHECK_NOTNULL(optval);
   CHECK_NOTNULL(optlen);
@@ -34,7 +34,7 @@ void Conn::get_option(event::Task* task, SockOpt opt, void* optval,
 }
 
 void Conn::get_int_option(event::Task* task, SockOpt opt, int* value,
-                          const io::Options& opts) const {
+                          const base::Options& opts) const {
   CHECK_NOTNULL(value);
   auto* helper = new GetOptHelper(sizeof(*value));
   get_option(task, opt, value, &helper->actual, opts);
@@ -43,7 +43,7 @@ void Conn::get_int_option(event::Task* task, SockOpt opt, int* value,
 }
 
 void Conn::get_tv_option(event::Task* task, SockOpt opt, struct timeval* value,
-                         const io::Options& opts) const {
+                         const base::Options& opts) const {
   CHECK_NOTNULL(value);
   auto* helper = new GetOptHelper(sizeof(*value));
   get_option(task, opt, value, &helper->actual, opts);
@@ -52,7 +52,7 @@ void Conn::get_tv_option(event::Task* task, SockOpt opt, struct timeval* value,
 }
 
 void Conn::set_option(event::Task* task, SockOpt opt, const void* optval,
-                      unsigned int optlen, const io::Options& opts) const {
+                      unsigned int optlen, const base::Options& opts) const {
   CHECK_NOTNULL(task);
   CHECK_NOTNULL(optval);
   assert_valid();
@@ -60,7 +60,7 @@ void Conn::set_option(event::Task* task, SockOpt opt, const void* optval,
 }
 
 void Conn::set_int_option(event::Task* task, SockOpt opt, int value,
-                          const io::Options& opts) const {
+                          const base::Options& opts) const {
   auto* ptr = new int(value);
   set_option(task, opt, ptr, sizeof(value), opts);
   auto closure = [ptr] {
@@ -71,7 +71,7 @@ void Conn::set_int_option(event::Task* task, SockOpt opt, int value,
 }
 
 void Conn::set_tv_option(event::Task* task, SockOpt opt, struct timeval value,
-                         const io::Options& opts) const {
+                         const base::Options& opts) const {
   auto* ptr = new struct timeval;
   ::memcpy(ptr, &value, sizeof(value));
   set_option(task, opt, ptr, sizeof(value), opts);
@@ -82,23 +82,23 @@ void Conn::set_tv_option(event::Task* task, SockOpt opt, struct timeval value,
   task->on_finished(event::callback(closure));
 }
 
-base::Result Conn::close(const io::Options& opts) const {
+base::Result Conn::close(const base::Options& opts) const {
   event::Task task;
   close(&task, opts);
-  event::wait(opts.manager(), &task);
+  event::wait(io::get_manager(opts), &task);
   return task.result();
 }
 
 base::Result Conn::get_option(SockOpt opt, void* optval, unsigned int* optlen,
-                              const io::Options& opts) const {
+                              const base::Options& opts) const {
   event::Task task;
   get_option(&task, opt, optval, optlen, opts);
-  event::wait(opts.manager(), &task);
+  event::wait(io::get_manager(opts), &task);
   return task.result();
 }
 
 base::Result Conn::get_int_option(SockOpt opt, int* value,
-                                  const io::Options& opts) const {
+                                  const base::Options& opts) const {
   CHECK_NOTNULL(value);
   unsigned int value_len = sizeof(*value);
   base::Result r = get_option(opt, value, &value_len, opts);
@@ -107,7 +107,7 @@ base::Result Conn::get_int_option(SockOpt opt, int* value,
 }
 
 base::Result Conn::get_tv_option(SockOpt opt, struct timeval* value,
-                                 const io::Options& opts) const {
+                                 const base::Options& opts) const {
   CHECK_NOTNULL(value);
   unsigned int value_len = sizeof(*value);
   base::Result r = get_option(opt, value, &value_len, opts);
@@ -117,20 +117,20 @@ base::Result Conn::get_tv_option(SockOpt opt, struct timeval* value,
 
 base::Result Conn::set_option(SockOpt opt, const void* optval,
                               unsigned int optlen,
-                              const io::Options& opts) const {
+                              const base::Options& opts) const {
   event::Task task;
   set_option(&task, opt, optval, optlen, opts);
-  event::wait(opts.manager(), &task);
+  event::wait(io::get_manager(opts), &task);
   return task.result();
 }
 
 base::Result Conn::set_int_option(SockOpt opt, int value,
-                                  const io::Options& opts) const {
+                                  const base::Options& opts) const {
   return set_option(opt, &value, sizeof(value), opts);
 }
 
 base::Result Conn::set_tv_option(SockOpt opt, struct timeval value,
-                                 const io::Options& opts) const {
+                                 const base::Options& opts) const {
   return set_option(opt, &value, sizeof(value), opts);
 }
 
@@ -140,7 +140,7 @@ void ListenConn::assert_valid() const {
 
 void ListenConn::get_option(event::Task* task, SockOpt opt, void* optval,
                             unsigned int* optlen,
-                            const io::Options& opts) const {
+                            const base::Options& opts) const {
   CHECK_NOTNULL(task);
   CHECK_NOTNULL(optval);
   CHECK_NOTNULL(optlen);
@@ -149,7 +149,7 @@ void ListenConn::get_option(event::Task* task, SockOpt opt, void* optval,
 }
 
 void ListenConn::get_int_option(event::Task* task, SockOpt opt, int* value,
-                                const io::Options& opts) const {
+                                const base::Options& opts) const {
   auto* helper = new GetOptHelper(sizeof(*value));
   get_option(task, opt, value, &helper->actual, opts);
   auto closure = [helper] { return helper->done(); };
@@ -158,7 +158,7 @@ void ListenConn::get_int_option(event::Task* task, SockOpt opt, int* value,
 
 void ListenConn::get_tv_option(event::Task* task, SockOpt opt,
                                struct timeval* value,
-                               const io::Options& opts) const {
+                               const base::Options& opts) const {
   auto* helper = new GetOptHelper(sizeof(*value));
   get_option(task, opt, value, &helper->actual, opts);
   auto closure = [helper] { return helper->done(); };
@@ -167,7 +167,7 @@ void ListenConn::get_tv_option(event::Task* task, SockOpt opt,
 
 void ListenConn::set_option(event::Task* task, SockOpt opt, const void* optval,
                             unsigned int optlen,
-                            const io::Options& opts) const {
+                            const base::Options& opts) const {
   CHECK_NOTNULL(task);
   CHECK_NOTNULL(optval);
   assert_valid();
@@ -175,7 +175,7 @@ void ListenConn::set_option(event::Task* task, SockOpt opt, const void* optval,
 }
 
 void ListenConn::set_int_option(event::Task* task, SockOpt opt, int value,
-                                const io::Options& opts) const {
+                                const base::Options& opts) const {
   auto* ptr = new int(value);
   set_option(task, opt, ptr, sizeof(value), opts);
   auto closure = [ptr] {
@@ -187,7 +187,7 @@ void ListenConn::set_int_option(event::Task* task, SockOpt opt, int value,
 
 void ListenConn::set_tv_option(event::Task* task, SockOpt opt,
                                struct timeval value,
-                               const io::Options& opts) const {
+                               const base::Options& opts) const {
   auto* ptr = new struct timeval;
   ::memcpy(ptr, &value, sizeof(value));
   set_option(task, opt, ptr, sizeof(value), opts);
@@ -198,38 +198,38 @@ void ListenConn::set_tv_option(event::Task* task, SockOpt opt,
   task->on_finished(event::callback(closure));
 }
 
-base::Result ListenConn::start(const io::Options& opts) const {
+base::Result ListenConn::start(const base::Options& opts) const {
   event::Task task;
   start(&task, opts);
-  event::wait(opts.manager(), &task);
+  event::wait(io::get_manager(opts), &task);
   return task.result();
 }
 
-base::Result ListenConn::stop(const io::Options& opts) const {
+base::Result ListenConn::stop(const base::Options& opts) const {
   event::Task task;
   stop(&task, opts);
-  event::wait(opts.manager(), &task);
+  event::wait(io::get_manager(opts), &task);
   return task.result();
 }
 
-base::Result ListenConn::close(const io::Options& opts) const {
+base::Result ListenConn::close(const base::Options& opts) const {
   event::Task task;
   close(&task, opts);
-  event::wait(opts.manager(), &task);
+  event::wait(io::get_manager(opts), &task);
   return task.result();
 }
 
 base::Result ListenConn::get_option(SockOpt opt, void* optval,
                                     unsigned int* optlen,
-                                    const io::Options& opts) const {
+                                    const base::Options& opts) const {
   event::Task task;
   get_option(&task, opt, optval, optlen, opts);
-  event::wait(opts.manager(), &task);
+  event::wait(io::get_manager(opts), &task);
   return task.result();
 }
 
 base::Result ListenConn::get_int_option(SockOpt opt, int* value,
-                                        const io::Options& opts) const {
+                                        const base::Options& opts) const {
   CHECK_NOTNULL(value);
   unsigned int value_len = sizeof(*value);
   base::Result r = get_option(opt, value, &value_len, opts);
@@ -238,7 +238,7 @@ base::Result ListenConn::get_int_option(SockOpt opt, int* value,
 }
 
 base::Result ListenConn::get_tv_option(SockOpt opt, struct timeval* value,
-                                       const io::Options& opts) const {
+                                       const base::Options& opts) const {
   CHECK_NOTNULL(value);
   unsigned int value_len = sizeof(*value);
   base::Result r = get_option(opt, value, &value_len, opts);
@@ -248,20 +248,20 @@ base::Result ListenConn::get_tv_option(SockOpt opt, struct timeval* value,
 
 base::Result ListenConn::set_option(SockOpt opt, const void* optval,
                                     unsigned int optlen,
-                                    const io::Options& opts) const {
+                                    const base::Options& opts) const {
   event::Task task;
   set_option(&task, opt, optval, optlen, opts);
-  event::wait(opts.manager(), &task);
+  event::wait(io::get_manager(opts), &task);
   return task.result();
 }
 
 base::Result ListenConn::set_int_option(SockOpt opt, int value,
-                                        const io::Options& opts) const {
+                                        const base::Options& opts) const {
   return set_option(opt, &value, sizeof(value), opts);
 }
 
 base::Result ListenConn::set_tv_option(SockOpt opt, struct timeval value,
-                                       const io::Options& opts) const {
+                                       const base::Options& opts) const {
   return set_option(opt, &value, sizeof(value), opts);
 }
 

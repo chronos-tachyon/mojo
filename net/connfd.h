@@ -33,10 +33,10 @@ class FDProtocol : public Protocol {
 
  public:
   void listen(event::Task* task, ListenConn* out, const Addr& bind,
-              const Options& opts, AcceptFn fn) override;
+              const base::Options& opts, AcceptFn fn) override;
 
   void dial(event::Task* task, Conn* out, const Addr& peer, const Addr& bind,
-            const Options& opts) override;
+            const base::Options& opts) override;
 };
 
 // Returns an io::Reader that maps |close()| to |shutdown(SHUT_RD)|.
@@ -52,7 +52,8 @@ base::Result fdconn(Conn* out, Addr la, Addr ra, base::FD fd);
 // - |p| must be capable of |interpret()|-ing the results of the getsockname(2)
 //   and getpeername(2) functions
 base::Result fdlistenconn(ListenConn* out, std::shared_ptr<Protocol> pr,
-                          Addr aa, base::FD fd, net::Options opts, AcceptFn fn);
+                          Addr aa, base::FD fd, const base::Options& opts,
+                          AcceptFn fn);
 
 }  // namespace net
 

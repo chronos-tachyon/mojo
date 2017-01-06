@@ -77,7 +77,7 @@ base::Result Registry::parse(Addr* out, const std::string& protocol,
 
 void Registry::resolve(event::Task* task, std::vector<Addr>* out,
                        const std::string& protocol, const std::string& address,
-                       const Options& opts) const {
+                       const base::Options& opts) const {
   CHECK_NOTNULL(task);
   CHECK_NOTNULL(out);
   for (const auto& item : items_) {
@@ -90,7 +90,7 @@ void Registry::resolve(event::Task* task, std::vector<Addr>* out,
 }
 
 void Registry::listen(event::Task* task, ListenConn* out, const Addr& bind,
-                      const Options& opts, AcceptFn fn) const {
+                      const base::Options& opts, AcceptFn fn) const {
   CHECK_NOTNULL(task);
   CHECK_NOTNULL(out);
   CHECK(bind);
@@ -105,7 +105,7 @@ void Registry::listen(event::Task* task, ListenConn* out, const Addr& bind,
 }
 
 void Registry::dial(event::Task* task, Conn* out, const Addr& peer,
-                    const Addr& bind, const Options& opts) const {
+                    const Addr& bind, const base::Options& opts) const {
   CHECK_NOTNULL(task);
   CHECK_NOTNULL(out);
   CHECK(peer);
@@ -122,26 +122,26 @@ void Registry::dial(event::Task* task, Conn* out, const Addr& peer,
 base::Result Registry::resolve(std::vector<Addr>* out,
                                const std::string& protocol,
                                const std::string& address,
-                               const Options& opts) const {
+                               const base::Options& opts) const {
   event::Task task;
   resolve(&task, out, protocol, address, opts);
-  event::wait(opts.io().manager(), &task);
+  event::wait(io::get_manager(opts), &task);
   return task.result();
 }
 
 base::Result Registry::listen(ListenConn* out, const Addr& bind,
-                              const Options& opts, AcceptFn fn) const {
+                              const base::Options& opts, AcceptFn fn) const {
   event::Task task;
   listen(&task, out, bind, opts, std::move(fn));
-  event::wait(opts.io().manager(), &task);
+  event::wait(io::get_manager(opts), &task);
   return task.result();
 }
 
 base::Result Registry::dial(Conn* out, const Addr& peer, const Addr& bind,
-                            const Options& opts) const {
+                            const base::Options& opts) const {
   event::Task task;
   dial(&task, out, peer, bind, opts);
-  event::wait(opts.io().manager(), &task);
+  event::wait(io::get_manager(opts), &task);
   return task.result();
 }
 

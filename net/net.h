@@ -29,30 +29,30 @@ base::Result parse(Addr* out, const std::string& protocol,
 // Resolves |address| as a human-readable |protocol| address.
 void resolve(event::Task* task, std::vector<Addr>* out,
              const std::string& protocol, const std::string& address,
-             const Options& opts);
+             const base::Options& opts);
 void resolve(event::Task* task, std::vector<Addr>* out,
              const std::string& protocol, const std::string& address);
 
 // Starts listening on |bind|.
 void listen(event::Task* task, ListenConn* out, const Addr& bind,
-            const Options& opts, AcceptFn fn);
+            const base::Options& opts, AcceptFn fn);
 void listen(event::Task* task, ListenConn* out, const Addr& bind, AcceptFn fn);
 
 // Connects from |bind| to |peer|.
 void dial(event::Task* task, Conn* out, const Addr& peer, const Addr& bind,
-          const Options& opts);
+          const base::Options& opts);
 void dial(event::Task* task, Conn* out, const Addr& peer, const Addr& bind);
 
 // Synchronous versions of the functions above.
 base::Result resolve(std::vector<Addr>* out, const std::string& protocol,
-                     const std::string& address, const Options& opts);
+                     const std::string& address, const base::Options& opts);
 base::Result resolve(std::vector<Addr>* out, const std::string& protocol,
                      const std::string& address);
-base::Result listen(ListenConn* out, const Addr& bind, const Options& opts,
-                    AcceptFn fn);
+base::Result listen(ListenConn* out, const Addr& bind,
+                    const base::Options& opts, AcceptFn fn);
 base::Result listen(ListenConn* out, const Addr& bind, AcceptFn fn);
 base::Result dial(Conn* out, const Addr& peer, const Addr& bind,
-                  const Options& opts);
+                  const base::Options& opts);
 base::Result dial(Conn* out, const Addr& peer, const Addr& bind);
 
 }  // namespace net

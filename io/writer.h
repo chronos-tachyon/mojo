@@ -32,7 +32,7 @@ class WriterImpl {
   //
   //    void write(event::Task* task, std::size_t* n,
   //               const char* ptr, std::size_t len,
-  //               const io::Options& opts) override {
+  //               const base::Options& opts) override {
   //      if (!prologue(task, n, ptr, len)) return;
   //      ...;  // actual implementation
   //      task->finish(result);
@@ -47,7 +47,7 @@ class WriterImpl {
   //
   //    void read_from(event::Task* task, std::size_t* n,
   //                   std::size_t max, const io::Reader& r,
-  //                   const io::Options& opts) override {
+  //                   const base::Options& opts) override {
   //      if (!prologue(task, n, max, r)) return;
   //      ...;  // actual implementation
   //      task->finish(result);
@@ -61,7 +61,7 @@ class WriterImpl {
   // Typical usage:
   //
   //    void close(event::Task* task,
-  //               const io::Options& opts) override {
+  //               const base::Options& opts) override {
   //      if (!prologue(task)) return;
   //      ...;  // actual implementation
   //      task->finish(result);
@@ -99,7 +99,7 @@ class WriterImpl {
   // THREAD SAFETY: Implementations of this function MUST be thread-safe.
   //
   virtual void write(event::Task* task, std::size_t* n, const char* ptr,
-                     std::size_t len, const Options& opts) = 0;
+                     std::size_t len, const base::Options& opts) = 0;
 
   // OPTIONAL. Copies up to |max| bytes from |r| into this Writer.
   // - NEVER copies more than |max| bytes
@@ -115,7 +115,7 @@ class WriterImpl {
   // THREAD SAFETY: Implementations of this function MUST be thread-safe.
   //
   virtual void read_from(event::Task* task, std::size_t* n, std::size_t max,
-                         const Reader& r, const Options& opts);
+                         const Reader& r, const base::Options& opts);
 
   // Closes this Writer, potentially freeing resources.
   // - May be synchronous: implementations may block until the call is complete
@@ -125,7 +125,7 @@ class WriterImpl {
   //
   // THREAD SAFETY: Implementations of this function MUST be thread-safe.
   //
-  virtual void close(event::Task* task, const Options& opts) = 0;
+  virtual void close(event::Task* task, const base::Options& opts) = 0;
 
   // FOR INTERNAL USE ONLY.  DO NOT CALL DIRECTLY.
   //
@@ -203,22 +203,23 @@ class Writer {
   // Writes up to |len| bytes from the buffer at |ptr|.
   // - See |WriterImpl::write| for details of the API contract.
   void write(event::Task* task, std::size_t* n, const char* ptr,
-             std::size_t len, const Options& opts = default_options()) const {
+             std::size_t len,
+             const base::Options& opts = base::default_options()) const {
     assert_valid();
     ptr_->write(task, n, ptr, len, opts);
   }
 
   // Like |write| above, but writes from a std::string.
   void write(event::Task* task, std::size_t* n, const std::string& str,
-             const Options& opts = default_options()) const {
+             const base::Options& opts = base::default_options()) const {
     write(task, n, str.data(), str.size(), opts);
   }
 
   // Synchronous versions of the functions above.
   base::Result write(std::size_t* n, const char* ptr, std::size_t len,
-                     const Options& opts = default_options()) const;
+                     const base::Options& opts = base::default_options()) const;
   base::Result write(std::size_t* n, const std::string& str,
-                     const Options& opts = default_options()) const;
+                     const base::Options& opts = base::default_options()) const;
 
   // }}}
   // Copy directly from Reader to Writer {{{
@@ -228,26 +229,28 @@ class Writer {
   //       See io::copy in io/util.h for a user-friendly interface.
   void read_from(event::Task* task, std::size_t* n, std::size_t max,
                  const Reader& r,
-                 const Options& opts = default_options()) const {
+                 const base::Options& opts = base::default_options()) const {
     assert_valid();
     ptr_->read_from(task, n, max, r, opts);
   }
 
   // Synchronous version of |read_from| above.
-  base::Result read_from(std::size_t* n, std::size_t max, const Reader& r,
-                         const Options& opts = default_options()) const;
+  base::Result read_from(
+      std::size_t* n, std::size_t max, const Reader& r,
+      const base::Options& opts = base::default_options()) const;
 
   // }}}
   // Close {{{
 
   // Closes this Writer, potentially freeing resources.
-  void close(event::Task* task, const Options& opts = default_options()) const {
+  void close(event::Task* task,
+             const base::Options& opts = base::default_options()) const {
     assert_valid();
     ptr_->close(task, opts);
   }
 
   // Synchronous version of |close| above.
-  base::Result close(const Options& opts = default_options()) const;
+  base::Result close(const base::Options& opts = base::default_options()) const;
 
   // }}}
 
@@ -264,9 +267,9 @@ inline bool operator!=(const Writer& a, const Writer& b) noexcept {
 }
 
 using WriteFn = std::function<void(event::Task*, std::size_t*, const char*,
-                                   std::size_t, const Options&)>;
-using SyncWriteFn = std::function<base::Result(std::size_t*, const char*,
-                                               std::size_t, const Options&)>;
+                                   std::size_t, const base::Options&)>;
+using SyncWriteFn = std::function<base::Result(
+    std::size_t*, const char*, std::size_t, const base::Options&)>;
 
 // Returns a Writer that wraps the given functor(s).
 Writer writer(WriteFn wfn, CloseFn cfn);

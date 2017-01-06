@@ -40,8 +40,8 @@ TEST(FakeAddr, Basics) {
 }
 
 TEST(FakeConn, EndToEnd) {
-  net::Options o;
-  const auto& m = o.io().manager();
+  base::Options o;
+  const auto& m = io::get_manager(o);
 
   net::FakeData data;
   auto p = net::fakeprotocol(&data);
@@ -131,8 +131,8 @@ TEST(FakeConn, EndToEnd) {
 }
 
 TEST(FakeProtocol, ParseResolve) {
-  net::Options o;
-  const auto& m = o.io().manager();
+  base::Options o;
+  const auto& m = io::get_manager(o);
 
   net::Registry registry;
   base::token_t token;

@@ -22,8 +22,8 @@
 
 namespace net {
 
-using FakeListenerFn =
-    std::function<void(base::Lock&, event::Task*, Conn*, uint32_t, Options)>;
+using FakeListenerFn = std::function<void(base::Lock&, event::Task*, Conn*,
+                                          uint32_t, const base::Options&)>;
 
 struct FakePortData {
   std::size_t refcount;

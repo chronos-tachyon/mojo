@@ -49,12 +49,12 @@ TEST(Copy, StringReaderStringWriter) {
   std::string out;
   io::Reader r = io::stringreader(in);
   io::Writer w = io::stringwriter(&out);
-  io::Options o;
+  base::Options o;
 
   event::Task task;
   std::size_t n;
   io::copy(&task, &n, w, r, o);
-  event::wait(o.manager(), &task);
+  event::wait(io::get_manager(o), &task);
   EXPECT_OK(task.result());
   EXPECT_EQ(12U, n);
   EXPECT_EQ(out, in);
@@ -62,7 +62,7 @@ TEST(Copy, StringReaderStringWriter) {
   base::log_flush();
 }
 
-static void TestFileFileCopy(io::Options o) {
+static void TestFileFileCopy(const base::Options& o) {
   std::string srcpath, dstpath;
   base::FD srcfd, dstfd;
 
@@ -85,7 +85,7 @@ static void TestFileFileCopy(io::Options o) {
 
   w = io::fdwriter(srcfd);
   w.write(&task, &n, in.data(), N, o);
-  event::wait(o.manager(), &task);
+  event::wait(io::get_manager(o), &task);
   EXPECT_OK(task.result());
   EXPECT_EQ(N, n);
 
@@ -98,7 +98,7 @@ static void TestFileFileCopy(io::Options o) {
   w = io::fdwriter(dstfd);
   task.reset();
   io::copy_n(&task, &n, N, w, r, o);
-  event::wait(o.manager(), &task);
+  event::wait(io::get_manager(o), &task);
   EXPECT_OK(task.result());
   EXPECT_EQ(N, n);
 
@@ -112,7 +112,7 @@ static void TestFileFileCopy(io::Options o) {
   r = io::fdreader(dstfd);
   task.reset();
   r.read(&task, out.data(), &n, 1, out.size(), o);
-  event::wait(o.manager(), &task);
+  event::wait(io::get_manager(o), &task);
   EXPECT_OK(task.result());
   EXPECT_EQ(N, n);
   out.resize(n);
@@ -124,41 +124,41 @@ static void TestFileFileCopy(io::Options o) {
 }
 
 TEST(Copy, FileFileLoop512) {
-  io::Options o;
-  o.set_manager(make_manager());
-  o.set_block_size(512);
-  o.set_transfer_mode(io::TransferMode::read_write);
+  base::Options o;
+  o.get<io::Options>().manager = make_manager();
+  o.get<io::Options>().block_size = 512;
+  o.get<io::Options>().transfer_mode = io::TransferMode::read_write;
   TestFileFileCopy(o);
 }
 
 TEST(Copy, FileFileLoop4K) {
-  io::Options o;
-  o.set_manager(make_manager());
-  o.set_block_size(4096);
-  o.set_transfer_mode(io::TransferMode::read_write);
+  base::Options o;
+  o.get<io::Options>().manager = make_manager();
+  o.get<io::Options>().block_size = 4096;
+  o.get<io::Options>().transfer_mode = io::TransferMode::read_write;
   TestFileFileCopy(o);
 }
 
 TEST(Copy, FileFileSendfile) {
-  io::Options o;
-  o.set_manager(make_manager());
-  o.set_transfer_mode(io::TransferMode::sendfile);
+  base::Options o;
+  o.get<io::Options>().manager = make_manager();
+  o.get<io::Options>().transfer_mode = io::TransferMode::sendfile;
   TestFileFileCopy(o);
 }
 
 TEST(Copy, FileFileSplice) {
-  io::Options o;
-  o.set_manager(make_manager());
-  o.set_transfer_mode(io::TransferMode::splice);
+  base::Options o;
+  o.get<io::Options>().manager = make_manager();
+  o.get<io::Options>().transfer_mode = io::TransferMode::splice;
   TestFileFileCopy(o);
 }
 
 TEST(Copy, SocketShuffle) {
   event::Manager m = make_manager();
-  io::Options o;
-  o.set_manager(m);
-  o.set_block_size(4096);
-  o.set_transfer_mode(io::TransferMode::read_write);
+  base::Options o;
+  o.get<io::Options>().manager = m;
+  o.get<io::Options>().block_size = 4096;
+  o.get<io::Options>().transfer_mode = io::TransferMode::read_write;
 
   base::SocketPair rdpair, wrpair;
   ASSERT_OK(base::make_socketpair(&rdpair, AF_UNIX, SOCK_STREAM, 0));

@@ -37,81 +37,33 @@ enum class TransferMode : uint8_t {
 };
 
 struct Options : public base::OptionsType {
- private:
-  enum bits {
-    bit_blocksize = (1U << 0),
-  };
+  // Use this event::Manager to perform async I/O.
+  event::Manager manager;
 
- public:
-  Options() noexcept : blocksize_(0),
-                       transfer_(TransferMode::system_default),
-                       has_(0) {}
+  // Use this BufferPool (if provided) for obtaining scratch buffers.
+  BufferPool pool;
+
+  // Overrides the preferred I/O block size, or 0 to use the default.
+  // - If non-zero, this value should almost certainly be a power of two.
+  std::size_t block_size;
+
+  // Determines how data should be copied from a Reader to a Writer.
+  TransferMode transfer_mode;
+
+  Options() noexcept : block_size(0),
+                       transfer_mode(TransferMode::system_default) {}
   Options(const Options&) noexcept = default;
   Options(Options&&) noexcept = default;
   Options& operator=(const Options&) noexcept = default;
   Options& operator=(Options&&) noexcept = default;
 
   // Resets this io::Options to the default values.
-  void reset() {
-    has_ = 0;
-    blocksize_ = 0;
-    manager_ = event::Manager();
-    pool_ = BufferPool();
-    transfer_ = TransferMode::system_default;
-  }
-
-  // Returns the event::Manager on which to perform async I/O.
-  event::Manager manager() const {
-    return manager_.or_system_manager();  // Always returns a Manager
-  }
-  void set_manager(event::Manager m) { manager_ = std::move(m); }
-
-  // Returns an optional BufferPool to use for obtaining scratch buffers.
-  // A BufferPool can reduce the number of allocations made during copies.
-  // - The BufferPool buffer size must be at least as large as the block_size.
-  BufferPool pool() const noexcept { return pool_; }
-  void set_pool(BufferPool pool) noexcept { pool_ = pool; }
-
-  // Returns the preferred I/O block size.
-  //
-  // If |.first == true|, then |.second| is the user-specified block size.
-  // If |.first == false|, then I/O will use implementation-defined defaults.
-  //
-  // This value should almost certainly be a power of two.
-  //
-  std::pair<bool, std::size_t> block_size() const noexcept {
-    return std::make_pair((has_ & bit_blocksize) != 0, blocksize_);
-  }
-  void reset_block_size() noexcept {
-    has_ &= ~bit_blocksize;
-    blocksize_ = 0;
-  }
-  void set_block_size(std::size_t n) noexcept {
-    blocksize_ = n;
-    has_ |= bit_blocksize;
-  }
-
-  // Returns which transfer mode should be used.
-  // See the description of the TransferMode enum for more information.
-  TransferMode transfer_mode() const noexcept { return transfer_; }
-  void reset_transfer_mode() noexcept {
-    transfer_ = TransferMode::system_default;
-  }
-  void set_transfer_mode(TransferMode value) noexcept { transfer_ = value; }
-
- private:
-  event::Manager manager_;
-  BufferPool pool_;
-  std::size_t blocksize_;
-  TransferMode transfer_;
-  uint8_t has_;
+  void reset() { *this = Options(); }
 };
 
-// Returns the default Options. Thread-safe.
-Options default_options() noexcept;
-
-// Changes the default Options. Thread-safe.
-void set_default_options(Options opts) noexcept;
+inline event::Manager get_manager(const base::Options& opts) {
+  return opts.get<Options>().manager.or_system_manager();
+}
 
 }  // namespace io
 

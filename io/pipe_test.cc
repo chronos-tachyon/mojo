@@ -9,7 +9,8 @@ TEST(Pipe, EndToEnd) {
   io::Writer w;
   io::make_pipe(&r, &w);
 
-  event::Manager m = io::default_options().manager();
+  base::Options o;
+  event::Manager m = io::get_manager(o);
 
   event::Task rd0, rd1, rd2;
   std::size_t n0, n1, n2;
@@ -20,22 +21,22 @@ TEST(Pipe, EndToEnd) {
   std::size_t m0, m1, m2;
 
   LOG(INFO) << "reading 8 bytes at offset 0";
-  r.read(&rd0, buf, &n0, 8, 8);
+  r.read(&rd0, buf, &n0, 8, 8, o);
 
   LOG(INFO) << "reading 4 bytes at offset 8";
-  r.read(&rd1, buf + 8, &n1, 4, 4);
+  r.read(&rd1, buf + 8, &n1, 4, 4, o);
 
   LOG(INFO) << "writing 4 bytes";
-  w.write(&wr0, &m0, "abcd", 4);
+  w.write(&wr0, &m0, "abcd", 4, o);
 
   LOG(INFO) << "writing 8 bytes";
-  w.write(&wr1, &m1, "efghijkl", 8);
+  w.write(&wr1, &m1, "efghijkl", 8, o);
 
   LOG(INFO) << "writing 4 bytes";
-  w.write(&wr2, &m2, "mnop", 4);
+  w.write(&wr2, &m2, "mnop", 4, o);
 
   LOG(INFO) << "reading 4 bytes at offset 12";
-  r.read(&rd2, buf + 12, &n2, 4, 4);
+  r.read(&rd2, buf + 12, &n2, 4, 4, o);
 
   LOG(INFO) << "waiting for all tasks";
   event::wait_all({m}, {&rd0, &rd1, &rd2, &wr0, &wr1, &wr2});
@@ -58,10 +59,10 @@ TEST(Pipe, EndToEnd) {
   std::size_t n3, m3;
 
   LOG(INFO) << "writing 2 bytes";
-  w.write(&wr3, &m3, "qr", 2);
+  w.write(&wr3, &m3, "qr", 2, o);
 
   LOG(INFO) << "closing pipe";
-  w.close(&cl);
+  w.close(&cl, o);
 
   LOG(INFO) << "waiting for completion";
   event::wait_all({m}, {&wr3, &cl});
@@ -71,7 +72,7 @@ TEST(Pipe, EndToEnd) {
   EXPECT_OK(cl.result());
 
   LOG(INFO) << "reading 4 bytes at offset 0";
-  r.read(&rd3, buf, &n3, 4, 4);
+  r.read(&rd3, buf, &n3, 4, 4, o);
 
   LOG(INFO) << "waiting for completion";
   event::wait(m, &rd3);

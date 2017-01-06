@@ -49,17 +49,17 @@ struct AcceptHelper {
   Countdown* const talk;
   const std::size_t id;
   const net::Conn conn;
-  const net::Options options;
+  const base::Options options;
   event::Task task;
   std::size_t n;
   char buf[64];
 
   AcceptHelper(Countdown* t, std::size_t id, net::Conn c,
-               net::Options opts) noexcept : talk(t),
-                                             id(id),
-                                             conn(std::move(c)),
-                                             options(std::move(opts)),
-                                             n(0) {
+               base::Options opts) noexcept : talk(t),
+                                              id(id),
+                                              conn(std::move(c)),
+                                              options(std::move(opts)),
+                                              n(0) {
     ::bzero(buf, sizeof(buf));
     VLOG(0) << "net::AcceptHelper::AcceptHelper";
   }
@@ -70,12 +70,12 @@ struct AcceptHelper {
   }
 
   event::DispatcherPtr dispatcher() const noexcept {
-    return options.io().manager().dispatcher();
+    return io::get_manager(options).dispatcher();
   }
 
   void run() {
     LOG(INFO) << "server #" << id << ": read";
-    conn.reader().read(&task, buf, &n, 1, sizeof(buf), options.io());
+    conn.reader().read(&task, buf, &n, 1, sizeof(buf), options);
     auto closure = [this] { return read_complete(); };
     task.on_finished(dispatcher(), event::callback(closure));
   }
@@ -107,7 +107,7 @@ struct AcceptHelper {
     task.reset();
     str.assign(buf, len);
     LOG(INFO) << "server #" << id << ": write '" << str << "'";
-    conn.writer().write(&task, &n, buf, len, options.io());
+    conn.writer().write(&task, &n, buf, len, options);
     auto closure = [this] { return write_complete(); };
     task.on_finished(dispatcher(), event::callback(closure));
     return base::Result();
@@ -122,7 +122,7 @@ struct AcceptHelper {
     }
     task.reset();
     LOG(INFO) << "server #" << id << ": read";
-    conn.reader().read(&task, buf, &n, 1, sizeof(buf), options.io());
+    conn.reader().read(&task, buf, &n, 1, sizeof(buf), options);
     auto closure = [this] { return read_complete(); };
     task.on_finished(dispatcher(), event::callback(closure));
     return base::Result();
@@ -131,7 +131,7 @@ struct AcceptHelper {
   void bomb_out() {
     task.reset();
     LOG(INFO) << "server #" << id << ": close";
-    conn.close(&task, options.io());
+    conn.close(&task, options);
     auto closure = [this] { return close_complete(); };
     task.on_finished(dispatcher(), event::callback(closure));
   }
@@ -150,20 +150,20 @@ struct TestHelper {
   const std::size_t id;
   const std::string send;
   const std::string recv;
-  const net::Options options;
+  const base::Options options;
   event::Task task;
   net::Conn conn;
   std::size_t n;
   char buf[64];
 
   TestHelper(Countdown* d, Countdown* t, std::size_t id, std::string s,
-             std::string r, net::Options o) noexcept : dial(d),
-                                                       talk(t),
-                                                       id(id),
-                                                       send(std::move(s)),
-                                                       recv(std::move(r)),
-                                                       options(std::move(o)),
-                                                       n(0) {
+             std::string r, base::Options o) noexcept : dial(d),
+                                                        talk(t),
+                                                        id(id),
+                                                        send(std::move(s)),
+                                                        recv(std::move(r)),
+                                                        options(std::move(o)),
+                                                        n(0) {
     ::bzero(buf, sizeof(buf));
     VLOG(0) << "client #" << id << ": net::TestHelper::TestHelper";
   }
@@ -174,7 +174,7 @@ struct TestHelper {
   }
 
   event::DispatcherPtr dispatcher() const noexcept {
-    return options.io().manager().dispatcher();
+    return io::get_manager(options).dispatcher();
   }
 
   void run(Protocol* pr, Addr peer) {
@@ -194,7 +194,7 @@ struct TestHelper {
     }
     task.reset();
     LOG(INFO) << "client #" << id << ": write '" << send << "'";
-    conn.writer().write(&task, &n, send.data(), send.size(), options.io());
+    conn.writer().write(&task, &n, send.data(), send.size(), options);
     auto closure = [this] { return write_complete(); };
     task.on_finished(dispatcher(), event::callback(closure));
     return base::Result();
@@ -210,7 +210,7 @@ struct TestHelper {
     }
     task.reset();
     LOG(INFO) << "client #" << id << ": read";
-    conn.reader().read(&task, buf, &n, 1, sizeof(buf), options.io());
+    conn.reader().read(&task, buf, &n, 1, sizeof(buf), options);
     auto closure = [this] { return read_complete(); };
     task.on_finished(dispatcher(), event::callback(closure));
     return base::Result();
@@ -228,7 +228,7 @@ struct TestHelper {
   void bomb_out() {
     task.reset();
     LOG(INFO) << "client #" << id << ": close";
-    conn.close(&task, options.io());
+    conn.close(&task, options);
     auto closure = [this] { return close_complete(); };
     task.on_finished(dispatcher(), event::callback(closure));
   }
@@ -255,8 +255,8 @@ static void TestListenAndDial_Common(std::shared_ptr<Protocol> pr, Addr addr,
   event::Manager m;
   ASSERT_OK(event::new_manager(&m, mo));
 
-  net::Options opts;
-  opts.io().set_manager(m);
+  base::Options opts;
+  opts.get<io::Options>().manager = m;
 
   auto acceptfn = [&last_id, &dial, &talk, &opts](net::Conn c) {
     std::size_t id = last_id.fetch_add(1) + 1;
@@ -279,7 +279,7 @@ static void TestListenAndDial_Common(std::shared_ptr<Protocol> pr, Addr addr,
 
   LOG(INFO) << "[listener-accept:" << name << "]";
   base::log_flush();
-  EXPECT_OK(l.start(opts.io()));
+  EXPECT_OK(l.start(opts));
 
   LOG(INFO) << "[clients-create:" << name << "]";
   for (auto t : {
@@ -299,7 +299,7 @@ static void TestListenAndDial_Common(std::shared_ptr<Protocol> pr, Addr addr,
 
   LOG(INFO) << "[listener-close:" << name << "]";
   base::log_flush();
-  EXPECT_OK(l.close(opts.io()));
+  EXPECT_OK(l.close(opts));
 
   LOG(INFO) << "[talk-wait:" << name << "]";
   event::wait(m, talk.task());

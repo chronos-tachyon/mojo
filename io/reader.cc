@@ -86,7 +86,7 @@ bool ReaderImpl::prologue(event::Task* task) {
 }
 
 void ReaderImpl::write_to(event::Task* task, std::size_t* n, std::size_t max,
-                          const Writer& w, const Options& opts) {
+                          const Writer& w, const base::Options& opts) {
   if (prologue(task, n, max, w)) task->finish(base::Result::not_implemented());
 }
 
@@ -126,11 +126,11 @@ struct StringReadHelper {
 }  // anonymous namespace
 
 void Reader::read(event::Task* task, std::string* out, std::size_t min,
-                  std::size_t max, const Options& opts) const {
+                  std::size_t max, const base::Options& opts) const {
   out->clear();
   if (!task->start()) return;
 
-  BufferPool pool = opts.pool();
+  BufferPool pool = opts.get<io::Options>().pool;
   OwnedBuffer buf;
   bool give_back;
   if (pool.pool_size() >= max) {
@@ -150,33 +150,33 @@ void Reader::read(event::Task* task, std::string* out, std::size_t min,
 }
 
 base::Result Reader::read(char* out, std::size_t* n, std::size_t min,
-                          std::size_t max, const Options& opts) const {
+                          std::size_t max, const base::Options& opts) const {
   event::Task task;
   read(&task, out, n, min, max, opts);
-  event::wait(opts.manager(), &task);
+  event::wait(get_manager(opts), &task);
   return task.result();
 }
 
 base::Result Reader::read(std::string* out, std::size_t min, std::size_t max,
-                          const Options& opts) const {
+                          const base::Options& opts) const {
   event::Task task;
   read(&task, out, min, max, opts);
-  event::wait(opts.manager(), &task);
+  event::wait(get_manager(opts), &task);
   return task.result();
 }
 
 base::Result Reader::write_to(std::size_t* n, std::size_t max, const Writer& w,
-                              const Options& opts) const {
+                              const base::Options& opts) const {
   event::Task task;
   write_to(&task, n, max, w, opts);
-  event::wait(opts.manager(), &task);
+  event::wait(get_manager(opts), &task);
   return task.result();
 }
 
-base::Result Reader::close(const Options& opts) const {
+base::Result Reader::close(const base::Options& opts) const {
   event::Task task;
   close(&task, opts);
-  event::wait(opts.manager(), &task);
+  event::wait(get_manager(opts), &task);
   return task.result();
 }
 
@@ -191,11 +191,11 @@ class FunctionReader : public ReaderImpl {
   }
 
   void read(event::Task* task, char* out, std::size_t* n, std::size_t min,
-            std::size_t max, const Options& opts) override {
+            std::size_t max, const base::Options& opts) override {
     rfn_(task, out, n, min, max, opts);
   }
 
-  void close(event::Task* task, const Options& opts) override {
+  void close(event::Task* task, const base::Options& opts) override {
     cfn_(task, opts);
   }
 
@@ -214,12 +214,12 @@ class SyncFunctionReader : public ReaderImpl {
   }
 
   void read(event::Task* task, char* out, std::size_t* n, std::size_t min,
-            std::size_t max, const Options& opts) override {
+            std::size_t max, const base::Options& opts) override {
     if (prologue(task, out, n, min, max))
       task->finish(rfn_(out, n, min, max, opts));
   }
 
-  void close(event::Task* task, const Options& opts) override {
+  void close(event::Task* task, const base::Options& opts) override {
     if (prologue(task)) task->finish(cfn_(opts));
   }
 
@@ -237,16 +237,16 @@ class CloseIgnoringReader : public ReaderImpl {
   }
 
   void read(event::Task* task, char* out, std::size_t* n, std::size_t min,
-            std::size_t max, const Options& opts) override {
+            std::size_t max, const base::Options& opts) override {
     r_.read(task, out, n, min, max, opts);
   }
 
   void write_to(event::Task* task, std::size_t* n, std::size_t max,
-                const Writer& w, const Options& opts) override {
+                const Writer& w, const base::Options& opts) override {
     r_.write_to(task, n, max, w, opts);
   }
 
-  void close(event::Task* task, const Options& opts) override {
+  void close(event::Task* task, const base::Options& opts) override {
     if (prologue(task)) task->finish_ok();
   }
 
@@ -264,7 +264,7 @@ class LimitedReader : public ReaderImpl {
   }
 
   void read(event::Task* task, char* out, std::size_t* n, std::size_t min,
-            std::size_t max, const Options& opts) override {
+            std::size_t max, const base::Options& opts) override {
     if (!prologue(task, out, n, min, max)) return;
 
     auto lock = base::acquire_lock(mu_);
@@ -292,7 +292,7 @@ class LimitedReader : public ReaderImpl {
   }
 
   void write_to(event::Task* task, std::size_t* n, std::size_t max,
-                const Writer& w, const Options& opts) override {
+                const Writer& w, const base::Options& opts) override {
     *n = 0;
 
     auto* lock = new base::Lock(mu_);
@@ -307,7 +307,7 @@ class LimitedReader : public ReaderImpl {
     task->on_finished(event::callback(closure));
   }
 
-  void close(event::Task* task, const Options& opts) override {
+  void close(event::Task* task, const base::Options& opts) override {
     r_.close(task, opts);
   }
 
@@ -332,7 +332,7 @@ class StringOrBufferReader : public ReaderImpl {
   }
 
   void read(event::Task* task, char* out, std::size_t* n, std::size_t min,
-            std::size_t max, const Options& opts) override {
+            std::size_t max, const base::Options& opts) override {
     if (!prologue(task, out, n, min, max)) return;
 
     auto lock = base::acquire_lock(mu_);
@@ -357,7 +357,7 @@ class StringOrBufferReader : public ReaderImpl {
   }
 
   void write_to(event::Task* task, std::size_t* n, std::size_t max,
-                const Writer& w, const Options& opts) override {
+                const Writer& w, const base::Options& opts) override {
     *n = 0;
 
     auto* lock = new base::Lock(mu_);
@@ -382,7 +382,7 @@ class StringOrBufferReader : public ReaderImpl {
     task->on_finished(event::callback(closure));
   }
 
-  void close(event::Task* task, const Options& opts) override {
+  void close(event::Task* task, const base::Options& opts) override {
     auto lock = base::acquire_lock(mu_);
     bool was = closed_;
     closed_ = true;
@@ -410,7 +410,7 @@ class NullReader : public ReaderImpl {
   std::size_t ideal_block_size() const noexcept override { return 64; }
 
   void read(event::Task* task, char* out, std::size_t* n, std::size_t min,
-            std::size_t max, const Options& opts) override {
+            std::size_t max, const base::Options& opts) override {
     if (!prologue(task, out, n, min, max)) return;
     base::Result r;
     if (min > 0) r = base::Result::eof();
@@ -419,13 +419,13 @@ class NullReader : public ReaderImpl {
   }
 
   void write_to(event::Task* task, std::size_t* n, std::size_t max,
-                const Writer& w, const Options& opts) override {
+                const Writer& w, const base::Options& opts) override {
     if (!prologue(task, n, max, w)) return;
     *n = 0;
     task->finish_ok();
   }
 
-  void close(event::Task* task, const Options& opts) override {
+  void close(event::Task* task, const base::Options& opts) override {
     if (prologue(task)) task->finish_ok();
   }
 };
@@ -439,14 +439,14 @@ class ZeroReader : public ReaderImpl {
   }
 
   void read(event::Task* task, char* out, std::size_t* n, std::size_t min,
-            std::size_t max, const Options& opts) override {
+            std::size_t max, const base::Options& opts) override {
     if (!prologue(task, out, n, min, max)) return;
     if (max > 0) ::bzero(out, max);
     *n = max;
     task->finish_ok();
   }
 
-  void close(event::Task* task, const Options& opts) override {
+  void close(event::Task* task, const base::Options& opts) override {
     if (prologue(task)) task->finish_ok();
   }
 };
@@ -465,16 +465,17 @@ class FDReader : public ReaderImpl {
     std::size_t* const n;
     const std::size_t min;
     const std::size_t max;
-    const Options options;
+    const base::Options options;
     event::FileDescriptor rdevt;
 
     ReadOp(event::Task* t, char* o, std::size_t* n, std::size_t mn,
-           std::size_t mx, Options opts) noexcept : task(t),
-                                                    out(o),
-                                                    n(n),
-                                                    min(mn),
-                                                    max(mx),
-                                                    options(std::move(opts)) {}
+           std::size_t mx, base::Options opts) noexcept
+        : task(t),
+          out(o),
+          n(n),
+          min(mn),
+          max(mx),
+          options(std::move(opts)) {}
     void cancel() override { task->cancel(); }
     bool process(FDReader* reader) override;
   };
@@ -484,16 +485,16 @@ class FDReader : public ReaderImpl {
     std::size_t* const n;
     const std::size_t max;
     const Writer writer;
-    const Options options;
+    const base::Options options;
     event::FileDescriptor rdevt;
     event::FileDescriptor wrevt;
 
     WriteToOp(event::Task* t, std::size_t* n, std::size_t mx, Writer w,
-              Options opts) noexcept : task(t),
-                                       n(n),
-                                       max(mx),
-                                       writer(std::move(w)),
-                                       options(std::move(opts)) {}
+              base::Options opts) noexcept : task(t),
+                                             n(n),
+                                             max(mx),
+                                             writer(std::move(w)),
+                                             options(std::move(opts)) {}
     void cancel() override { task->cancel(); }
     bool process(FDReader* reader) override;
   };
@@ -506,10 +507,10 @@ class FDReader : public ReaderImpl {
   }
 
   void read(event::Task* task, char* out, std::size_t* n, std::size_t min,
-            std::size_t max, const Options& opts) override;
+            std::size_t max, const base::Options& opts) override;
   void write_to(event::Task* task, std::size_t* n, std::size_t max,
-                const Writer& w, const Options& opts) override;
-  void close(event::Task* task, const Options& opts) override;
+                const Writer& w, const base::Options& opts) override;
+  void close(event::Task* task, const base::Options& opts) override;
 
   base::FD internal_readerfd() const override { return fd_; }
 
@@ -517,7 +518,7 @@ class FDReader : public ReaderImpl {
   void process(base::Lock& lock);
   base::Result wake(event::Set set);
   base::Result arm(event::FileDescriptor* evt, const base::FD& fd,
-                   event::Set set, const Options& o);
+                   event::Set set, const base::Options& o);
 
   const base::FD fd_;
   mutable std::mutex mu_;
@@ -543,7 +544,8 @@ FDReader::~FDReader() noexcept {
 }
 
 void FDReader::read(event::Task* task, char* out, std::size_t* n,
-                    std::size_t min, std::size_t max, const Options& opts) {
+                    std::size_t min, std::size_t max,
+                    const base::Options& opts) {
   if (!prologue(task, out, n, min, max)) return;
   auto lock = base::acquire_lock(mu_);
   VLOG(6) << "io::FDReader::read: min=" << min << ", max=" << max;
@@ -552,7 +554,7 @@ void FDReader::read(event::Task* task, char* out, std::size_t* n,
 }
 
 void FDReader::write_to(event::Task* task, std::size_t* n, std::size_t max,
-                        const Writer& w, const Options& opts) {
+                        const Writer& w, const base::Options& opts) {
   if (!prologue(task, n, max, w)) return;
   auto lock = base::acquire_lock(mu_);
   VLOG(6) << "io::FDReader::write_to: max=" << max;
@@ -560,7 +562,7 @@ void FDReader::write_to(event::Task* task, std::size_t* n, std::size_t max,
   process(lock);
 }
 
-void FDReader::close(event::Task* task, const Options& opts) {
+void FDReader::close(event::Task* task, const base::Options& opts) {
   VLOG(6) << "io::FDReader::close";
   base::Result r = fd_->close();
   if (prologue(task)) task->finish(std::move(r));
@@ -604,11 +606,11 @@ base::Result FDReader::wake(event::Set set) {
 }
 
 base::Result FDReader::arm(event::FileDescriptor* evt, const base::FD& fd,
-                           event::Set set, const Options& o) {
+                           event::Set set, const base::Options& o) {
   DCHECK_NOTNULL(evt);
   base::Result r;
   if (!*evt) {
-    event::Manager manager = o.manager();
+    event::Manager manager = get_manager(o);
     auto closure = [this](event::Data data) { return wake(data.events); };
     r = manager.fd(evt, fd, set, event::handler(closure));
   }
@@ -717,7 +719,7 @@ bool FDReader::WriteToOp::process(FDReader* reader) {
     return true;
   }
 
-  auto xm = options.transfer_mode();
+  auto xm = options.get<io::Options>().transfer_mode;
   if (xm == TransferMode::system_default) xm = default_transfer_mode();
 
   base::FD rfd = reader->fd_;
@@ -880,18 +882,18 @@ class MultiReader : public ReaderImpl {
     std::size_t* const n;
     const std::size_t min;
     const std::size_t max;
-    const Options options;
+    const base::Options options;
     event::Task subtask;
     std::size_t subn;
 
     Op(event::Task* t, char* o, std::size_t* n, std::size_t mn, std::size_t mx,
-       Options opts) noexcept : task(t),
-                                out(o),
-                                n(n),
-                                min(mn),
-                                max(mx),
-                                options(std::move(opts)),
-                                subn(0) {}
+       base::Options opts) noexcept : task(t),
+                                      out(o),
+                                      n(n),
+                                      min(mn),
+                                      max(mx),
+                                      options(std::move(opts)),
+                                      subn(0) {}
     bool process(MultiReader* reader);
   };
 
@@ -939,7 +941,7 @@ class MultiReader : public ReaderImpl {
   }
 
   void read(event::Task* task, char* out, std::size_t* n, std::size_t min,
-            std::size_t max, const Options& opts) override {
+            std::size_t max, const base::Options& opts) override {
     if (!prologue(task, out, n, min, max)) return;
     auto lock = base::acquire_lock(mu_);
     q_.emplace_back(new Op(task, out, n, min, max, opts));
@@ -947,7 +949,7 @@ class MultiReader : public ReaderImpl {
     process(lock);
   }
 
-  void close(event::Task* task, const Options& opts) override {
+  void close(event::Task* task, const base::Options& opts) override {
     std::size_t size = vec_.size();
     auto* helper = new CloseHelper(task, size);
     auto closure = [helper] { return helper->run(); };

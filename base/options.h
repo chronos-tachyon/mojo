@@ -1,3 +1,7 @@
+// base/options.h - Container for passing around options
+// Copyright © 2016 by Donald King <chronos@chronos-tachyon.net>
+// Available under the MIT License. See LICENSE for details.
+
 #ifndef BASE_OPTIONS_H
 #define BASE_OPTIONS_H
 
@@ -81,6 +85,12 @@ class Options {
 
   std::unordered_map<std::type_index, std::unique_ptr<HolderBase>> map_;
 };
+
+// Returns the default Options. Thread-safe.
+Options default_options() noexcept;
+
+// Changes the default Options. Thread-safe.
+void set_default_options(Options opts) noexcept;
 
 }  // namespace base
 

@@ -22,10 +22,10 @@ TEST(MockReader, EndToEnd) {
   bool ready = false;
 
   io::MockReader mr;
+  const base::Options o;
   io::Reader r = io::mockreader(&mr);
-  event::Manager m = io::default_options().manager();
 
-  std::thread t0([&mu, &cv, &ready, &mr, r, m] {
+  std::thread t0([&mu, &cv, &ready, &mr, &o, r] {
     mr.expect({
         Mock(Verb::write_to, "Hello, world!\n"),
     });
@@ -38,13 +38,13 @@ TEST(MockReader, EndToEnd) {
     io::Writer w = io::stringwriter(&out);
     event::Task task;
     std::size_t n;
-    io::copy(&task, &n, w, r);
-    event::wait(m, &task);
+    io::copy(&task, &n, w, r, o);
+    event::wait(io::get_manager(o), &task);
     EXPECT_OK(task.result());
     EXPECT_EQ("Hello, world!\n", out);
   });
 
-  std::thread t1([&mu, &cv, &ready, &mr, r, m] {
+  std::thread t1([&mu, &cv, &ready, &mr, &o, r] {
     mr.expect({
         Mock(Verb::write_to, "", base::Result::not_implemented()),
         Mock(Verb::read, "Hello, world!\n"),
@@ -59,8 +59,8 @@ TEST(MockReader, EndToEnd) {
     io::Writer w = io::stringwriter(&out);
     event::Task task;
     std::size_t n;
-    io::copy(&task, &n, w, r);
-    event::wait(m, &task);
+    io::copy(&task, &n, w, r, o);
+    event::wait(io::get_manager(o), &task);
     EXPECT_OK(task.result());
     EXPECT_EQ("Hello, world!\n", out);
   });
@@ -78,8 +78,8 @@ TEST(MockReader, EndToEnd) {
   t1.join();
 
   event::Task task;
-  r.close(&task);
-  event::wait(m, &task);
+  r.close(&task, o);
+  event::wait(io::get_manager(o), &task);
   EXPECT_OK(task.result());
 
   mr.verify();
