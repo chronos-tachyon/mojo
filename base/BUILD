@@ -17,6 +17,7 @@ cc_library(
     "stopwatch.cc",
     "time.cc",
     "token.cc",
+    "user.cc",
   ],
   hdrs = [
     "backport.h",
@@ -32,6 +33,7 @@ cc_library(
     "stopwatch.h",
     "time.h",
     "token.h",
+    "user.h",
   ],
   linkopts = ["-pthread"],
   visibility = ["//visibility:public"],
@@ -128,6 +130,17 @@ cc_test(
   timeout = "short",
 )
 
+cc_test(
+  name = "user_test",
+  srcs = ["user_test.cc"],
+  deps = [
+    ":base",
+    "//external:gtest",
+  ],
+  size = "small",
+  timeout = "short",
+)
+
 cc_library(
   name = "clockfake",
   srcs = ["clockfake.cc"],
@@ -158,4 +171,10 @@ cc_test(
   ],
   size = "small",
   timeout = "short",
+)
+
+cc_binary(
+  name = "user_lookup",
+  srcs = ["user_lookup.cc"],
+  deps = [":base"],
 )
