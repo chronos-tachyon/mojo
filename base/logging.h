@@ -145,60 +145,43 @@ struct LogEntry {
   level_t level;
   std::string message;
 
-  LogEntry() noexcept : tid(0), file(nullptr), line(0) {
-    ::bzero(&time, sizeof(time));
-  }
+  LogEntry() noexcept : time(), tid(0), file(nullptr), line(0) {}
 
   LogEntry(const char* file, unsigned int line, level_t level,
            std::string message) noexcept;
 
-  LogEntry(const LogEntry& other)
-    : tid(other.tid),
-      file(other.file),
-      line(other.line),
-      level(other.level),
-      message(other.message) {
-    ::memcpy(&time, &other.time, sizeof(time));
-  }
+  LogEntry(const LogEntry& other) = default;
 
   LogEntry(LogEntry&& other) noexcept
-    : tid(other.tid),
+    : time(other.time),
+      tid(other.tid),
       file(other.file),
       line(other.line),
       level(other.level),
       message(std::move(other.message)) {
-    ::memcpy(&time, &other.time, sizeof(time));
+    other.clear();
   }
 
-  LogEntry& operator=(const LogEntry& other) {
-    ::memcpy(&time, &other.time, sizeof(time));
-    tid = other.tid;
-    file = other.file;
-    line = other.line;
-    level = other.level;
-    message = other.message;
-    return *this;
-  }
+  LogEntry& operator=(const LogEntry& other) = default;
 
   LogEntry& operator=(LogEntry&& other) noexcept {
-    ::memcpy(&time, &other.time, sizeof(time));
-    ::bzero(&other.time, sizeof(time));
-
+    time = other.time;
     tid = other.tid;
-    other.tid = 0;
-
     file = other.file;
-    other.file = nullptr;
-
     line = other.line;
-    other.line = 0;
-
     level = other.level;
-    other.level = level_t();
-
     message = std::move(other.message);
-
+    other.clear();
     return *this;
+  }
+
+  void clear() noexcept {
+    ::bzero(&time, sizeof(time));
+    tid = 0;
+    file = nullptr;
+    line = 0;
+    level = level_t();
+    message.clear();
   }
 
   explicit operator bool() const noexcept {
