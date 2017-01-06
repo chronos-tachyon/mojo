@@ -13,6 +13,7 @@ cc_library(
     "fd.cc",
     "logging.cc",
     "mutex.cc",
+    "options.cc",
     "result.cc",
     "stopwatch.cc",
     "time.cc",
@@ -29,6 +30,7 @@ cc_library(
     "fd.h",
     "logging.h",
     "mutex.h",
+    "options.h",
     "result.h",
     "stopwatch.h",
     "time.h",
@@ -92,6 +94,17 @@ cc_test(
     ":result_testing",
     "//external:gtest",
     "//external:re2",
+  ],
+  size = "small",
+  timeout = "short",
+)
+
+cc_test(
+  name = "options_test",
+  srcs = ["options_test.cc"],
+  deps = [
+    ":base",
+    "//external:gtest",
   ],
   size = "small",
   timeout = "short",

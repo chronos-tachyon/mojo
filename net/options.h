@@ -7,6 +7,7 @@
 
 #include <cstdint>
 
+#include "base/options.h"
 #include "io/options.h"
 
 namespace net {
@@ -26,7 +27,7 @@ enum class DualListen : uint8_t {
 };
 
 // Options represents knobs that can be tweaked for network connections.
-class Options {
+class Options : public base::OptionsType {
  private:
   enum {
     io_bit = (1U << 0),

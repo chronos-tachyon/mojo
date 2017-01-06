@@ -7,6 +7,7 @@
 
 #include <cstdint>
 
+#include "base/options.h"
 #include "event/manager.h"
 #include "io/buffer.h"
 
@@ -35,7 +36,7 @@ enum class TransferMode : uint8_t {
   system_default = 255,
 };
 
-class Options {
+struct Options : public base::OptionsType {
  private:
   enum bits {
     bit_blocksize = (1U << 0),
