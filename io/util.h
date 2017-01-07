@@ -38,6 +38,9 @@ inline base::Result copy(std::size_t* copied, Writer w, Reader r,
   return copy_n(copied, max, std::move(w), std::move(r), opts);
 }
 
+__attribute__((const)) std::size_t gcd(std::size_t a, std::size_t b) noexcept;
+__attribute__((const)) std::size_t lcm(std::size_t a, std::size_t b) noexcept;
+
 }  // namespace io
 
 #endif  // IO_UTIL_H

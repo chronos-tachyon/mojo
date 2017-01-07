@@ -8,22 +8,6 @@
 
 #include "base/logging.h"
 
-__attribute__((const)) static std::size_t gcd(std::size_t a,
-                                              std::size_t b) noexcept {
-  std::size_t t;
-  while (b != 0) {
-    t = b;
-    b = a % b;
-    a = t;
-  }
-  return a;
-}
-
-__attribute__((const)) static std::size_t lcm(std::size_t a,
-                                              std::size_t b) noexcept {
-  return a / gcd(a, b) * b;
-}
-
 namespace io {
 
 namespace {
@@ -194,6 +178,20 @@ void copy_n(event::Task* task, std::size_t* copied, std::size_t max, Writer w,
   auto* helper =
       new CopyHelper(task, copied, max, std::move(w), std::move(r), opts);
   helper->begin();
+}
+
+__attribute__((const)) std::size_t gcd(std::size_t a, std::size_t b) noexcept {
+  std::size_t t;
+  while (b != 0) {
+    t = b;
+    b = a % b;
+    a = t;
+  }
+  return a;
+}
+
+__attribute__((const)) std::size_t lcm(std::size_t a, std::size_t b) noexcept {
+  return a / gcd(a, b) * b;
 }
 
 }  // namespace io

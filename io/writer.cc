@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <vector>
 
+#include "base/backport.h"
 #include "base/cleanup.h"
 #include "base/logging.h"
 #include "base/mutex.h"
@@ -19,13 +20,23 @@
 
 namespace io {
 
+static void propagate_result(event::Task* dst, const event::Task* src) {
+  try {
+    dst->finish(src->result());
+  } catch (...) {
+    dst->finish_exception(std::current_exception());
+  }
+}
+
 bool WriterImpl::prologue(event::Task* task, std::size_t* n, const char* ptr,
                           std::size_t len) {
   CHECK_NOTNULL(task);
   CHECK_NOTNULL(n);
   CHECK(len == 0 || ptr != nullptr);
-  *n = 0;
-  return task->start();
+
+  bool start = task->start();
+  if (start) *n = 0;
+  return start;
 }
 
 bool WriterImpl::prologue(event::Task* task, std::size_t* n, std::size_t max,
@@ -33,8 +44,10 @@ bool WriterImpl::prologue(event::Task* task, std::size_t* n, std::size_t max,
   CHECK_NOTNULL(task);
   CHECK_NOTNULL(n);
   r.assert_valid();
-  *n = 0;
-  return task->start();
+
+  bool start = task->start();
+  if (start) *n = 0;
+  return start;
 }
 
 bool WriterImpl::prologue(event::Task* task) {
@@ -47,11 +60,7 @@ void WriterImpl::read_from(event::Task* task, std::size_t* n, std::size_t max,
   if (prologue(task, n, max, r)) task->finish(base::Result::not_implemented());
 }
 
-void Writer::assert_valid() const {
-  if (!ptr_) {
-    LOG(FATAL) << "BUG: io::Writer is empty!";
-  }
-}
+void Writer::assert_valid() const { CHECK(ptr_) << ": io::Writer is empty!"; }
 
 base::Result Writer::write(std::size_t* n, const char* ptr, std::size_t len,
                            const base::Options& opts) const {
@@ -175,13 +184,15 @@ class StringWriter : public WriterImpl {
   void write(event::Task* task, std::size_t* n, const char* ptr,
              std::size_t len, const base::Options& opts) override {
     if (!prologue(task, n, ptr, len)) return;
+
     auto lock = base::acquire_lock(mu_);
     if (closed_) {
       task->finish(writer_closed());
       return;
     }
-    str_->append(ptr, ptr + len);
+    str_->append(ptr, len);
     lock.unlock();
+
     *n = len;
     task->finish_ok();
   }
@@ -191,6 +202,7 @@ class StringWriter : public WriterImpl {
     bool was = closed_;
     closed_ = true;
     lock.unlock();
+
     if (prologue(task)) {
       if (was)
         task->finish(writer_closed());
@@ -213,6 +225,8 @@ class BufferWriter : public WriterImpl {
     *buflen_ = 0;
   }
 
+  ~BufferWriter() noexcept override { mu_.lock(); }
+
   std::size_t ideal_block_size() const noexcept override {
     return kDefaultIdealBlockSize;
   }
@@ -220,17 +234,21 @@ class BufferWriter : public WriterImpl {
   void write(event::Task* task, std::size_t* n, const char* ptr,
              std::size_t len, const base::Options& opts) override {
     if (!prologue(task, n, ptr, len)) return;
+
     auto lock = base::acquire_lock(mu_);
     if (closed_) {
       task->finish(writer_closed());
       return;
     }
+
     char* data = buf_.data() + *buflen_;
     std::size_t size = buf_.size() - *buflen_;
     if (size > len) size = len;
+
     ::memcpy(data, ptr, size);
     *buflen_ += size;
     lock.unlock();
+
     *n = size;
     if (size < len)
       task->finish(writer_full());
@@ -240,26 +258,23 @@ class BufferWriter : public WriterImpl {
 
   void read_from(event::Task* task, std::size_t* n, std::size_t max,
                  const Reader& r, const base::Options& opts) override {
-    *n = 0;
+    if (!prologue(task, n, max, r)) return;
 
     auto lock = base::acquire_lock(mu_);
     if (closed_) {
-      if (task->start()) task->finish(writer_closed());
+      task->finish(writer_closed());
       return;
     }
+
     char* data = buf_.data() + *buflen_;
     std::size_t size = buf_.size() - *buflen_;
     if (size > max) size = max;
-    lock.unlock();
 
-    r.read(task, data, n, 0, size, opts);
-
-    auto closure = [this, n] {
-      auto lock = base::acquire_lock(mu_);
-      *buflen_ += *n;
-      return base::Result();
-    };
-    task->on_finished(event::callback(closure));
+    auto helper =
+        base::backport::make_unique<Helper>(task, n, buflen_, std::move(lock));
+    auto* st = &helper->subtask;
+    r.read(st, data, n, 0, size, opts);
+    st->on_finished(std::move(helper));
   }
 
   void close(event::Task* task, const base::Options& opts) override {
@@ -267,6 +282,7 @@ class BufferWriter : public WriterImpl {
     bool was = closed_;
     closed_ = true;
     lock.unlock();
+
     if (prologue(task)) {
       if (was)
         task->finish(writer_closed());
@@ -276,6 +292,29 @@ class BufferWriter : public WriterImpl {
   }
 
  private:
+  struct Helper : public event::Callback {
+    event::Task* const task;
+    std::size_t* const n;
+    std::size_t* const buflen;
+    base::Lock lock;
+    event::Task subtask;
+
+    Helper(event::Task* t, std::size_t* n, std::size_t* l,
+           base::Lock lk) noexcept : task(t),
+                                     n(n),
+                                     buflen(l),
+                                     lock(std::move(lk)) {
+      task->add_subtask(&subtask);
+    }
+
+    base::Result run() override {
+      *buflen += *n;
+      lock.unlock();
+      propagate_result(task, &subtask);
+      return base::Result();
+    }
+  };
+
   const Buffer buf_;
   std::size_t* const buflen_;
   mutable std::mutex mu_;
@@ -317,7 +356,6 @@ class FullWriter : public WriterImpl {
   void write(event::Task* task, std::size_t* n, const char* ptr,
              std::size_t len, const base::Options& opts) override {
     if (!prologue(task, n, ptr, len)) return;
-    *n = 0;
     base::Result r;
     if (len > 0) r = writer_full();
     task->finish(std::move(r));

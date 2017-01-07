@@ -26,10 +26,13 @@
 #include <mutex>
 #include <stdexcept>
 
+#include "base/backport.h"
 #include "base/cleanup.h"
 #include "base/logging.h"
 #include "base/mutex.h"
 #include "io/writer.h"
+
+namespace io {
 
 using RC = base::ResultCode;
 
@@ -55,10 +58,8 @@ static bool propagate_failure(event::Task* dst, const event::Task* src) {
   return false;
 }
 
-namespace io {
-
 static TransferMode default_transfer_mode() noexcept {
-  return io::TransferMode::read_write;  // TODO: probe this on first access
+  return TransferMode::read_write;  // TODO: probe this on first access
 }
 
 bool ReaderImpl::prologue(event::Task* task, char* out, std::size_t* n,
@@ -67,8 +68,10 @@ bool ReaderImpl::prologue(event::Task* task, char* out, std::size_t* n,
   CHECK_NOTNULL(out);
   CHECK_NOTNULL(n);
   CHECK_LE(min, max);
-  *n = 0;
-  return task->start();
+
+  bool start = task->start();
+  if (start) *n = 0;
+  return start;
 }
 
 bool ReaderImpl::prologue(event::Task* task, std::size_t* n, std::size_t max,
@@ -76,8 +79,10 @@ bool ReaderImpl::prologue(event::Task* task, std::size_t* n, std::size_t max,
   CHECK_NOTNULL(task);
   CHECK_NOTNULL(n);
   w.assert_valid();
-  *n = 0;
-  return task->start();
+
+  bool start = task->start();
+  if (start) *n = 0;
+  return start;
 }
 
 bool ReaderImpl::prologue(event::Task* task) {
@@ -90,11 +95,7 @@ void ReaderImpl::write_to(event::Task* task, std::size_t* n, std::size_t max,
   if (prologue(task, n, max, w)) task->finish(base::Result::not_implemented());
 }
 
-void Reader::assert_valid() const {
-  if (!ptr_) {
-    LOG(FATAL) << "BUG: io::Reader is empty!";
-  }
-}
+void Reader::assert_valid() const { CHECK(ptr_) << ": io::Reader is empty!"; }
 
 namespace {
 struct StringReadHelper {
@@ -127,8 +128,10 @@ struct StringReadHelper {
 
 void Reader::read(event::Task* task, std::string* out, std::size_t min,
                   std::size_t max, const base::Options& opts) const {
-  out->clear();
+  CHECK_NOTNULL(task);
+  CHECK_NOTNULL(out);
   if (!task->start()) return;
+  out->clear();
 
   BufferPool pool = opts.get<io::Options>().pool;
   OwnedBuffer buf;
@@ -259,6 +262,8 @@ class LimitedReader : public ReaderImpl {
   LimitedReader(Reader r, std::size_t max)
       : r_(std::move(r)), remaining_(max) {}
 
+  ~LimitedReader() noexcept override { mu_.lock(); }
+
   std::size_t ideal_block_size() const noexcept override {
     return r_.ideal_block_size();
   }
@@ -272,39 +277,25 @@ class LimitedReader : public ReaderImpl {
     std::size_t amin = std::min(min, remaining_);
     bool eof = (amax < min);
 
-    auto* subtask = new event::Task;
-    task->add_subtask(subtask);
-    r_.read(subtask, out, n, amin, amax, opts);
-
-    auto closure = [this, task, n, subtask, eof](base::Lock lock) {
-      remaining_ -= *n;
-      lock.unlock();
-      if (propagate_failure(task, subtask)) {
-        if (eof)
-          task->finish(base::Result::eof());
-        else
-          task->finish_ok();
-      }
-      delete subtask;
-      return base::Result();
-    };
-    subtask->on_finished(event::callback(closure, std::move(lock)));
+    auto helper = base::backport::make_unique<Helper>(task, n, &remaining_, eof,
+                                                      std::move(lock));
+    auto* st = &helper->subtask;
+    r_.read(st, out, n, amin, amax, opts);
+    st->on_finished(std::move(helper));
   }
 
   void write_to(event::Task* task, std::size_t* n, std::size_t max,
                 const Writer& w, const base::Options& opts) override {
-    *n = 0;
+    if (!prologue(task, n, max, w)) return;
 
-    auto* lock = new base::Lock(mu_);
-    if (max > remaining_) max = remaining_;
-    r_.write_to(task, n, max, w, opts);
+    auto lock = base::acquire_lock(mu_);
+    std::size_t amax = std::min(max, remaining_);
 
-    auto closure = [this, n, lock] {
-      remaining_ -= *n;
-      delete lock;
-      return base::Result();
-    };
-    task->on_finished(event::callback(closure));
+    auto helper = base::backport::make_unique<Helper>(task, n, &remaining_,
+                                                      false, std::move(lock));
+    auto* st = &helper->subtask;
+    r_.write_to(st, n, amax, w, opts);
+    st->on_finished(std::move(helper));
   }
 
   void close(event::Task* task, const base::Options& opts) override {
@@ -312,7 +303,38 @@ class LimitedReader : public ReaderImpl {
   }
 
  private:
-  Reader r_;
+  struct Helper : public event::Callback {
+    event::Task* const task;
+    std::size_t* const n;
+    std::size_t* const remaining;
+    const bool eof;
+    base::Lock lock;
+    event::Task subtask;
+
+    Helper(event::Task* t, std::size_t* n, std::size_t* r, bool e,
+           base::Lock lk) noexcept : task(t),
+                                     n(n),
+                                     remaining(r),
+                                     eof(e),
+                                     lock(std::move(lk)) {
+      task->add_subtask(&subtask);
+    }
+
+    base::Result run() override {
+      CHECK_GE(*remaining, *n);
+      *remaining -= *n;
+      lock.unlock();
+      if (propagate_failure(task, &subtask)) {
+        if (eof)
+          task->finish(base::Result::eof());
+        else
+          task->finish_ok();
+      }
+      return base::Result();
+    }
+  };
+
+  const Reader r_;
   mutable std::mutex mu_;
   std::size_t remaining_;
 };
@@ -327,6 +349,8 @@ class StringOrBufferReader : public ReaderImpl {
                                                    pos_(0),
                                                    closed_(false) {}
 
+  ~StringOrBufferReader() noexcept override { mu_.lock(); }
+
   std::size_t ideal_block_size() const noexcept override {
     return kDefaultIdealBlockSize;
   }
@@ -336,7 +360,6 @@ class StringOrBufferReader : public ReaderImpl {
     if (!prologue(task, out, n, min, max)) return;
 
     auto lock = base::acquire_lock(mu_);
-
     if (closed_) {
       task->finish(reader_closed());
       return;
@@ -358,13 +381,11 @@ class StringOrBufferReader : public ReaderImpl {
 
   void write_to(event::Task* task, std::size_t* n, std::size_t max,
                 const Writer& w, const base::Options& opts) override {
-    *n = 0;
+    if (!prologue(task, n, max, w)) return;
 
-    auto* lock = new base::Lock(mu_);
-
+    auto lock = base::acquire_lock(mu_);
     if (closed_) {
-      delete lock;
-      if (task->start()) task->finish(reader_closed());
+      task->finish(reader_closed());
       return;
     }
 
@@ -372,14 +393,11 @@ class StringOrBufferReader : public ReaderImpl {
     std::size_t len = buf_.size() - pos_;
     if (len > max) len = max;
 
-    w.write(task, n, ptr, len, opts);
-
-    auto closure = [this, n, lock] {
-      pos_ += *n;
-      delete lock;
-      return base::Result();
-    };
-    task->on_finished(event::callback(closure));
+    auto helper =
+        base::backport::make_unique<Helper>(task, n, &pos_, std::move(lock));
+    auto* st = &helper->subtask;
+    w.write(st, n, ptr, len, opts);
+    st->on_finished(std::move(helper));
   }
 
   void close(event::Task* task, const base::Options& opts) override {
@@ -396,6 +414,29 @@ class StringOrBufferReader : public ReaderImpl {
   }
 
  private:
+  struct Helper : public event::Callback {
+    event::Task* const task;
+    std::size_t* const n;
+    std::size_t* const pos;
+    base::Lock lock;
+    event::Task subtask;
+
+    Helper(event::Task* t, std::size_t* n, std::size_t* p,
+           base::Lock lk) noexcept : task(t),
+                                     n(n),
+                                     pos(p),
+                                     lock(std::move(lk)) {
+      task->add_subtask(&subtask);
+    }
+
+    base::Result run() override {
+      *pos += *n;
+      lock.unlock();
+      propagate_result(task, &subtask);
+      return base::Result();
+    }
+  };
+
   const std::string str_;
   const ConstBuffer buf_;
   mutable std::mutex mu_;
@@ -726,6 +767,7 @@ bool FDReader::WriteToOp::process(FDReader* reader) {
   base::FD wfd = writer.implementation()->internal_writerfd();
   base::Result r;
 
+#if HAVE_SPLICE
   // Try using splice(2)
   if (xm >= TransferMode::splice && wfd) {
     while (*n < max) {
@@ -794,7 +836,9 @@ bool FDReader::WriteToOp::process(FDReader* reader) {
     goto finish;
   }
 no_splice:
+#endif  // HAVE_SPLICE
 
+#ifdef HAVE_SENDFILE
   // Try using sendfile(2)
   if (xm >= TransferMode::sendfile && wfd) {
     while (*n < max) {
@@ -862,6 +906,7 @@ no_splice:
     goto finish;
   }
 no_sendfile:
+#endif  // HAVE_SENDFILE
 
   // Nothing else left to try
   r = base::Result::not_implemented();
