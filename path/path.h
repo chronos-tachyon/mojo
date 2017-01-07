@@ -10,10 +10,17 @@
 
 namespace path {
 
-// Cleans up a logical path name
+// Partially cleans up a path.
+// - Collapses 'foo//bar' into 'foo/bar'
+// - Removes redundant '.' components
+// - Does NOT process '..' components
+std::string partial_clean(const std::string& path);
+
+// Cleans up a path name according to logical rules.
+// - This may change the meaning of the path in the face of symlinks!
 std::string clean(const std::string& path);
 
-// Splits a path into a parent directory + a base filename
+// Splits a path into a parent directory + a base filename.
 std::pair<std::string, std::string> split(const std::string& path);
 
 // Returns the parent directory of a path.

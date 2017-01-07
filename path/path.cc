@@ -7,6 +7,72 @@
 
 namespace path {
 
+std::string partial_clean(const std::string& path) {
+  std::string out;
+  out.reserve(path.size());
+
+  const char* p = path.data();
+  const char* q = p + path.size();
+
+  if (p == q) {
+    out.push_back('.');
+    goto end;
+  }
+
+  if (*p == '/') {
+    out.push_back('/');
+    ++p;
+  }
+
+  while (p != q) {
+    // Handle repeated slashes
+    if (*p == '/') {
+      ++p;
+      continue;
+    }
+
+    // Handle '.'
+    if (*p == '.') {
+      ++p;
+      // partial: '.<unexamined>'
+      if (p == q) {
+        // '.$'
+        break;
+      }
+      if (*p == '/') {
+        // './<rest>'
+        ++p;
+        continue;
+      }
+      --p;
+    }
+
+    // Add missing slash:
+    //    'foo'  -> 'foo/'
+    //    '/foo' -> '/foo/'
+    //    '/'    -> '/'
+    if (!out.empty() && out.back() != '/') out.push_back('/');
+
+    // Append component characters:
+    //    'foo/'  -> 'foo/bar'
+    //    '/foo/' -> '/foo/bar'
+    //    '/'     -> '/bar'
+    while (p != q && *p != '/') {
+      out.push_back(*p);
+      ++p;
+    }
+
+    // Skip past the component's final slash, if any
+    if (p != q) ++p;
+  }
+
+  // Turn '' -> '.'
+  if (out.empty()) out.push_back('.');
+
+end:
+  return out;
+}
+
 std::string clean(const std::string& path) {
   std::string out;
   out.reserve(path.size());

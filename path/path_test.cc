@@ -3,84 +3,148 @@
 
 #include "gtest/gtest.h"
 
+#include <vector>
+
 #include "path/path.h"
 
-TEST(Path, CleanRooted) {
-  EXPECT_EQ("/", path::clean("/"));
-  EXPECT_EQ("/", path::clean("//"));
+TEST(Path, Clean) {
+  struct TestItem {
+    std::string input;
+    std::string expected_partial;
+    std::string expected_full;
+  };
 
-  EXPECT_EQ("/", path::clean("/."));
-  EXPECT_EQ("/", path::clean("//."));
+  std::vector<TestItem> testdata{
+      // Relative {{{
+      {"", ".", "."},
 
-  EXPECT_EQ("/", path::clean("/./"));
-  EXPECT_EQ("/", path::clean("//.//"));
+      {".", ".", "."},
+      {"..", "..", ".."},
+      {"foo", "foo", "foo"},
+      {"foo/.", "foo", "foo"},
+      {"foo/..", "foo/..", "."},
+      {"foo/bar", "foo/bar", "foo/bar"},
+      {"foo/./bar", "foo/bar", "foo/bar"},
+      {"foo/../bar", "foo/../bar", "bar"},
+      {"./foo", "foo", "foo"},
+      {"../foo", "../foo", "../foo"},
+      {"../foo/..", "../foo/..", ".."},
+      {"../foo/../bar", "../foo/../bar", "../bar"},
 
-  EXPECT_EQ("/", path::clean("/.."));
-  EXPECT_EQ("/", path::clean("//.."));
+      // Trailing slashes {{{
+      {"./", ".", "."},
+      {"../", "..", ".."},
+      {"foo/", "foo", "foo"},
+      {"foo/./", "foo", "foo"},
+      {"foo/../", "foo/..", "."},
+      {"foo/bar/", "foo/bar", "foo/bar"},
+      {"foo/./bar/", "foo/bar", "foo/bar"},
+      {"foo/../bar/", "foo/../bar", "bar"},
+      {"./foo/", "foo", "foo"},
+      {"../foo/", "../foo", "../foo"},
+      {"../foo/../", "../foo/..", ".."},
+      {"../foo/../bar/", "../foo/../bar", "../bar"},
+      // }}}
+      // }}}
 
-  EXPECT_EQ("/", path::clean("/../"));
-  EXPECT_EQ("/", path::clean("//..//"));
+      // Absolute {{{
+      {"/", "/", "/"},
 
-  EXPECT_EQ("/", path::clean("/foo/.."));
-  EXPECT_EQ("/", path::clean("//foo//.."));
+      {"/.", "/", "/"},
+      {"/..", "/..", "/"},
+      {"/foo", "/foo", "/foo"},
+      {"/foo/.", "/foo", "/foo"},
+      {"/foo/./bar", "/foo/bar", "/foo/bar"},
+      {"/foo/..", "/foo/..", "/"},
+      {"/foo/../bar", "/foo/../bar", "/bar"},
+      {"/foo/./..", "/foo/..", "/"},
+      {"/foo/./../bar", "/foo/../bar", "/bar"},
+      {"/./foo", "/foo", "/foo"},
+      {"/../foo", "/../foo", "/foo"},
 
-  EXPECT_EQ("/", path::clean("/foo/../"));
-  EXPECT_EQ("/", path::clean("//foo//..//"));
+      // Trailing slashes {{{
+      {"/./", "/", "/"},
+      {"/../", "/..", "/"},
+      {"/foo/", "/foo", "/foo"},
+      {"/foo/./", "/foo", "/foo"},
+      {"/foo/./bar/", "/foo/bar", "/foo/bar"},
+      {"/foo/../", "/foo/..", "/"},
+      {"/foo/../bar/", "/foo/../bar", "/bar"},
+      {"/foo/./../", "/foo/..", "/"},
+      {"/foo/./../bar/", "/foo/../bar", "/bar"},
+      {"/./foo/", "/foo", "/foo"},
+      {"/../foo/", "/../foo", "/foo"},
+      // }}}
+      // }}}
 
-  EXPECT_EQ("/foo", path::clean("/./foo"));
-  EXPECT_EQ("/foo", path::clean("//.//foo"));
+      // Doubled slashes {{{
 
-  EXPECT_EQ("/foo", path::clean("/../foo/"));
-  EXPECT_EQ("/foo", path::clean("//..//foo//"));
+      // Relative {{{
 
-  EXPECT_EQ("/bar", path::clean("/foo/../bar"));
-  EXPECT_EQ("/bar", path::clean("//foo//..//bar"));
+      {"foo//.", "foo", "foo"},
+      {"foo//..", "foo/..", "."},
+      {"foo//bar", "foo/bar", "foo/bar"},
+      {"foo//.//bar", "foo/bar", "foo/bar"},
+      {"foo//..//bar", "foo/../bar", "bar"},
+      {".//foo", "foo", "foo"},
+      {"..//foo", "../foo", "../foo"},
+      {"..//foo//..", "../foo/..", ".."},
+      {"..//foo//..//bar", "../foo/../bar", "../bar"},
 
-  EXPECT_EQ("/bar", path::clean("/foo/./../bar"));
-  EXPECT_EQ("/bar", path::clean("//foo//.//..//bar/"));
-}
+      // Trailing slashes {{{
+      {".//", ".", "."},
+      {"..//", "..", ".."},
+      {"foo//", "foo", "foo"},
+      {"foo//.//", "foo", "foo"},
+      {"foo//..//", "foo/..", "."},
+      {"foo//bar//", "foo/bar", "foo/bar"},
+      {"foo//.//bar//", "foo/bar", "foo/bar"},
+      {"foo//..//bar//", "foo/../bar", "bar"},
+      {".//foo//", "foo", "foo"},
+      {"..//foo//", "../foo", "../foo"},
+      {"..//foo//..//", "../foo/..", ".."},
+      {"..//foo//..//bar//", "../foo/../bar", "../bar"},
+      // }}}
+      // }}}
 
-TEST(Path, CleanRelative) {
-  EXPECT_EQ(".", path::clean(""));
-  EXPECT_EQ(".", path::clean("."));
-  EXPECT_EQ(".", path::clean("./"));
-  EXPECT_EQ(".", path::clean(".//"));
+      // Absolute {{{
+      {"//", "/", "/"},
 
-  EXPECT_EQ("foo", path::clean("foo"));
-  EXPECT_EQ("foo", path::clean("foo/"));
-  EXPECT_EQ("foo", path::clean("foo//"));
-  EXPECT_EQ("foo", path::clean("./foo"));
-  EXPECT_EQ("foo", path::clean(".//foo"));
-  EXPECT_EQ("foo", path::clean("./foo/"));
-  EXPECT_EQ("foo", path::clean(".//foo//"));
+      {"//.", "/", "/"},
+      {"//..", "/..", "/"},
+      {"//foo", "/foo", "/foo"},
+      {"//foo//.", "/foo", "/foo"},
+      {"//foo//.//bar", "/foo/bar", "/foo/bar"},
+      {"//foo//..", "/foo/..", "/"},
+      {"//foo//..//bar", "/foo/../bar", "/bar"},
+      {"//foo//.//..", "/foo/..", "/"},
+      {"//foo//.//..//bar", "/foo/../bar", "/bar"},
+      {"//.//foo", "/foo", "/foo"},
+      {"//..//foo", "/../foo", "/foo"},
 
-  EXPECT_EQ("foo/bar", path::clean("foo/bar"));
-  EXPECT_EQ("foo/bar", path::clean("foo//bar"));
-  EXPECT_EQ("foo/bar", path::clean("foo/bar/"));
-  EXPECT_EQ("foo/bar", path::clean("foo//bar//"));
-  EXPECT_EQ("foo/bar", path::clean("./foo/bar"));
-  EXPECT_EQ("foo/bar", path::clean(".//foo//bar"));
-  EXPECT_EQ("foo/bar", path::clean("./foo/bar/"));
-  EXPECT_EQ("foo/bar", path::clean(".//foo//bar//"));
+      // Trailing slashes {{{
+      {"//.//", "/", "/"},
+      {"//..//", "/..", "/"},
+      {"//foo//", "/foo", "/foo"},
+      {"//foo//.//", "/foo", "/foo"},
+      {"//foo//.//bar//", "/foo/bar", "/foo/bar"},
+      {"//foo//..//", "/foo/..", "/"},
+      {"//foo//..//bar//", "/foo/../bar", "/bar"},
+      {"//foo//.//..//", "/foo/..", "/"},
+      {"//foo//.//..//bar//", "/foo/../bar", "/bar"},
+      {"//.//foo//", "/foo", "/foo"},
+      {"//..//foo//", "/../foo", "/foo"},
+      // }}}
+      // }}}
 
-  EXPECT_EQ("..", path::clean(".."));
-  EXPECT_EQ("..", path::clean("../"));
-  EXPECT_EQ("..", path::clean("..//"));
+      // }}}
+  };
 
-  EXPECT_EQ("../foo", path::clean("../foo"));
-  EXPECT_EQ("../foo", path::clean("..//foo"));
-  EXPECT_EQ("../foo", path::clean("../foo/"));
-  EXPECT_EQ("../foo", path::clean("..//foo//"));
-
-  EXPECT_EQ("..", path::clean("../foo/.."));
-  EXPECT_EQ("..", path::clean("..//foo//.."));
-  EXPECT_EQ("..", path::clean("../foo/../"));
-  EXPECT_EQ("..", path::clean("..//foo//..//"));
-
-  EXPECT_EQ("../bar", path::clean("../foo/../bar"));
-  EXPECT_EQ("../bar", path::clean("..//foo//..//bar"));
-  EXPECT_EQ("../bar", path::clean("../foo/../bar/"));
-  EXPECT_EQ("../bar", path::clean("..//foo//..//bar//"));
+  for (const auto& row : testdata) {
+    SCOPED_TRACE(row.input);
+    EXPECT_EQ(row.expected_partial, path::partial_clean(row.input));
+    EXPECT_EQ(row.expected_full, path::clean(row.input));
+  }
 }
 
 using Pair = std::pair<std::string, std::string>;
