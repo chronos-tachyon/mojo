@@ -10,6 +10,11 @@
 
 namespace path {
 
+// Returns true iff the given path is absolute.
+inline bool is_abs(const std::string& path) {
+  return !path.empty() && path.front() == '/';
+}
+
 // Partially cleans up a path.
 // - Collapses 'foo//bar' into 'foo/bar'
 // - Removes redundant '.' components
@@ -17,7 +22,10 @@ namespace path {
 std::string partial_clean(const std::string& path);
 
 // Cleans up a path name according to logical rules.
-// - This may change the meaning of the path in the face of symlinks!
+// - Collapses 'foo//bar' into 'foo/bar'
+// - Removes redundant '.' components
+// - Collapses 'foo/../bar' into 'bar'
+//   - NOTE: This may change the meaning of the path in the face of symlinks!
 std::string clean(const std::string& path);
 
 // Splits a path into a parent directory + a base filename.
