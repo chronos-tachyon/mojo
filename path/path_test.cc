@@ -89,15 +89,57 @@ static Pair P(std::string a, std::string b) {
   return std::make_pair(std::move(a), std::move(b));
 }
 
-TEST(Path, split) {
-  EXPECT_EQ(P("/", ""), path::split("/"));
-  EXPECT_EQ(P("/", "foo"), path::split("/foo"));
-  EXPECT_EQ(P("/foo", "bar"), path::split("/foo/bar"));
+TEST(Path, Split) {
+  // Test cases are taken from:
+  //
+  //   for x in "" .{,/} ..{,/} foo{,/,/bar} ./foo{,/,/bar} ../foo{,/,/bar} / /foo{,/,/bar}
+  //   do
+  //     printf '[%10s] [%10s] [%10s]\n' "$x" "$(dirname "$x")" "$(basename "$x")"
+  //   done
+  //
+  // Which outputs:
+  //
+  //   [          ] [         .] [          ]
+  //   [         .] [         .] [         .]
+  //   [        ./] [         .] [         .]
+  //   [        ..] [         .] [        ..]
+  //   [       ../] [         .] [        ..]
+  //   [       foo] [         .] [       foo]
+  //   [      foo/] [         .] [       foo]
+  //   [   foo/bar] [       foo] [       bar]
+  //   [     ./foo] [         .] [       foo]
+  //   [    ./foo/] [         .] [       foo]
+  //   [ ./foo/bar] [     ./foo] [       bar]
+  //   [    ../foo] [        ..] [       foo]
+  //   [   ../foo/] [        ..] [       foo]
+  //   [../foo/bar] [    ../foo] [       bar]
+  //   [         /] [         /] [         /]
+  //   [      /foo] [         /] [       foo]
+  //   [     /foo/] [         /] [       foo]
+  //   [  /foo/bar] [      /foo] [       bar]
 
   EXPECT_EQ(P(".", ""), path::split(""));
-  EXPECT_EQ(P(".", ""), path::split("."));
+
+  EXPECT_EQ(P(".", "."), path::split("."));
+  EXPECT_EQ(P(".", "."), path::split("./"));
+
+  EXPECT_EQ(P(".", ".."), path::split(".."));
+  EXPECT_EQ(P(".", ".."), path::split("../"));
+
   EXPECT_EQ(P(".", "foo"), path::split("foo"));
+  EXPECT_EQ(P(".", "foo"), path::split("foo/"));
   EXPECT_EQ(P("foo", "bar"), path::split("foo/bar"));
-  EXPECT_EQ(P("..", ""), path::split(".."));
+
+  EXPECT_EQ(P(".", "foo"), path::split("./foo"));
+  EXPECT_EQ(P(".", "foo"), path::split("./foo/"));
+  EXPECT_EQ(P("./foo", "bar"), path::split("./foo/bar"));
+
   EXPECT_EQ(P("..", "foo"), path::split("../foo"));
+  EXPECT_EQ(P("..", "foo"), path::split("../foo/"));
+  EXPECT_EQ(P("../foo", "bar"), path::split("../foo/bar"));
+
+  EXPECT_EQ(P("/", "/"), path::split("/"));
+  EXPECT_EQ(P("/", "foo"), path::split("/foo"));
+  EXPECT_EQ(P("/", "foo"), path::split("/foo/"));
+  EXPECT_EQ(P("/foo", "bar"), path::split("/foo/bar"));
 }

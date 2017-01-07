@@ -16,6 +16,14 @@ std::string clean(const std::string& path);
 // Splits a path into a directory path + a base filename
 std::pair<std::string, std::string> split(const std::string& path);
 
+inline std::string dirname(const std::string& path) {
+  return split(path).first;
+}
+
+inline std::string basename(const std::string& path) {
+  return split(path).second;
+}
+
 }  // namespace path
 
 #endif  // PATH_PATH_H

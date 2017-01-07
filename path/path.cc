@@ -120,25 +120,31 @@ std::pair<std::string, std::string> split(const std::string& path) {
     goto end;
   }
 
-  // '.' -> ('.', '')
-  if (end == begin + 1 && *begin == '.') {
-    out.first.push_back('.');
-    goto end;
+  // Trim trailing slashes
+  //   'foo'   -> 'foo'
+  //   'foo/'  -> 'foo'
+  //   '/'     -> ''
+  //   '/foo'  -> '/foo'
+  //   '/foo/' -> '/foo'
+  while (end != begin) {
+    --end;
+    if (*end != '/') {
+      ++end;
+      break;
+    }
   }
 
-  // '..' -> ('..', '')
-  if (end == begin + 2 && *begin == '.' && *(begin + 1) == '.') {
-    out.first.push_back('.');
-    out.first.push_back('.');
+  // '' (was '/') -> ('/', '/')
+  if (end == begin) {
+    out.first.push_back('/');
+    out.second.push_back('/');
     goto end;
   }
 
   // Find start of final component
   //   'foo'      -> ('',      'foo')
-  //   'foo/'     -> ('foo/',  '')
   //   'foo/bar'  -> ('foo/',  'bar')
   //   '/foo'     -> ('/',     'foo')
-  //   '/foo/'    -> ('/foo/', '')
   //   '/foo/bar' -> ('/foo/', 'bar')
   ptr = end;
   while (ptr != begin) {
@@ -157,8 +163,10 @@ std::pair<std::string, std::string> split(const std::string& path) {
   }
 
   // Trim trailing slashes
+  //   'foo'   -> 'foo'
   //   'foo/'  -> 'foo'
   //   '/'     -> ''
+  //   '/foo'  -> '/foo'
   //   '/foo/' -> '/foo'
   while (ptr != begin) {
     --ptr;
