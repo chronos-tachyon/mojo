@@ -5,10 +5,14 @@
 #ifndef BASE_TIME_H
 #define BASE_TIME_H
 
+#include <sys/time.h>
+#include <time.h>
+
 #include <memory>
 #include <string>
 
 #include "base/duration.h"
+#include "base/result.h"
 
 namespace base {
 
@@ -200,6 +204,12 @@ inline MonotonicTime& MonotonicTime::operator-=(Duration b) {
 }
 
 // }}}
+
+Result time_from_timeval(Time* out, const struct timeval* tv);
+Result time_from_timespec(Time* out, const struct timespec* ts);
+
+Result timeval_from_time(struct timeval* out, Time time);
+Result timespec_from_time(struct timespec* out, Time time);
 
 }  // namespace base
 
