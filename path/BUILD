@@ -4,19 +4,17 @@
 cc_library(
   name = "path",
   srcs = [
-    "clean.cc",
+    "path.cc",
   ],
   hdrs = [
-    "clean.h",
-  ],
-  deps = [
+    "path.h",
   ],
   visibility = ["//visibility:public"],
 )
 
 cc_test(
-  name = "clean_test",
-  srcs = ["clean_test.cc"],
+  name = "path_test",
+  srcs = ["path_test.cc"],
   deps = [
     ":path",
     "//external:gtest",

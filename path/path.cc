@@ -1,7 +1,7 @@
-// Copyright © 2016 by Donald King <chronos@chronos-tachyon.net>
+// Copyright © 2017 by Donald King <chronos@chronos-tachyon.net>
 // Available under the MIT License. See LICENSE for details.
 
-#include "path/clean.h"
+#include "path/path.h"
 
 namespace path {
 
