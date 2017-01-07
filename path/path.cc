@@ -3,6 +3,8 @@
 
 #include "path/path.h"
 
+#include "base/logging.h"
+
 namespace path {
 
 std::string clean(const std::string& path) {
@@ -185,6 +187,19 @@ std::pair<std::string, std::string> split(const std::string& path) {
 
 end:
   return out;
+}
+
+void join(std::string* head, const std::string& tail) {
+  CHECK_NOTNULL(head);
+  if (tail.empty()) return;
+  if (head->empty()) {
+    *head = tail;
+    return;
+  }
+  if (head->back() != '/' && tail.front() != '/') {
+    head->push_back('/');
+  }
+  head->append(tail);
 }
 
 }  // namespace path

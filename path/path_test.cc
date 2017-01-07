@@ -143,3 +143,37 @@ TEST(Path, Split) {
   EXPECT_EQ(P("/", "foo"), path::split("/foo/"));
   EXPECT_EQ(P("/foo", "bar"), path::split("/foo/bar"));
 }
+
+TEST(Path, Join) {
+  EXPECT_EQ("", path::join("", ""));
+
+  EXPECT_EQ("foo", path::join("", "foo"));
+  EXPECT_EQ(".", path::join("", "."));
+  EXPECT_EQ("..", path::join("", ".."));
+
+  EXPECT_EQ("/foo", path::join("", "/foo"));
+  EXPECT_EQ("/.", path::join("", "/."));
+  EXPECT_EQ("/..", path::join("", "/.."));
+
+  EXPECT_EQ("foo", path::join("foo", ""));
+  EXPECT_EQ(".", path::join(".", ""));
+  EXPECT_EQ("..", path::join("..", ""));
+
+  EXPECT_EQ("foo/", path::join("foo/", ""));
+  EXPECT_EQ("./", path::join("./", ""));
+  EXPECT_EQ("../", path::join("../", ""));
+
+  EXPECT_EQ("foo/bar", path::join("foo", "bar"));
+  EXPECT_EQ("./.", path::join(".", "."));
+  EXPECT_EQ("../..", path::join("..", ".."));
+
+  EXPECT_EQ("foo/bar", path::join("foo/", "bar"));
+  EXPECT_EQ("./.", path::join("./", "."));
+  EXPECT_EQ("../..", path::join("../", ".."));
+
+  EXPECT_EQ("foo/bar", path::join("foo", "/bar"));
+  EXPECT_EQ("./.", path::join(".", "/."));
+  EXPECT_EQ("../..", path::join("..", "/.."));
+
+  EXPECT_EQ("foo/bar/baz", path::join("foo", "bar", "baz"));
+}

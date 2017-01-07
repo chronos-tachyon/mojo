@@ -9,6 +9,7 @@ cc_library(
   hdrs = [
     "path.h",
   ],
+  deps = ["//base"],
   visibility = ["//visibility:public"],
 )
 
