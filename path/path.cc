@@ -108,4 +108,75 @@ std::string clean(const std::string& path) {
   return out;
 }
 
+std::pair<std::string, std::string> split(const std::string& path) {
+  std::pair<std::string, std::string> out;
+  const char* begin = path.data();
+  const char* end = begin + path.size();
+  const char* ptr;
+
+  // '' -> ('.', '')
+  if (end == begin) {
+    out.first.push_back('.');
+    goto end;
+  }
+
+  // '.' -> ('.', '')
+  if (end == begin + 1 && *begin == '.') {
+    out.first.push_back('.');
+    goto end;
+  }
+
+  // '..' -> ('..', '')
+  if (end == begin + 2 && *begin == '.' && *(begin + 1) == '.') {
+    out.first.push_back('.');
+    out.first.push_back('.');
+    goto end;
+  }
+
+  // Find start of final component
+  //   'foo'      -> ('',      'foo')
+  //   'foo/'     -> ('foo/',  '')
+  //   'foo/bar'  -> ('foo/',  'bar')
+  //   '/foo'     -> ('/',     'foo')
+  //   '/foo/'    -> ('/foo/', '')
+  //   '/foo/bar' -> ('/foo/', 'bar')
+  ptr = end;
+  while (ptr != begin) {
+    --ptr;
+    if (*ptr == '/') {
+      ++ptr;
+      break;
+    }
+  }
+  out.second.assign(ptr, end - ptr);
+
+  // 'foo' -> ('.', 'foo')
+  if (ptr == begin) {
+    out.first.push_back('.');
+    goto end;
+  }
+
+  // Trim trailing slashes
+  //   'foo/'  -> 'foo'
+  //   '/'     -> ''
+  //   '/foo/' -> '/foo'
+  while (ptr != begin) {
+    --ptr;
+    if (*ptr != '/') {
+      ++ptr;
+      break;
+    }
+  }
+
+  // '' (was '/') -> ('/', '')
+  if (ptr == begin) {
+    out.first.push_back('/');
+  } else {
+    out.first.assign(begin, ptr);
+  }
+
+end:
+  return out;
+}
+
 }  // namespace path

@@ -6,11 +6,15 @@
 #define PATH_PATH_H
 
 #include <string>
+#include <utility>
 
 namespace path {
 
 // Cleans up a logical path name
 std::string clean(const std::string& path);
+
+// Splits a path into a directory path + a base filename
+std::pair<std::string, std::string> split(const std::string& path);
 
 }  // namespace path
 
