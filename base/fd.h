@@ -105,6 +105,7 @@ Result read_exactly(FD fd, void* ptr, std::size_t len, const char* what);
 Result write_exactly(FD fd, const void* ptr, std::size_t len, const char* what);
 
 Result make_tempfile(std::string* path, FD* fd, const char* tmpl);
+Result make_tempdir(std::string* path, const char* tmpl);
 
 }  // namespace base
 

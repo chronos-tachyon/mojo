@@ -206,21 +206,39 @@ Result write_exactly(FD fd, const void* ptr, std::size_t len,
   return r;
 }
 
-Result make_tempfile(std::string* path, FD* fd, const char* tmpl) {
-  path->clear();
-  *fd = nullptr;
+static std::vector<char> build_temppath(const char* tmpl) {
+  CHECK_NOTNULL(tmpl);
 
-  const char* tmpdir = getenv("TMPDIR");
-  if (tmpdir == nullptr) tmpdir = "/tmp";
+  const char* tmpdir;
+  if (*tmpl == '/') {
+    tmpdir = "";
+  } else {
+    tmpdir = getenv("TMPDIR");
+    if (tmpdir == nullptr) tmpdir = "/tmp";
+    if (!*tmpl) tmpl = "tmp.XXXXXX";
+  }
+
   std::size_t tmpdir_len = ::strlen(tmpdir);
   std::size_t tmpl_len = ::strlen(tmpl);
 
   std::vector<char> buf;
   buf.resize(tmpdir_len + tmpl_len + 2);
-  ::memcpy(buf.data(), tmpdir, tmpdir_len);
-  buf[tmpdir_len] = '/';
-  ::memcpy(buf.data() + tmpdir_len + 1, tmpl, tmpl_len + 1);
 
+  char* ptr = buf.data();
+  ::memcpy(ptr, tmpdir, tmpdir_len);
+  buf[tmpdir_len] = '/';
+  ::memcpy(ptr + tmpdir_len + 1, tmpl, tmpl_len + 1);
+  return std::move(buf);
+}
+
+Result make_tempfile(std::string* path, FD* fd, const char* tmpl) {
+  CHECK_NOTNULL(path);
+  CHECK_NOTNULL(fd);
+  CHECK_NOTNULL(tmpl);
+  path->clear();
+  *fd = nullptr;
+
+  std::vector<char> buf = build_temppath(tmpl);
   int fdnum = ::mkostemp(buf.data(), O_CLOEXEC);
   if (fdnum == -1) {
     int err_no = errno;
@@ -228,6 +246,21 @@ Result make_tempfile(std::string* path, FD* fd, const char* tmpl) {
   }
   path->assign(buf.data(), buf.size() - 1);
   *fd = base::wrapfd(fdnum);
+  return base::Result();
+}
+
+Result make_tempdir(std::string* path, const char* tmpl) {
+  CHECK_NOTNULL(path);
+  CHECK_NOTNULL(tmpl);
+  path->clear();
+
+  std::vector<char> buf = build_temppath(tmpl);
+  const char* ret = ::mkdtemp(buf.data());
+  if (ret == nullptr) {
+    int err_no = errno;
+    return base::Result::from_errno(err_no, "mkdtemp(3)");
+  }
+  path->assign(buf.data(), buf.size() - 1);
   return base::Result();
 }
 
