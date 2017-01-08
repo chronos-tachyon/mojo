@@ -3,9 +3,56 @@
 
 #include "path/path.h"
 
+#include <unistd.h>
+
+#include <algorithm>
+#include <cstdlib>
+#include <vector>
+#include <deque>
+
+#include "base/cleanup.h"
 #include "base/logging.h"
 
+#ifndef PATH_MAX
+#define PATH_MAX 4096
+#endif
+
 namespace path {
+
+static std::size_t count(char ch, const char* begin, const char* end) noexcept {
+  std::size_t n = 0;
+  while (begin != end) {
+    if (*begin == ch) ++n;
+    ++begin;
+  }
+  return n;
+}
+
+static std::size_t common_prefix(const std::string& a, const std::string& b) {
+  std::size_t i = 0;
+  std::size_t n = std::min(a.size(), b.size());
+  while (i < n && a[i] == b[i]) ++i;
+  return i;
+}
+
+static base::Result readlink(std::string* out, const std::string& path) {
+  CHECK_NOTNULL(out);
+  out->clear();
+
+  long pathmax = ::pathconf(path.c_str(), _PC_PATH_MAX);
+  if (pathmax < PATH_MAX) pathmax = PATH_MAX;
+
+  std::vector<char> buf;
+  buf.resize(pathmax);
+
+  ssize_t n = ::readlink(path.c_str(), buf.data(), buf.size());
+  if (n < 0) {
+    int err_no = errno;
+    return base::Result::from_errno(err_no, "readlink(2) path=", path);
+  }
+  out->assign(buf.data(), n);
+  return base::Result();
+}
 
 std::string partial_clean(const std::string& path) {
   std::string out;
@@ -44,6 +91,7 @@ std::string partial_clean(const std::string& path) {
         ++p;
         continue;
       }
+      // '.foo'
       --p;
     }
 
@@ -176,6 +224,47 @@ std::string clean(const std::string& path) {
   return out;
 }
 
+std::vector<std::string> explode(const std::string& path) {
+  std::vector<std::string> out;
+  const char* begin = path.data();
+  const char* end = begin + path.size();
+  const char* ptr;
+
+  // "" -> {"."}
+  if (begin == end) {
+    out.emplace_back(".", 1);
+    goto done;
+  }
+
+  // Absolute paths -> {"/", ...}
+  if (*begin == '/') {
+    out.emplace_back("/", 1);
+    ++begin;
+    while (begin != end && *begin == '/') ++begin;
+  }
+
+  // Trim trailing slashes
+  while (end != begin) {
+    --end;
+    if (*end != '/') {
+      ++end;
+      break;
+    }
+  }
+
+  // Find components and append them to |out|
+  ptr = begin;
+  while (ptr != end) {
+    while (ptr != end && *ptr != '/') ++ptr;
+    out.emplace_back(begin, ptr);
+    while (ptr != end && *ptr == '/') ++ptr;
+    begin = ptr;
+  }
+
+done:
+  return out;
+}
+
 std::pair<std::string, std::string> split(const std::string& path) {
   std::pair<std::string, std::string> out;
   const char* begin = path.data();
@@ -266,6 +355,197 @@ void join(std::string* head, const std::string& tail) {
     head->push_back('/');
   }
   head->append(tail);
+}
+
+std::string join(const std::vector<std::string>& vec) {
+  std::string out;
+  if (vec.empty()) {
+    out.push_back('.');
+  } else {
+    out.assign(vec.front());
+    auto it = vec.begin() + 1, end = vec.end();
+    while (it != end) {
+      join(&out, *it);
+      ++it;
+    }
+  }
+  return out;
+}
+
+std::string abspath(const std::string& path, const std::string& root) {
+  if (path.empty()) return clean(root);
+  if (path.front() == '/') return clean(path);
+  return clean(join(root, path));
+}
+
+std::string relpath(const std::string& path, const std::string& root) {
+  std::string cpath = clean(path);
+  std::string croot = clean(root);
+
+  if (!is_abs(cpath)) return cpath;
+
+  // root         path            common      result
+  //
+  // [len == croot.size() && len == cpath.size()]
+  // "/"          "/"             "/"         "."
+  // "/foo"       "/foo"          "/foo"      "."
+  // "/foo/bar"   "/foo/bar"      "/foo/bar"  "."
+  //
+  // [len == croot.size() && len == 1]
+  // "/"          "/foo"          "/"         "foo"
+  //
+  // [len == croot.size() && cpath[len] == '/']
+  // "/foo"       "/foo/bar"      "/foo"      "bar"
+  // "/foo/bar"   "/foo/bar/baz"  "/foo/bar"  "baz"
+  //
+  // [len == croot.size()]
+  // "/foo"       "/foobar"       "/foo"      "../foobar"
+  //
+  // [len == cpath.size()]
+  // "/foo"       "/"             "/"         ".."
+  // "/foo/bar"   "/"             "/"         "../.."
+  // "/foo/bar"   "/foo"          "/foo"      ".."
+  //
+  // [other]
+  // "/foo"       "/foobar"       "/"         "../foobar"
+  // "/foo"       "/bar"          "/"         "../bar"
+  // "/foo/bar"   "/foo/baz"      "/foo/ba"   "../baz"
+  // "/foo/bar"   "/baz"          "/"         "../../baz"
+  // "/foobar"    "/foobaz"       "/fooba"    "../foobaz"
+
+  std::size_t len = common_prefix(cpath, croot);
+  if (len == croot.size()) {
+    if (len == cpath.size()) {
+      return ".";
+    }
+    if (len == 1) {
+      return cpath.substr(1);
+    }
+    if (cpath[len] == '/') {
+      return cpath.substr(len + 1);
+    }
+  }
+
+  if (len == cpath.size()) {
+    const char* p = croot.data();
+    const char* q = p + croot.size();
+    p += len;
+    if (*p == '/') ++p;
+    std::size_t dotdots = 1 + count('/', p, q);
+
+    std::string out;
+    while (dotdots--) join(&out, "..");
+    return out;
+  }
+
+  while (true) {
+    --len;
+    if (croot[len] == '/') break;
+  }
+  ++len;
+
+  const char* p = croot.data() + len;
+  const char* q = p + croot.size() - len;
+  std::size_t dotdots = 1 + count('/', p, q);
+
+  std::string out;
+  while (dotdots--) join(&out, "..");
+  join(&out, cpath.substr(len));
+  return out;
+}
+
+base::Result cwd(std::string* out) {
+  CHECK_NOTNULL(out);
+
+  char* ptr = ::get_current_dir_name();
+  if (ptr == nullptr) {
+    int err_no = errno;
+    return base::Result::from_errno(err_no, "get_current_dir_name(3)");
+  }
+  auto cleanup = base::cleanup([ptr] { ::free(ptr); });
+  CHECK(*ptr == '/');
+  out->assign(ptr);
+  return base::Result();
+}
+
+base::Result make_abs(std::string* path, const std::string& root) {
+  CHECK_NOTNULL(path);
+  CHECK(root.empty() || root.front() == '/') << ": root must be an absolute path";
+
+  if (!is_abs(*path) && !root.empty()) {
+    *path = join(root, *path);
+  }
+  return canonicalize(path);
+}
+
+base::Result make_rel(std::string* path, const std::string& root) {
+  CHECK_NOTNULL(path);
+  CHECK(root.empty() || root.front() == '/') << ": root must be an absolute path";
+  return base::Result::not_implemented();
+}
+
+base::Result canonicalize(std::string* path) {
+  CHECK_NOTNULL(path);
+
+  std::string in = *path;
+  if (!is_abs(in)) {
+    std::string tmp;
+    auto r = cwd(&tmp);
+    if (!r) return r;
+    join(&tmp, in);
+    in = std::move(tmp);
+  }
+
+  std::vector<std::string> x, y;
+  x = explode(in);
+  y.reserve(x.size());
+
+  std::deque<std::string> q;
+  q.insert(q.end(), x.begin(), x.end());
+
+  while (!q.empty()) {
+    const auto component = q.front();
+    q.pop_front();
+
+    if (component != "..") {
+      if (component != ".") y.push_back(component);
+      continue;
+    }
+
+    // Found "..", so need to backtrack by one component.
+    // But... is that component a symlink?  And if so, where does it point?
+
+    // Root directory is never a link, and should never be backtracked past.
+    if (y.size() == 1 && y.front() == "/") continue;
+
+    // Determine if the path so far ends in a symlink.
+    bool islink;
+    std::string linktext;
+    auto r = readlink(&linktext, join(y));
+    if (r) {
+      islink = true;
+    } else {
+      // EINVAL -> not a symlink
+      if (r.errno_value() != EINVAL) return r;
+      islink = false;
+    }
+
+    // Not a link?  Just backtrack.
+    if (!islink) {
+      y.pop_back();
+      continue;
+    }
+
+    // Stuff the link's components into the front of the queue,
+    // followed by the ".." that we thought we'd consumed.
+    if (is_abs(linktext)) y.clear();
+    x = explode(linktext);
+    q.push_front(component);
+    q.insert(q.begin(), x.begin(), x.end());
+  }
+
+  *path = join(y);
+  return base::Result();
 }
 
 }  // namespace path

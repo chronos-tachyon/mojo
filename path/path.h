@@ -7,6 +7,9 @@
 
 #include <string>
 #include <utility>
+#include <vector>
+
+#include "base/result.h"
 
 namespace path {
 
@@ -15,20 +18,27 @@ inline bool is_abs(const std::string& path) {
   return !path.empty() && path.front() == '/';
 }
 
-// Partially cleans up a path.
+// Partially cleans up a path according to purely syntactic rules.
 // - Collapses 'foo//bar' into 'foo/bar'
 // - Removes redundant '.' components
 // - Does NOT process '..' components
 std::string partial_clean(const std::string& path);
 
-// Cleans up a path name according to logical rules.
+// Cleans up a path name according to purely syntactic rules.
 // - Collapses 'foo//bar' into 'foo/bar'
 // - Removes redundant '.' components
 // - Collapses 'foo/../bar' into 'bar'
 //   - NOTE: This may change the meaning of the path in the face of symlinks!
 std::string clean(const std::string& path);
 
-// Splits a path into a parent directory + a base filename.
+// Syntactically splits a path into a series of path components.
+//
+// Examples:
+// - "/foo/bar" becomes {"/", "foo", "bar"}
+// - "foo/..bar" becomes {"foo", "..", "bar"}
+std::vector<std::string> explode(const std::string& path);
+
+// Syntactically splits a path into a parent directory + a base filename.
 std::pair<std::string, std::string> split(const std::string& path);
 
 // Returns the parent directory of a path.
@@ -60,6 +70,30 @@ std::string join(const std::string& first, const std::string& second,
   join(&out, second, rest...);
   return out;
 }
+
+std::string join(const std::vector<std::string>& vec);
+
+// Converts a relative path to an absolute path using purely syntactic rules.
+std::string abspath(const std::string& path, const std::string& root);
+
+// Converts an absolute path to a relative path using purely syntactic rules.
+std::string relpath(const std::string& path, const std::string& root);
+
+// Retrieves the current working directory.
+base::Result cwd(std::string* out);
+
+// Converts a relative path to an absolute path using the local filesystem.
+// - If |root| is empty, |path| is interpreted relative to the CWD.
+base::Result make_abs(std::string* path,
+                      const std::string& root = std::string());
+
+// Converts an absolute path to a relative path using the local filesystem.
+// - If |root| is empty, |path| is altered to be relative to the CWD.
+base::Result make_rel(std::string* path,
+                      const std::string& root = std::string());
+
+// Cleans up an absolute path name, walking the filesystem to resolve symlinks.
+base::Result canonicalize(std::string* path);
 
 }  // namespace path
 

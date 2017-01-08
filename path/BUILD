@@ -23,3 +23,30 @@ cc_test(
   size = "small",
   timeout = "short",
 )
+
+cc_binary(
+  name = "abspath",
+  srcs = ["abspath.cc"],
+  deps = [
+    "//base",
+    ":path",
+  ],
+)
+
+cc_binary(
+  name = "realpath",
+  srcs = ["realpath.cc"],
+  deps = [
+    "//base",
+    ":path",
+  ],
+)
+
+cc_binary(
+  name = "relpath",
+  srcs = ["relpath.cc"],
+  deps = [
+    "//base",
+    ":path",
+  ],
+)
