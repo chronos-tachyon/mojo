@@ -7,8 +7,8 @@
 
 #include <algorithm>
 #include <cstdlib>
-#include <vector>
 #include <deque>
+#include <vector>
 
 #include "base/cleanup.h"
 #include "base/logging.h"
@@ -28,7 +28,16 @@ static std::size_t count(char ch, const char* begin, const char* end) noexcept {
   return n;
 }
 
-static std::size_t common_prefix(const std::string& a, const std::string& b) {
+static std::size_t common_prefix(const std::string& a,
+                                 const std::string& b) noexcept {
+  std::size_t i = 0;
+  std::size_t n = std::min(a.size(), b.size());
+  while (i < n && a[i] == b[i]) ++i;
+  return i;
+}
+
+static std::size_t common_prefix(const std::vector<std::string>& a,
+                                 const std::vector<std::string>& b) noexcept {
   std::size_t i = 0;
   std::size_t n = std::min(a.size(), b.size());
   while (i < n && a[i] == b[i]) ++i;
@@ -468,20 +477,61 @@ base::Result cwd(std::string* out) {
   return base::Result();
 }
 
-base::Result make_abs(std::string* path, const std::string& root) {
-  CHECK_NOTNULL(path);
-  CHECK(root.empty() || root.front() == '/') << ": root must be an absolute path";
+static base::Result canonicalize_exploded(std::vector<std::string>* vec) {
+  CHECK_NOTNULL(vec);
+  CHECK(vec->size() > 0 && vec->front() == "/");
 
-  if (!is_abs(*path) && !root.empty()) {
-    *path = join(root, *path);
+  std::vector<std::string> out;
+  out.reserve(vec->size());
+
+  std::deque<std::string> q;
+  q.insert(q.end(), vec->begin(), vec->end());
+
+  while (!q.empty()) {
+    const auto component = q.front();
+    q.pop_front();
+
+    if (component != "..") {
+      if (component != ".") out.push_back(component);
+      continue;
+    }
+
+    // Found "..", so need to backtrack by one component.
+    // But... is that component a symlink?  And if so, where does it point?
+
+    // Root directory is never a link, and should never be backtracked past.
+    if (out.size() == 1 && out.front() == "/") continue;
+
+    // Determine if the path so far ends in a symlink.
+    bool islink;
+    std::string linktext;
+    auto r = readlink(&linktext, join(out));
+    if (r) {
+      islink = true;
+    } else {
+      // EINVAL -> not a symlink
+      // ENOENT -> does not exist, therefore not a symlink
+      int err_no = r.errno_value();
+      if (err_no != EINVAL && err_no != ENOENT) return r;
+      islink = false;
+    }
+
+    // Not a link?  Just backtrack.
+    if (!islink) {
+      out.pop_back();
+      continue;
+    }
+
+    // Stuff the link's components into the front of the queue,
+    // followed by the ".." that we thought we'd consumed.
+    if (is_abs(linktext)) out.clear();
+    auto tmp = explode(linktext);
+    q.push_front(component);
+    q.insert(q.begin(), tmp.begin(), tmp.end());
   }
-  return canonicalize(path);
-}
 
-base::Result make_rel(std::string* path, const std::string& root) {
-  CHECK_NOTNULL(path);
-  CHECK(root.empty() || root.front() == '/') << ": root must be an absolute path";
-  return base::Result::not_implemented();
+  *vec = std::move(out);
+  return base::Result();
 }
 
 base::Result canonicalize(std::string* path) {
@@ -496,55 +546,132 @@ base::Result canonicalize(std::string* path) {
     in = std::move(tmp);
   }
 
-  std::vector<std::string> x, y;
-  x = explode(in);
-  y.reserve(x.size());
+  std::vector<std::string> vec;
+  vec = explode(in);
+  auto r = canonicalize_exploded(&vec);
+  if (!r) return r;
 
-  std::deque<std::string> q;
-  q.insert(q.end(), x.begin(), x.end());
+  *path = join(vec);
+  return base::Result();
+}
 
-  while (!q.empty()) {
-    const auto component = q.front();
-    q.pop_front();
+base::Result make_abs(std::string* path, const std::string& root) {
+  CHECK_NOTNULL(path);
+  CHECK(root.empty() || root.front() == '/')
+      << ": root must be an absolute path";
 
-    if (component != "..") {
-      if (component != ".") y.push_back(component);
-      continue;
-    }
+  if (!is_abs(*path) && !root.empty()) {
+    *path = join(root, *path);
+  }
+  return canonicalize(path);
+}
 
-    // Found "..", so need to backtrack by one component.
-    // But... is that component a symlink?  And if so, where does it point?
+base::Result make_rel(std::string* path, const std::string& root) {
+  CHECK_NOTNULL(path);
+  CHECK(root.empty() || root.front() == '/')
+      << ": root must be an absolute path";
 
-    // Root directory is never a link, and should never be backtracked past.
-    if (y.size() == 1 && y.front() == "/") continue;
-
-    // Determine if the path so far ends in a symlink.
-    bool islink;
-    std::string linktext;
-    auto r = readlink(&linktext, join(y));
-    if (r) {
-      islink = true;
-    } else {
-      // EINVAL -> not a symlink
-      if (r.errno_value() != EINVAL) return r;
-      islink = false;
-    }
-
-    // Not a link?  Just backtrack.
-    if (!islink) {
-      y.pop_back();
-      continue;
-    }
-
-    // Stuff the link's components into the front of the queue,
-    // followed by the ".." that we thought we'd consumed.
-    if (is_abs(linktext)) y.clear();
-    x = explode(linktext);
-    q.push_front(component);
-    q.insert(q.begin(), x.begin(), x.end());
+  if (!is_abs(*path)) {
+    *path = partial_clean(*path);
+    return base::Result();
   }
 
-  *path = join(y);
+  std::string croot = root;
+  auto r = canonicalize(&croot);
+  if (!r) return r;
+
+  std::vector<std::string> xroot, xpath, tmp, out;
+  xroot = explode(croot);
+  xpath = explode(*path);
+
+  // Our task?  Find the relative path whose canonicalization
+  // is equal to the canonicalization of root.
+
+  // The |len == xroot.size()| case is easy (pure syntax):
+  //
+  // root = "/home/chronos"
+  // path = "/home/chronos"
+  // correct result = "."
+  //
+  // root = "/home/chronos"
+  // path = "/home/chronos/src/mojo"
+  // correct result = "src/mojo"
+
+  std::size_t len = common_prefix(xroot, xpath);
+  if (len == xroot.size()) {
+    if (len == xpath.size()) {
+      out.push_back(".");
+    } else {
+      out.insert(out.begin(), xpath.begin() + len, xpath.end());
+    }
+    goto done;
+  }
+
+  // The remaining cases get very complicated, very fast:
+  //
+  // root = "/home/chronos/src/mojo/bazel-bin/path"
+  // path = "/home/chronos/src/mojo"
+  //
+  // symlink:
+  //   "/home/chronos/src/mojo/bazel-bin" ->
+  //     ("/home/chronos/.cache/bazel/_bazel_chronos/"
+  //      "af45689a65e49d32fd4a80b96a5abdde/execroot/"
+  //      "mojo/bazel-out/local-fastbuild/bin")
+  //
+  // correct result = "../../../../../../../../../../src/mojo"
+
+  // Use out to hold the relative path built so far.
+  // USe tmp to hold the absolute path that out represents.
+
+  // Start with the root, then peel it off piece by piece:
+  //
+  // xroot = ["/" "home" "chronos" "src" "mojo" "bazel-bin" "path"]
+  // xpath = ["/" "home" "chronos" "src" "mojo"]
+  //
+  // tmp = ["/" "home" "chronos" "src" "mojo" "bazel-bin" "path"]
+  // out = []
+  //
+  // tmp = ["/" "home" "chronos" "src" "mojo" "bazel-bin"]
+  // out = [".."]
+  //
+  // tmp = ["/" "home" "chronos" ".cache" "bazel" "_bazel_chronos"
+  //        "af45..." "execroot" "mojo" "bazel-out" "local-fastbuild"]
+  // out = [".." ".."]
+  //
+  // ...
+  //
+  // tmp = ["/" "home" "chronos" ".cache"]
+  // out = [".." ".." ".." ".." ".." ".." ".." ".." ".."]
+  //
+  // tmp = ["/" "home" "chronos"]
+  // out = [".." ".." ".." ".." ".." ".." ".." ".." ".." ".."]
+  //
+  // Terminate the loop because |common_prefix(xpath, tmp) == tmp.size()|.
+  //
+  // xpath = ["/" "home" "chronos" "src" "mojo"]
+  //   tmp = ["/" "home" "chronos"]
+  //   out = [".." ".." ".." ".." ".." ".." ".." ".." ".." ".."]
+  //   len = 3
+  //
+  // Then add the remaining pieces of xpath:
+  //
+  //   tmp = ["/" "home" "chronos" "src" "mojo"]
+  //   out = [".." ".." ".." ".." ".." ".." ".." ".." ".." ".." "src" "mojo"]
+  //
+  // Join that, assign to *path, and we are done.
+
+  tmp = xroot;
+  while (len != tmp.size()) {
+    out.push_back("..");
+    tmp.push_back("..");
+    auto r = canonicalize_exploded(&tmp);
+    if (!r) return r;
+    len = common_prefix(xpath, tmp);
+  }
+  out.insert(out.end(), xpath.begin() + len, xpath.end());
+
+done:
+  *path = join(out);
   return base::Result();
 }
 

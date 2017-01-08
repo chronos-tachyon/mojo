@@ -18,7 +18,7 @@ inline bool is_abs(const std::string& path) {
   return !path.empty() && path.front() == '/';
 }
 
-// Partially cleans up a path according to purely syntactic rules.
+// Partially cleans up a path name according to purely syntactic rules.
 // - Collapses 'foo//bar' into 'foo/bar'
 // - Removes redundant '.' components
 // - Does NOT process '..' components
@@ -71,29 +71,32 @@ std::string join(const std::string& first, const std::string& second,
   return out;
 }
 
+// Alternative version of path::join that takes a vector.
 std::string join(const std::vector<std::string>& vec);
 
 // Converts a relative path to an absolute path using purely syntactic rules.
+// - NOTE: This may change the meaning of the path in the face of symlinks!
 std::string abspath(const std::string& path, const std::string& root);
 
 // Converts an absolute path to a relative path using purely syntactic rules.
+// - NOTE: This may change the meaning of the path in the face of symlinks!
 std::string relpath(const std::string& path, const std::string& root);
 
 // Retrieves the current working directory.
 base::Result cwd(std::string* out);
 
+// Cleans up an absolute path name using the local filesystem.
+base::Result canonicalize(std::string* path);
+
 // Converts a relative path to an absolute path using the local filesystem.
-// - If |root| is empty, |path| is interpreted relative to the CWD.
+// - If |root| is empty/omitted, |path| is interpreted relative to the CWD.
 base::Result make_abs(std::string* path,
                       const std::string& root = std::string());
 
 // Converts an absolute path to a relative path using the local filesystem.
-// - If |root| is empty, |path| is altered to be relative to the CWD.
+// - If |root| is empty/omitted, |path| is altered to be relative to the CWD.
 base::Result make_rel(std::string* path,
                       const std::string& root = std::string());
-
-// Cleans up an absolute path name, walking the filesystem to resolve symlinks.
-base::Result canonicalize(std::string* path);
 
 }  // namespace path
 
