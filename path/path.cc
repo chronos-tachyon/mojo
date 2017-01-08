@@ -368,15 +368,8 @@ void join(std::string* head, const std::string& tail) {
 
 std::string join(const std::vector<std::string>& vec) {
   std::string out;
-  if (vec.empty()) {
-    out.push_back('.');
-  } else {
-    out.assign(vec.front());
-    auto it = vec.begin() + 1, end = vec.end();
-    while (it != end) {
-      join(&out, *it);
-      ++it;
-    }
+  for (const auto& segment : vec) {
+    join(&out, segment);
   }
   return out;
 }
@@ -551,7 +544,11 @@ base::Result canonicalize(std::string* path) {
   auto r = canonicalize_exploded(&vec);
   if (!r) return r;
 
-  *path = join(vec);
+  if (vec.empty()) {
+    path->assign(".", 1);
+  } else {
+    *path = join(vec);
+  }
   return base::Result();
 }
 
@@ -671,7 +668,11 @@ base::Result make_rel(std::string* path, const std::string& root) {
   out.insert(out.end(), xpath.begin() + len, xpath.end());
 
 done:
-  *path = join(out);
+  if (out.empty()) {
+    path->assign(".", 1);
+  } else {
+    *path = join(out);
+  }
   return base::Result();
 }
 
