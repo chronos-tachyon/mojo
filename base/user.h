@@ -73,6 +73,8 @@ struct User {
   std::string as_string() const;
 };
 
+inline void swap(User& a, User& b) noexcept { a.swap(b); }
+
 bool operator==(const User& a, const User& b) noexcept;
 inline bool operator!=(const User& a, const User& b) noexcept {
   return !(a == b);
@@ -121,6 +123,8 @@ struct Group {
   std::size_t length_hint() const noexcept;
   std::string as_string() const;
 };
+
+inline void swap(Group& a, Group& b) noexcept { a.swap(b); }
 
 bool operator==(const Group& a, const Group& b) noexcept;
 inline bool operator!=(const Group& a, const Group& b) noexcept {
