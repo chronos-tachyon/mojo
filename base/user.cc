@@ -136,7 +136,7 @@ base::Result user_by_id(User* out, int32_t id) {
       });
 }
 
-base::Result user_by_name(User* out, std::string name) {
+base::Result user_by_name(User* out, const std::string& name) {
   return user_common(out, "getpwnam_r(3)",
                      [&name](struct passwd* pw, char* buf, std::size_t len,
                              struct passwd** ptr) {
@@ -152,7 +152,7 @@ base::Result group_by_id(Group* out, int32_t id) {
       });
 }
 
-base::Result group_by_name(Group* out, std::string name) {
+base::Result group_by_name(Group* out, const std::string& name) {
   return group_common(out, "getgrnam_r(3)",
                       [&name](struct group* gr, char* buf, std::size_t len,
                               struct group** ptr) {

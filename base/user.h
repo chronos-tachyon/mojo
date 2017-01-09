@@ -130,9 +130,9 @@ inline bool operator!=(const Group& a, const Group& b) noexcept {
 // Retrieves information about the specified account, looked up via the
 // provided field.
 base::Result user_by_id(User* out, int32_t id);
-base::Result user_by_name(User* out, std::string name);
+base::Result user_by_name(User* out, const std::string& name);
 base::Result group_by_id(Group* out, int32_t id);
-base::Result group_by_name(Group* out, std::string name);
+base::Result group_by_name(Group* out, const std::string& name);
 
 }  // namespace base
 
