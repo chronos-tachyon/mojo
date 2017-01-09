@@ -1,3 +1,7 @@
+// base/user.h - Users and groups
+// Copyright © 2017 by Donald King <chronos@chronos-tachyon.net>
+// Available under the MIT License. See LICENSE for details.
+
 #ifndef BASE_USER_H
 #define BASE_USER_H
 
@@ -9,6 +13,7 @@
 
 namespace base {
 
+// User holds metadata about a user, typically one on the local system.
 struct User {
   int32_t uid;
   int32_t gid;
@@ -73,6 +78,7 @@ inline bool operator!=(const User& a, const User& b) noexcept {
   return !(a == b);
 }
 
+// Group holds metadata about a group, typically one on the local system.
 struct Group {
   int32_t gid;
   std::string name;
@@ -121,6 +127,8 @@ inline bool operator!=(const Group& a, const Group& b) noexcept {
   return !(a == b);
 }
 
+// Retrieves information about the specified account, looked up via the
+// provided field.
 base::Result user_by_id(User* out, int32_t id);
 base::Result user_by_name(User* out, std::string name);
 base::Result group_by_id(Group* out, int32_t id);
