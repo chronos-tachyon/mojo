@@ -87,10 +87,10 @@ class Options {
 };
 
 // Returns the default Options. Thread-safe.
-Options default_options() noexcept;
+Options default_options();
 
 // Changes the default Options. Thread-safe.
-void set_default_options(Options opts) noexcept;
+void set_default_options(Options opts);
 
 }  // namespace base
 
