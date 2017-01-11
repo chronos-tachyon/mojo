@@ -836,7 +836,7 @@ base::Result ManagerImpl::generic_fire(Record* myrec, int value) {
   Data data;
   data.token = myrec->token;
   data.int_value = value;
-  data.events = Set::event_bit();
+  data.events = Set::generic_bit();
   return base::write_exactly(pipe_.write, &data, sizeof(data), "event pipe");
 }
 
@@ -1050,7 +1050,7 @@ void ManagerImpl::handle_pipe_event(CallbackVec* cbvec) {
       }
     }
 
-    if (data.events.event()) {
+    if (data.events.generic()) {
       auto srcit = sources_.find(data.token);
       if (srcit == sources_.end()) continue;
       if (srcit->second.type != SourceType::generic) continue;

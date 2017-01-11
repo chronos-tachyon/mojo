@@ -25,7 +25,7 @@ class Set {
     bit_error = (1U << 4),
     bit_signal = (1U << 5),
     bit_timer = (1U << 6),
-    bit_event = (1U << 7),
+    bit_generic = (1U << 7),
   };
 
   explicit constexpr Set(uint8_t bits) noexcept : bits_(bits) {}
@@ -42,6 +42,18 @@ class Set {
   }
 
  public:
+  // Constants for various interesting Set values.
+  static constexpr Set no_bits() noexcept { return Set(0); }
+  static constexpr Set all_bits() noexcept { return Set(~uint8_t(0)); }
+  static constexpr Set readable_bit() noexcept { return Set(bit_readable); }
+  static constexpr Set writable_bit() noexcept { return Set(bit_writable); }
+  static constexpr Set priority_bit() noexcept { return Set(bit_priority); }
+  static constexpr Set hangup_bit() noexcept { return Set(bit_hangup); }
+  static constexpr Set error_bit() noexcept { return Set(bit_error); }
+  static constexpr Set signal_bit() noexcept { return Set(bit_signal); }
+  static constexpr Set timer_bit() noexcept { return Set(bit_timer); }
+  static constexpr Set generic_bit() noexcept { return Set(bit_generic); }
+
   // Set is default constructible, copyable, and moveable.
   // Thse are guaranteed to be noexcept and (where applicable) constexpr.
   constexpr Set() noexcept : bits_(0) {}
@@ -62,7 +74,7 @@ class Set {
   constexpr bool error() const noexcept { return has(bit_error); }
   constexpr bool signal() const noexcept { return has(bit_signal); }
   constexpr bool timer() const noexcept { return has(bit_timer); }
-  constexpr bool event() const noexcept { return has(bit_event); }
+  constexpr bool generic() const noexcept { return has(bit_generic); }
 
   // Return a new Set that has the given <flag, value>.
   constexpr Set with_readable(bool value = true) const noexcept {
@@ -86,8 +98,8 @@ class Set {
   constexpr Set with_timer(bool value = true) const noexcept {
     return with(bit_timer, value);
   }
-  constexpr Set with_event(bool value = true) const noexcept {
-    return with(bit_event, value);
+  constexpr Set with_generic(bool value = true) const noexcept {
+    return with(bit_generic, value);
   }
 
   // Perform set arithmetic using the bitwise operators.
@@ -99,9 +111,6 @@ class Set {
   // Equality and comparison are defined.
   friend constexpr bool operator==(const Set& a, const Set& b) noexcept {
     return a.bits_ == b.bits_;
-  }
-  friend constexpr bool operator<(const Set& a, const Set& b) noexcept {
-    return a.bits_ < b.bits_;
   }
 
   // Reset all flags to false.
@@ -129,21 +138,10 @@ class Set {
   Set& set_error(bool value = true) noexcept { return set(bit_error, value); }
   Set& set_signal(bool value = true) noexcept { return set(bit_signal, value); }
   Set& set_timer(bool value = true) noexcept { return set(bit_timer, value); }
-  Set& set_event(bool value = true) noexcept { return set(bit_event, value); }
-
-  // Constants for various interesting Set values.
-  static constexpr Set no_bits() noexcept { return Set(0); }
-  static constexpr Set all_bits() noexcept { return Set(~uint8_t(0)); }
-  static constexpr Set readable_bit() noexcept { return Set(bit_readable); }
-  static constexpr Set writable_bit() noexcept { return Set(bit_writable); }
-  static constexpr Set priority_bit() noexcept { return Set(bit_priority); }
-  static constexpr Set hangup_bit() noexcept { return Set(bit_hangup); }
-  static constexpr Set error_bit() noexcept { return Set(bit_error); }
-  static constexpr Set signal_bit() noexcept { return Set(bit_signal); }
-  static constexpr Set timer_bit() noexcept { return Set(bit_timer); }
-  static constexpr Set event_bit() noexcept { return Set(bit_event); }
+  Set& set_generic(bool value = true) noexcept { return set(bit_generic, value); }
 
   void append_to(std::string* out) const;
+  std::size_t length_hint() const noexcept;
   std::string as_string() const;
 
  private:
@@ -154,16 +152,6 @@ inline void swap(Set& a, Set& b) noexcept { a.swap(b); }
 inline constexpr bool operator!=(const Set& a, const Set& b) noexcept {
   return !(a == b);
 }
-inline constexpr bool operator>(const Set& a, const Set& b) noexcept {
-  return (b < a);
-}
-inline constexpr bool operator<=(const Set& a, const Set& b) noexcept {
-  return !(b < a);
-}
-inline constexpr bool operator>=(const Set& a, const Set& b) noexcept {
-  return !(a < b);
-}
-
 inline std::ostream& operator<<(std::ostream& os, Set x) {
   return (os << x.as_string());
 }

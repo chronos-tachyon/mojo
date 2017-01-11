@@ -5,10 +5,14 @@
 
 #include "base/concat.h"
 
+__attribute__((const)) static std::size_t popcount(unsigned int x) noexcept {
+  return __builtin_popcount(x);
+}
+
 namespace event {
 
 void Set::append_to(std::string* out) const {
-  out->append("event::Set[");
+  out->push_back('[');
   if (readable()) out->push_back('r');
   if (writable()) out->push_back('w');
   if (priority()) out->push_back('p');
@@ -16,9 +20,11 @@ void Set::append_to(std::string* out) const {
   if (error()) out->push_back('e');
   if (signal()) out->push_back('S');
   if (timer()) out->push_back('T');
-  if (event()) out->push_back('E');
-  out->append("]");
+  if (generic()) out->push_back('G');
+  out->push_back(']');
 }
+
+std::size_t Set::length_hint() const noexcept { return 2 + popcount(bits_); }
 
 std::string Set::as_string() const {
   std::string out;
