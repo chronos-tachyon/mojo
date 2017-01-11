@@ -20,6 +20,47 @@ namespace event {
 
 class Dispatcher;  // forward declaration
 
+// Enumeration of the possible states of a Task.
+enum class TaskState : uint8_t {
+  // The Task has not yet started.
+  //
+  // NEXT STATES: |running|, |done|
+  ready = 0,
+
+  // The Task is currently running, its deadline has not expired, and it has
+  // not been cancelled.
+  //
+  // NEXT STATES: |expiring|, |cancelling|, |done|
+  running = 1,
+
+  // The Task is currently running, but it has exceeded its deadline.
+  // It SHOULD acknowledge the expiration, but it MAY run to completion.
+  //
+  // NEXT STATES: |cancelling|, |done|
+  expiring = 2,
+
+  // The Task is currently running, but it has been cancelled.
+  // It SHOULD acknowledge the cancellation, but it MAY run to completion.
+  //
+  // NEXT STATES: |done|
+  cancelling = 3,
+
+  // The Task has completed.
+  // This does not mean it was successful: check its outcome with |result()|.
+  //
+  // NEXT STATES: N/A (terminal)
+  done = 4,
+};
+
+void append_to(std::string* out, TaskState state);
+std::size_t length_hint(TaskState state) noexcept;
+
+inline std::ostream& operator<<(std::ostream& o, TaskState state) {
+  std::string str;
+  append_to(&str, state);
+  return (o << str);
+}
+
 // A Task is used by asynchronous and/or threaded functions as an output
 // parameter for returning a base::Result, with the side effect of notifying
 // the caller of completion in the process. Task is commonly used in
@@ -43,38 +84,7 @@ class Dispatcher;  // forward declaration
 //
 class Task {
  public:
-  // The state of a Task must be one of these.
-  enum class State : uint8_t {
-    // The Task has not yet started.
-    //
-    // NEXT STATES: |running|, |done|
-    ready = 0,
-
-    // The Task is currently running, its deadline has not expired, and it has
-    // not been cancelled.
-    //
-    // NEXT STATES: |expiring|, |cancelling|, |done|
-    running = 1,
-
-    // The Task is currently running, but it has exceeded its deadline.
-    // It SHOULD acknowledge the expiration, but it MAY run to completion.
-    //
-    // NEXT STATES: |cancelling|, |done|
-    expiring = 2,
-
-    // The Task is currently running, but it has been cancelled.
-    // It SHOULD acknowledge the cancellation, but it MAY run to completion.
-    //
-    // NEXT STATES: |done|
-    cancelling = 3,
-
-    // The Task has completed.
-    // This does not mean it was successful: check its outcome with |result()|.
-    //
-    // NEXT STATES: N/A (terminal)
-    done = 8,
-  };
-
+  using State = TaskState;
   using DispatcherPtr = std::shared_ptr<Dispatcher>;
 
   struct Work {
@@ -212,8 +222,6 @@ class Task {
   std::vector<Work> on_cancel_;
   std::vector<Task*> subtasks_;
 };
-
-std::ostream& operator<<(std::ostream& o, Task::State state);
 
 }  // namespace event
 

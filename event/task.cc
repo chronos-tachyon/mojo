@@ -13,8 +13,7 @@ using RC = base::ResultCode;
 using Work = event::Task::Work;
 
 static const char* const kTaskStateNames[] = {
-    "ready",      "running",    "expiring",   "cancelling", "reserved#4",
-    "reserved#5", "reserved#6", "reserved#7", "done",
+    "ready", "running", "expiring", "cancelling", "done",
 };
 
 namespace event {
@@ -47,9 +46,16 @@ static void lifo_subtasks(std::vector<Task*> vec) {
   }
 }
 
-static void assert_finished(Task::State state) {
-  CHECK_GE(state, Task::State::done) << ": event::Task is not yet finished!";
+static void assert_finished(TaskState state) {
+  CHECK_GE(state, TaskState::done) << ": event::Task is not yet finished!";
 }
+
+void append_to(std::string* out, TaskState state) {
+  CHECK_NOTNULL(out);
+  out->append(kTaskStateNames[static_cast<uint8_t>(state)]);
+}
+
+std::size_t length_hint(TaskState) noexcept { return 10; }
 
 base::Result Task::incomplete_result() {
   return base::Result::internal(
@@ -218,10 +224,6 @@ void Task::finish_impl(std::unique_lock<std::mutex> lock, base::Result result,
   }
   lifo_subtasks(std::move(subtasks));
   lifo_callbacks(std::move(on_finish));
-}
-
-std::ostream& operator<<(std::ostream& o, Task::State state) {
-  return (o << kTaskStateNames[static_cast<uint8_t>(state)]);
 }
 
 }  // namespace event
