@@ -10,15 +10,16 @@
 #include "event/dispatcher.h"
 
 using RC = base::ResultCode;
-using Work = event::Task::Work;
+using Work = event::internal::TaskWork;
+using State = event::TaskState;
 
 static const char* const kTaskStateNames[] = {
-    "ready", "running", "expiring", "cancelling", "done",
+    "ready", "running", "expiring", "cancelling", "unstarted", "done",
 };
 
 namespace event {
 
-static void invoke(Work work) {
+static void invoke(Work work) noexcept {
   try {
     if (work.dispatcher) {
       work.dispatcher->dispatch(nullptr, std::move(work.callback));
@@ -30,7 +31,7 @@ static void invoke(Work work) {
   }
 }
 
-static void lifo_callbacks(std::vector<Work> vec) {
+static void lifo_callbacks(std::vector<Work> vec) noexcept {
   while (!vec.empty()) {
     auto work = std::move(vec.back());
     vec.pop_back();
@@ -38,7 +39,7 @@ static void lifo_callbacks(std::vector<Work> vec) {
   }
 }
 
-static void lifo_subtasks(std::vector<Task*> vec) {
+static void lifo_subtasks(std::vector<Task*> vec) noexcept {
   while (!vec.empty()) {
     Task* subtask = vec.back();
     vec.pop_back();
@@ -46,16 +47,45 @@ static void lifo_subtasks(std::vector<Task*> vec) {
   }
 }
 
-static void assert_finished(TaskState state) {
-  CHECK_GE(state, TaskState::done) << ": event::Task is not yet finished!";
+static void assert_destructible(State state) noexcept {
+  switch (state) {
+    case State::ready:
+    case State::done:
+      break;
+
+    default:
+      LOG(DFATAL) << "BUG! event::Task is neither ready nor done";
+  }
 }
 
-void append_to(std::string* out, TaskState state) {
+static void assert_running(State state) noexcept {
+  switch (state) {
+    case State::running:
+    case State::expiring:
+    case State::cancelling:
+      break;
+
+    default:
+      LOG(DFATAL) << "BUG! event::Task is not running";
+  }
+}
+
+static void assert_finished(State state) noexcept {
+  switch (state) {
+    case State::done:
+      break;
+
+    default:
+      LOG(DFATAL) << "BUG! event::Task is not done";
+  }
+}
+
+void append_to(std::string* out, State state) {
   CHECK_NOTNULL(out);
   out->append(kTaskStateNames[static_cast<uint8_t>(state)]);
 }
 
-std::size_t length_hint(TaskState) noexcept { return 10; }
+std::size_t length_hint(State) noexcept { return 10; }
 
 base::Result Task::incomplete_result() {
   return base::Result::internal(
@@ -67,10 +97,14 @@ base::Result Task::exception_result() {
       "BUG: this Task finished with an exception; how did you see this?");
 }
 
+Task::~Task() noexcept {
+  auto lock = base::acquire_lock(mu_);
+  assert_destructible(state_);
+}
+
 void Task::reset() {
   auto lock = base::acquire_lock(mu_);
-  if (state_ == State::ready) return;
-  assert_finished(state_);
+  assert_destructible(state_);
   result_ = incomplete_result();
   eptr_ = nullptr;
   on_finish_.clear();
@@ -95,7 +129,27 @@ bool Task::result_will_throw() const noexcept {
 
 void Task::add_subtask(Task* subtask) {
   auto lock = base::acquire_lock(mu_);
-  if (state_ > State::running) {
+  bool run = false;
+  switch (state_) {
+    case State::ready:
+      LOG(DFATAL) << "BUG! event::Task is not started";
+      break;
+
+    case State::running:
+      break;
+
+    case State::expiring:
+    case State::cancelling:
+    case State::done:
+      run = true;
+      break;
+
+    case State::unstarted:
+      LOG(DFATAL) << "BUG! event::Task is not started";
+      run = true;
+      break;
+  }
+  if (run) {
     lock.unlock();
     subtask->cancel();
   } else {
@@ -110,109 +164,125 @@ void Task::add_subtask(Task* subtask) {
 void Task::on_cancelled(DispatcherPtr d, CallbackPtr cb) {
   Work work(std::move(d), std::move(cb));
   auto lock = base::acquire_lock(mu_);
+  RC rc;
   bool run;
-  if (state_ >= State::done) {
-    RC rc = result_.code();
-    run = (rc == RC::DEADLINE_EXCEEDED || rc == RC::CANCELLED);
-  } else if (state_ > State::running) {
-    run = true;
-  } else {
-    run = false;
-    on_cancel_.push_back(std::move(work));
+  switch (state_) {
+    case State::ready:
+    case State::running:
+      run = false;
+      on_cancel_.push_back(std::move(work));
+      break;
+
+    case State::expiring:
+    case State::cancelling:
+      run = true;
+      break;
+
+    case State::unstarted:
+    case State::done:
+      rc = result_.code();
+      run = (rc == RC::DEADLINE_EXCEEDED || rc == RC::CANCELLED);
   }
-  if (run) {
-    lock.unlock();
-    invoke(std::move(work));
-  }
+  lock.unlock();
+  if (run) invoke(std::move(work));
 }
 
 void Task::on_finished(DispatcherPtr d, CallbackPtr cb) {
   Work work(std::move(d), std::move(cb));
   auto lock = base::acquire_lock(mu_);
-  if (state_ >= State::done) {
-    lock.unlock();
-    invoke(std::move(work));
-  } else {
-    on_finish_.push_back(std::move(work));
+  switch (state_) {
+    case State::ready:
+    case State::running:
+    case State::expiring:
+    case State::cancelling:
+    case State::unstarted:
+      on_finish_.push_back(std::move(work));
+      break;
+
+    case State::done:
+      lock.unlock();
+      invoke(std::move(work));
   }
 }
 
-bool Task::expire() noexcept {
+void Task::expire() noexcept {
   return cancel_impl(State::expiring, base::Result::deadline_exceeded());
 }
 
-bool Task::cancel() noexcept {
+void Task::cancel() noexcept {
   return cancel_impl(State::cancelling, base::Result::cancelled());
 }
 
-bool Task::cancel_impl(State next, base::Result result) noexcept {
+void Task::cancel_impl(State next, base::Result result) noexcept {
   auto lock = base::acquire_lock(mu_);
-  if (state_ == State::ready) {
-    finish_impl(std::move(lock), std::move(result), nullptr);
-    return true;
-  }
-  if (state_ >= State::running && state_ < next) {
-    state_ = next;
-    auto on_cancel = std::move(on_cancel_);
-    auto subtasks = std::move(subtasks_);
-    lock.unlock();
+  switch (state_) {
+    case State::ready:
+      state_ = State::unstarted;
+      result_ = std::move(result);
+      break;
 
-    lifo_callbacks(std::move(on_cancel));
-    lifo_subtasks(std::move(subtasks));
+    case State::running:
+    case State::expiring:
+    case State::cancelling:
+      if (state_ >= next) return;
+      state_ = next;
+      break;
+
+    case State::unstarted:
+    case State::done:
+      return;
   }
-  return false;
+  auto on_cancel = std::move(on_cancel_);
+  auto subtasks = std::move(subtasks_);
+  lock.unlock();
+
+  lifo_callbacks(std::move(on_cancel));
+  lifo_subtasks(std::move(subtasks));
 }
 
 bool Task::start() {
   auto lock = base::acquire_lock(mu_);
-  if (state_ == State::ready) {
-    state_ = State::running;
-    return true;
+  switch (state_) {
+    case State::ready:
+      state_ = State::running;
+      return true;
+
+    case State::unstarted:
+      finish_impl(lock);
+      return false;
+
+    default:
+      LOG(DFATAL) << "BUG! event::Task: start() on started task";
+      return false;
   }
-  CHECK_GE(state_, State::done) << ": event::Task: start() on running task!";
-  return false;
 }
 
-bool Task::finish(base::Result result) {
+void Task::finish(base::Result result) {
   auto lock = base::acquire_lock(mu_);
-  CHECK_GE(state_, State::running)
-      << ": event::Task: finish() without start()!";
-  if (state_ < State::done) {
-    finish_impl(std::move(lock), std::move(result), nullptr);
-    return true;
-  }
-  return false;
-}
-
-bool Task::finish_cancel() {
-  auto lock = base::acquire_lock(mu_);
-  CHECK_GE(state_, State::running)
-      << ": event::Task: finish_cancel() without start()";
-  if (state_ < State::done) {
-    auto r = base::Result::cancelled();
-    if (state_ == State::expiring) r = base::Result::deadline_exceeded();
-    finish_impl(std::move(lock), std::move(r), nullptr);
-    return true;
-  }
-  return false;
-}
-
-bool Task::finish_exception(std::exception_ptr eptr) {
-  auto lock = base::acquire_lock(mu_);
-  CHECK_GE(state_, State::running)
-      << ": event::Task: finish_exception() without start()";
-  if (state_ < State::done) {
-    finish_impl(std::move(lock), exception_result(), eptr);
-    return true;
-  }
-  return false;
-}
-
-void Task::finish_impl(std::unique_lock<std::mutex> lock, base::Result result,
-                       std::exception_ptr eptr) {
-  state_ = State::done;
+  assert_running(state_);
   result_ = std::move(result);
+  finish_impl(lock);
+}
+
+void Task::finish_cancel() {
+  auto lock = base::acquire_lock(mu_);
+  assert_running(state_);
+  auto r = base::Result::cancelled();
+  if (state_ == State::expiring) r = base::Result::deadline_exceeded();
+  result_ = std::move(r);
+  finish_impl(lock);
+}
+
+void Task::finish_exception(std::exception_ptr eptr) {
+  auto lock = base::acquire_lock(mu_);
+  assert_running(state_);
+  result_ = exception_result();
   eptr_ = eptr;
+  finish_impl(lock);
+}
+
+void Task::finish_impl(base::Lock& lock) {
+  state_ = State::done;
   auto on_finish = std::move(on_finish_);
   auto on_cancel = std::move(on_cancel_);
   auto subtasks = std::move(subtasks_);

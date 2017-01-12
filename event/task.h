@@ -24,7 +24,7 @@ class Dispatcher;  // forward declaration
 enum class TaskState : uint8_t {
   // The Task has not yet started.
   //
-  // NEXT STATES: |running|, |done|
+  // NEXT STATES: |running|, |unstarted|
   ready = 0,
 
   // The Task is currently running, its deadline has not expired, and it has
@@ -45,11 +45,16 @@ enum class TaskState : uint8_t {
   // NEXT STATES: |done|
   cancelling = 3,
 
+  // The Task has completed, but |start()| has not yet been called.
+  //
+  // NEXT STATES: |done|
+  unstarted = 4,
+
   // The Task has completed.
   // This does not mean it was successful: check its outcome with |result()|.
   //
   // NEXT STATES: N/A (terminal)
-  done = 4,
+  done = 5,
 };
 
 void append_to(std::string* out, TaskState state);
@@ -60,6 +65,17 @@ inline std::ostream& operator<<(std::ostream& o, TaskState state) {
   append_to(&str, state);
   return (o << str);
 }
+
+namespace internal {
+struct TaskWork {
+  std::shared_ptr<Dispatcher> /*nullable*/ dispatcher;
+  CallbackPtr callback;
+
+  TaskWork(std::shared_ptr<Dispatcher> /*nullable*/ d, CallbackPtr c) noexcept
+      : dispatcher(std::move(d)),
+        callback(std::move(c)) {}
+};
+}  // namespace internal
 
 // A Task is used by asynchronous and/or threaded functions as an output
 // parameter for returning a base::Result, with the side effect of notifying
@@ -85,18 +101,13 @@ inline std::ostream& operator<<(std::ostream& o, TaskState state) {
 class Task {
  public:
   using State = TaskState;
-  using DispatcherPtr = std::shared_ptr<Dispatcher>;
-
-  struct Work {
-    DispatcherPtr dispatcher;
-    CallbackPtr callback;
-
-    Work(DispatcherPtr d, CallbackPtr c) noexcept : dispatcher(std::move(d)),
-                                                    callback(std::move(c)) {}
-  };
 
   // Constructs an empty Task, ready for use.
   Task() : state_(State::ready), result_(incomplete_result()) {}
+
+  // Destroys a Task.
+  // PRECONDITION: state is |ready| or |done|
+  ~Task() noexcept;
 
   // Tasks are neither copyable nor movable.
   Task(const Task&) = delete;
@@ -105,9 +116,7 @@ class Task {
   Task& operator=(Task&&) = delete;
 
   // Returns the Task to its initial state, ready to be reused.
-  //
-  // NOTE: This method must be used with extreme care. The caller must ensure
-  //       that no other threads still have references to this Task object.
+  // PRECONDITION: state is |ready| or |done|
   void reset();
 
   // Returns the current state of the Task.
@@ -134,85 +143,96 @@ class Task {
   // Returns true iff the Task is in the terminal state, |done|.
   bool is_finished() const noexcept { return state() >= State::done; }
 
-  // Returns the result of the Task.
-  // - If the Task finished with an exception, rethrows the exception.
-  // PRECONDITION: |is_finished() == true|.
-  base::Result result() const;
-
-  // Returns true if |result()| will throw an exception.
-  bool result_will_throw() const noexcept;
-
-  // Registers another Task as a subtask of this Task.
-  // - If this Task reaches |expiring|, |cancelling|, or |done|, then all
-  //   subtasks will be cancelled.
-  // - Will cancel |task| immediately if this Task is already |done|.
-  void add_subtask(Task* task);
-
-  // Registers a Callback to execute when the Task reaches |expiring|,
-  // |cancelling|, or |done| with result DEADLINE_EXCEEDED or CANCELLED.
+  // Registers a Callback to execute if the Task reaches |expiring|,
+  // |cancelling|, |unstarted| with a DEADLINE_EXCEEDED or CANCELLED pending
+  // result, or |done| with a DEADLINE_EXCEEDED or CANCELLED result.
   // - Will execute |callback| immediately if this Task is already cancelled
-  void on_cancelled(DispatcherPtr /*nullable*/ dispatcher,
+  void on_cancelled(std::shared_ptr<Dispatcher> /*nullable*/ dispatcher,
                     CallbackPtr callback);
   void on_cancelled(CallbackPtr callback) {
     on_cancelled(nullptr, std::move(callback));
   }
 
   // Registers a Callback to execute when the Task reaches the |done| state.
-  // - Will execute |callback| immediately if this Task is already |done|.
-  void on_finished(DispatcherPtr /*nullable*/ dispatcher, CallbackPtr callback);
+  // - Will execute |callback| immediately if this Task is already |done|
+  void on_finished(std::shared_ptr<Dispatcher> /*nullable*/ dispatcher,
+                   CallbackPtr callback);
   void on_finished(CallbackPtr callback) {
     on_finished(nullptr, std::move(callback));
   }
 
+  // Methods for Consumers {{{
+
   // Marks the task as having exceeded its deadline.
-  // - Changes |ready| to |done| with result DEADLINE_EXCEEDED and returns true
-  // - Changes |running| to |expiring| and returns false
-  // - Has no effect otherwise (and returns false)
+  // - Changes |ready| to |unstarted| with result DEADLINE_EXCEEDED
+  // - Changes |running| to |expiring|
+  // - Has no effect otherwise
   //
   // This is normally called via |event::Manager::set_deadline()| and friends.
   //
-  bool expire() noexcept;
+  void expire() noexcept;
 
   // Requests that the Task be cancelled.
-  // - Changes |ready| to |done| with result CANCELLED and returns true
-  // - Changes |running| to |cancelling| and returns false
-  // - Changes |expiring| to |cancelling| and returns false
-  // - Has no effect otherwise (and returns false)
-  bool cancel() noexcept;
+  // - Changes |ready| to |unstarted| with result CANCELLED
+  // - Changes |running| to |cancelling|
+  // - Changes |expiring| to |cancelling|
+  // - Has no effect otherwise
+  void cancel() noexcept;
+
+  // Returns the result of the Task.
+  // PRECONDITION: state is |done|
+  // - If the Task finished with an exception, rethrows the exception.
+  base::Result result() const;
+
+  // Returns true if |result()| will throw an exception.
+  // PRECONDITION: state is |done|
+  bool result_will_throw() const noexcept;
+
+  // }}}
+  // Methods for Producers {{{
 
   // Marks the Task as running, unless the Task was already cancelled.
+  // PRECONDITION: state is |ready| or |unstarted|
   // - Changes |ready| to |running| and returns true
-  // - Has no effect if state was |done| (and returns false)
-  // PRECONDITION: state is |ready| or |done|
+  // - Changes |unstarted| to |done| and returns false
   bool start();
 
+  // Registers another Task as a subtask of this Task.
+  // PRECONDITION: state is |running|, |expiring|, |cancelling|, or |done|
+  // - If this Task reaches |expiring|, |cancelling|, or |done|,
+  //   then all subtasks will be cancelled.
+  // - Cancels |subtask| immediately if this Task is already expired/cancelled.
+  void add_subtask(Task* subtask);
+
   // Marks the task as finished with a result.
-  // - Changes |running| to |done| and returns true
-  // - Changes |expiring| to |done| and returns true
-  // - Changes |cancelling| to |done| and returns true
-  // - Has no effect if the state is already |done| (and returns false)
-  // PRECONDITION: state is not |ready|
-  bool finish(base::Result result);
+  // PRECONDITION: state is |running|, |expiring|, or |cancelling|
+  // - Changes |running| to |done|
+  // - Changes |expiring| to |done|
+  // - Changes |cancelling| to |done|
+  void finish(base::Result result);
 
   // Convenience method for finishing with an OK result.
-  // Return values and preconditions are the same as for |finish()|.
-  bool finish_ok() { return finish(base::Result()); }
+  // PRECONDITION: state is |running|, |expiring|, or |cancelling|
+  void finish_ok() { finish(base::Result()); }
 
   // Convenience method for finishing with DEADLINE_EXCEEDED or CANCELLED.
-  // Return values and preconditions are the same as for |finish()|.
-  bool finish_cancel();
+  // PRECONDITION: state is |running|, |expiring|, or |cancelling|
+  void finish_cancel();
 
   // Marks the task as finished with an exception.
-  // Return values and preconditions are the same as for |finish()|.
-  bool finish_exception(std::exception_ptr eptr);
+  // PRECONDITION: state is |running|, |expiring|, or |cancelling|
+  void finish_exception(std::exception_ptr eptr);
+
+  // }}}
 
  private:
+  using Work = internal::TaskWork;
+
   static base::Result incomplete_result();
   static base::Result exception_result();
 
-  bool cancel_impl(State next, base::Result result) noexcept;
-  void finish_impl(std::unique_lock<std::mutex> lock, base::Result result,
-                   std::exception_ptr eptr);
+  void cancel_impl(State next, base::Result result) noexcept;
+  void finish_impl(base::Lock& lock);
 
   mutable std::mutex mu_;
   State state_;
