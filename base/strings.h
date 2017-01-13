@@ -1,3 +1,7 @@
+// base/strings.h - StringPiece and other string helpers
+// Copyright © 2017 by Donald King <chronos@chronos-tachyon.net>
+// Available under the MIT License. See LICENSE for details.
+
 #ifndef BASE_STRINGS_H
 #define BASE_STRINGS_H
 
@@ -9,6 +13,14 @@
 
 namespace base {
 
+// StringPiece is a value type which holds a read-only view of a buffer, such
+// as a (piece of a) std::string. Take a StringPiece by value where you would
+// normally take a "const std::string&", especially in situations where you
+// don't need a std::string.
+//
+// NOTE: StringPiece does not own the memory it points to.
+//       Use std::string or alternatives if you need memory to persist.
+//       In particular, StringPiece is rarely appropriate as an object member.
 class StringPiece {
  private:
   static constexpr std::size_t constexpr_strlen(const char* ptr) noexcept {
@@ -26,35 +38,44 @@ class StringPiece {
  public:
   static constexpr std::size_t npos = SIZE_MAX;
 
+  // StringPiece is default constructible, copyable, and moveable.
+  // Move is indistinguishable from copy.
   constexpr StringPiece() noexcept : data_(""), size_(0) {}
   constexpr StringPiece(const StringPiece&) noexcept = default;
+  StringPiece& operator=(const StringPiece&) noexcept = default;
+
+  // StringPiece is constructible from a pointer and a length.
   constexpr StringPiece(const char* ptr, std::size_t len) noexcept
       : data_(ptr&& len > 0 ? ptr : ""),
         size_(ptr&& len > 0 ? len : 0) {}
+
+  // StringPiece is constructible from a C string.
   constexpr StringPiece(const char* ptr) noexcept
       : data_(ptr ? ptr : ""),
         size_(constexpr_strlen(ptr)) {}
-  StringPiece(const std::string& str) noexcept : data_(str.data()),
-                                                 size_(str.size()) {}
-  StringPiece(const std::vector<char>& vec) noexcept : data_(vec.data()),
-                                                       size_(vec.size()) {}
-
-  template <std::size_t N>
-  constexpr StringPiece(const char arr[N]) noexcept
-      : data_(arr),
-        size_(N >= 1 ? N - 1 : 0) {}
-
-  StringPiece& operator=(const StringPiece&) noexcept = default;
   StringPiece& operator=(const char* str) noexcept {
     return (*this = StringPiece(str));
   }
+
+  // StringPiece is constructible from a std::string.
+  StringPiece(const std::string& str) noexcept : data_(str.data()),
+                                                 size_(str.size()) {}
   StringPiece& operator=(const std::string& str) noexcept {
     return (*this = StringPiece(str));
   }
+
+  // StringPiece is constructible from a std::vector<char>.
+  StringPiece(const std::vector<char>& vec) noexcept : data_(vec.data()),
+                                                       size_(vec.size()) {}
   StringPiece& operator=(const std::vector<char>& vec) noexcept {
     return (*this = StringPiece(vec));
   }
 
+  // StringPiece is constructible from a string constant.
+  template <std::size_t N>
+  constexpr StringPiece(const char arr[N]) noexcept
+      : data_(arr),
+        size_(N >= 1 ? N - 1 : 0) {}
   template <std::size_t N>
   StringPiece& operator=(const char arr[N]) noexcept {
     return (*this = StringPiece(arr));
@@ -64,12 +85,17 @@ class StringPiece {
   constexpr const char* data() const noexcept { return data_; }
   constexpr std::size_t size() const noexcept { return size_; }
 
-  StringPiece substring(std::size_t pos, std::size_t len = npos) const
+  constexpr const char* begin() const noexcept { return data_; }
+  constexpr const char* cbegin() const noexcept { return data_; }
+  constexpr const char* end() const noexcept { return data_ + size_; }
+  constexpr const char* cend() const noexcept { return data_ + size_; }
+
+  constexpr StringPiece substring(std::size_t pos, std::size_t len = npos) const
       noexcept {
-    StringPiece dupe(*this);
-    dupe.remove_prefix(pos);
-    if (dupe.size_ > len) dupe.size_ = len;
-    return dupe;
+    return (pos >= size_)
+               ? StringPiece(data_ + size_, 0)
+               : ((len >= size_ - pos) ? StringPiece(data_ + pos, size_ - pos)
+                                       : StringPiece(data_ + pos, len));
   }
 
   constexpr StringPiece prefix(std::size_t n) const noexcept {
