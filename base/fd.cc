@@ -5,6 +5,7 @@
 
 #include <fcntl.h>
 #include <sys/socket.h>
+#include <sys/syscall.h>
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -137,6 +138,59 @@ Result seek(off_t* out, FD fd, off_t offset, int whence) {
     return Result::from_errno(err_no, "lseek(2)");
   }
   if (out) *out = n;
+  return Result();
+}
+
+Result readdir_all(std::vector<DEntry>* out, FD fd, const char* what) {
+  CHECK_NOTNULL(out);
+  CHECK_NOTNULL(fd);
+
+  std::vector<char> buf(4096);
+  long nread;
+  auto fdpair = fd->acquire_fd();
+  while (true) {
+    nread = syscall(SYS_getdents, fdpair.first, buf.data(), buf.size());
+    if (nread < 0) {
+      int err_no = errno;
+      return Result::from_errno(err_no, "getdents(2) from ", what);
+    }
+    if (nread == 0) break;
+
+    const char* ptr = buf.data();
+    const char* end = ptr + nread;
+    while (ptr != end) {
+      unsigned long ino;
+      unsigned short reclen;
+      unsigned char type;
+      ::memcpy(&ino, ptr, sizeof(unsigned long));
+      ::memcpy(&reclen, ptr + 2 * sizeof(unsigned long),
+               sizeof(unsigned short));
+      type = *(ptr + reclen - 1);
+      const char* p = ptr + 2 * sizeof(unsigned long) + sizeof(unsigned short);
+      const char* q = ptr + reclen - 2;
+      out->emplace_back(ino, type, std::string(p, q - p));
+      ptr += reclen;
+    }
+  }
+  return Result();
+}
+
+Result read_all(std::vector<char>* out, FD fd, const char* what) {
+  CHECK_NOTNULL(out);
+  CHECK_NOTNULL(fd);
+  auto fdpair = fd->acquire_fd();
+  std::size_t pos = 0;
+  while (true) {
+    out->resize(pos + 4096);
+    ssize_t n = ::read(fdpair.first, out->data() + pos, out->size() - pos);
+    if (n < 0) {
+      int err_no = errno;
+      return Result::from_errno(err_no, "read(2) from ", what);
+    }
+    if (n == 0) break;
+    pos += n;
+  }
+  out->resize(pos);
   return Result();
 }
 

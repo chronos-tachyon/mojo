@@ -9,6 +9,7 @@
 
 #include <functional>
 #include <memory>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -101,6 +102,10 @@ Result set_blocking(FD fd, bool value);
 Result shutdown(FD fd, int how);
 Result seek(off_t* /*nullable*/ out, FD fd, off_t offset, int whence);
 
+using DEntry = std::tuple<unsigned long, unsigned char, std::string>;
+
+Result readdir_all(std::vector<DEntry>* out, FD fd, const char* what);
+Result read_all(std::vector<char>* out, FD fd, const char* what);
 Result read_exactly(FD fd, void* ptr, std::size_t len, const char* what);
 Result write_exactly(FD fd, const void* ptr, std::size_t len, const char* what);
 
