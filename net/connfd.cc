@@ -182,7 +182,7 @@ class FDListenConn : public ListenConnImpl {
   const base::FD fd_;
   const AcceptFn fn_;
   mutable std::mutex mu_;
-  event::FileDescriptor evt_;
+  event::Handle evt_;
   bool accepting_;
 };
 
@@ -303,7 +303,7 @@ struct DialHelper {
   const ProtocolType type;
   const base::FD filedesc;
   std::mutex mu;
-  event::FileDescriptor evt;
+  event::Handle evt;
   bool seen;
 
   DialHelper(Protocol* pr, event::Task* t, Conn* o, ProtocolType p,

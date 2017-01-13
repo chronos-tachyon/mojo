@@ -84,7 +84,7 @@ static void TestManagerImplementation_FDs(event::Manager m) {
   EXPECT_TRUE(task.start());
 
   LOG(INFO) << "registering fd";
-  event::FileDescriptor fd;
+  event::Handle fd;
   EXPECT_OK(
       m.fd(&fd, s.right, event::Set::readable_bit(), event::handler(closure)));
 
@@ -127,7 +127,7 @@ static void TestManagerImplementation_Signals(event::Manager m) {
   EXPECT_TRUE(task.start());
 
   LOG(INFO) << "registering signals";
-  event::Signal hup, usr1, usr2;
+  event::Handle hup, usr1, usr2;
   EXPECT_OK(m.signal(&hup, SIGHUP, event::handler(handler, 1)));
   EXPECT_OK(m.signal(&usr1, SIGUSR1, event::handler(handler, 2)));
   EXPECT_OK(m.signal(&usr2, SIGUSR2, event::handler(handler, 4)));
@@ -175,7 +175,7 @@ static void TestManagerImplementation_Timers(event::Manager m) {
   EXPECT_TRUE(task.start());
 
   LOG(INFO) << "creating timer";
-  event::Timer t;
+  event::Handle t;
   ASSERT_OK(m.timer(&t, event::handler(timer_closure)));
 
   LOG(INFO) << "setting timer to period 1ms";
@@ -238,7 +238,7 @@ static void TestManagerImplementation_Events(event::Manager m) {
   EXPECT_TRUE(task.start());
 
   LOG(INFO) << "registering event";
-  event::Generic e;
+  event::Handle e;
   EXPECT_OK(m.generic(&e, event::handler(handler)));
 
   LOG(INFO) << "spawning thread";
@@ -274,15 +274,18 @@ static void TestManagerImplementation_TaskTimeouts(event::Manager m) {
   std::mutex mu;
   unsigned int a = 1;
   unsigned int b = 1;
+  bool ended = false;
 
-  auto closure = [&task, &mu, &a, &b](event::Data data) {
+  auto closure = [&task, &mu, &a, &b, &ended](event::Data data) {
+    auto lock = base::acquire_lock(mu);
+    if (ended) return base::Result();
     if (!task.is_running()) {
       LOG(INFO) << "boop from the grave!";
+      ended = true;
       task.finish_cancel();
       return base::Result();
     }
     LOG(INFO) << "boop!";
-    auto lock = base::acquire_lock(mu);
     auto i = data.int_value;
     while (i > 0) {
       unsigned int c = a + b;
@@ -297,12 +300,12 @@ static void TestManagerImplementation_TaskTimeouts(event::Manager m) {
   EXPECT_TRUE(task.start());
 
   LOG(INFO) << "creating timer at interval 1ms";
-  event::Timer t;
+  event::Handle t;
   EXPECT_OK(m.timer(&t, event::handler(closure)));
-  EXPECT_OK(t.set_periodic(base::milliseconds(1)));
+  EXPECT_OK(t.set_periodic(base::microseconds(250)));
 
   LOG(INFO) << "setting deadline";
-  base::MonotonicTime at = base::monotonic_now() + base::milliseconds(3);
+  base::MonotonicTime at = base::monotonic_now() + base::milliseconds(1);
   EXPECT_OK(m.set_deadline(&task, at));
 
   LOG(INFO) << "waiting for task";

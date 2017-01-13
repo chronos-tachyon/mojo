@@ -43,13 +43,13 @@ struct Record {
   Set set;
   bool disabled;  // true iff new calls forbidden
 
-  Record(base::token_t t, DispatcherPtr d, HandlerPtr h,
-         Set set = Set()) noexcept : token(t),
-                                     dispatcher(std::move(d)),
-                                     handler(std::move(h)),
-                                     outstanding(0),
-                                     set(set),
-                                     disabled(false) {
+  Record(base::token_t t, DispatcherPtr d, HandlerPtr h, Set set) noexcept
+      : token(t),
+        dispatcher(std::move(d)),
+        handler(std::move(h)),
+        outstanding(0),
+        set(set),
+        disabled(false) {
     DCHECK_NOTNULL(dispatcher);
     DCHECK_NOTNULL(handler);
   }
@@ -113,21 +113,15 @@ class ManagerImpl {
 
   base::Result fd_add(std::unique_ptr<Record>* out, base::FD fd, Set set,
                       HandlerPtr handler);
-  base::Result fd_modify(Record* myrec, Set set);
-  base::Result fd_remove(Record* myrec);
-
   base::Result signal_add(std::unique_ptr<Record>* out, int signo,
                           HandlerPtr handler);
-  base::Result signal_remove(Record* myrec);
-
   base::Result timer_add(std::unique_ptr<Record>* out, HandlerPtr handler);
-  base::Result timer_arm(Record* myrec, base::Duration delay,
-                         base::Duration period, bool delay_abs);
-  base::Result timer_remove(Record* myrec);
-
   base::Result generic_add(std::unique_ptr<Record>* out, HandlerPtr handler);
-  base::Result generic_fire(Record* myrec, int value);
-  base::Result generic_remove(Record* myrec);
+  base::Result modify(Record* myrec, Set set);
+  base::Result arm(Record* myrec, base::Duration delay,
+                   base::Duration period, bool delay_abs);
+  base::Result fire(Record* myrec, int value);
+  base::Result disable(Record* myrec);
 
   void donate(bool forever) noexcept;
   void shutdown() noexcept;
@@ -142,7 +136,7 @@ class ManagerImpl {
   void donate_once(base::Lock& lock) noexcept;
   void donate_forever(base::Lock& lock) noexcept;
 
-  void schedule(CallbackVec* cbvec, Record* rec, Data data);
+  void schedule(CallbackVec* cbvec, Record* rec, Set set, Data data);
   void handle_event(CallbackVec* cbvec, base::token_t t, Set set);
   void handle_pipe_event(CallbackVec* cbvec);
   void handle_fd_event(CallbackVec* cbvec, base::token_t t, const Source& src,
@@ -168,41 +162,67 @@ class ManagerImpl {
 using ManagerPtr = std::shared_ptr<internal::ManagerImpl>;
 using RecordPtr = std::unique_ptr<internal::Record>;
 
-// An event::FileDescriptor binds an event handler to a file descriptor.
-class FileDescriptor {
+// An event::Handle binds an event handler to one or more events.
+class Handle {
  public:
-  // FileDescriptor is constructible in the non-empty state.
-  // - Normally only |Manager::fd()| calls this.
-  FileDescriptor(ManagerPtr ptr, RecordPtr rec) noexcept
-      : ptr_(std::move(ptr)),
-        rec_(std::move(rec)) {}
+  // Handle is default constructible in the empty state.
+  Handle() noexcept = default;
 
-  // FileDescriptor is default constructible in the empty state.
-  FileDescriptor() noexcept = default;
+  // Handle is moveable but not copyable.
+  Handle(const Handle&) = delete;
+  Handle(Handle&&) noexcept = default;
+  Handle& operator=(const Handle&) = delete;
+  Handle& operator=(Handle&&) noexcept = default;
 
-  // FileDescriptor is moveable but not copyable.
-  FileDescriptor(const FileDescriptor&) = delete;
-  FileDescriptor(FileDescriptor&& x) noexcept = default;
-  FileDescriptor& operator=(const FileDescriptor&) = delete;
-  FileDescriptor& operator=(FileDescriptor&&) noexcept = default;
-
-  // Swaps this FileDescriptor with another.
-  void swap(FileDescriptor& x) noexcept {
+  // Swaps this Handle with another.
+  void swap(Handle& x) noexcept {
     ptr_.swap(x.ptr_);
     rec_.swap(x.rec_);
   }
 
-  // Returns true iff this FileDescriptor event is non-empty.
+  // Returns true iff this Handle is non-empty.
   explicit operator bool() const noexcept { return !!rec_; }
 
-  // Asserts that this FileDescriptor event is non-empty.
+  // Asserts that this Handle is non-empty.
   void assert_valid() const;
 
   // Gets the set of events which the Handler is interested in.
   base::Result get(Set* out) const;
 
-  // Replaces the set of events which the Handler is interested in.
+  // Replaces the set of FD events which the Handler is interested in.
   base::Result modify(Set set);
+
+  // Arms the timer event as a one-shot timer for the given absolute time.
+  // The time is specified in terms of the |base::system_monotonic_clock()|.
+  base::Result set_at(base::MonotonicTime at);
+  base::Result set_at(base::Time at) {
+    return set_at(base::system_monotonic_clock().convert(at));
+  }
+
+  // Arms the timer event as a one-shot timer for a time relative to now.
+  base::Result set_delay(base::Duration delay);
+
+  // Arms the timer event as a periodic timer with the given period.
+  base::Result set_periodic(base::Duration period);
+
+  // Arms the timer event as a periodic timer with the given period.
+  // The first event will arrive at the given absolute time.
+  base::Result set_periodic_at(base::Duration period, base::MonotonicTime at);
+  base::Result set_periodic_at(base::Duration period, base::Time at) {
+    return set_periodic_at(period, base::system_monotonic_clock().convert(at));
+  }
+
+  // Arms the timer event as a periodic timer with the given period.
+  // The first event will arrive after the specified delay.
+  base::Result set_periodic_delay(base::Duration period, base::Duration delay);
+
+  // Disarms the timer event. The Handle remains valid, but it produces no
+  // further events until it is armed again.
+  base::Result cancel();
+
+  // Triggers a generic event.
+  // |value| will be available as |data.int_value| in the Handler.
+  base::Result fire(int value = 0) const;
 
   // Unbinds the Handler from future file descriptor events.
   base::Result disable();
@@ -219,197 +239,16 @@ class FileDescriptor {
   base::Result release();
 
  private:
-  ManagerPtr ptr_;
-  RecordPtr rec_;
-};
+  friend class Manager;
 
-inline void swap(FileDescriptor& a, FileDescriptor& b) noexcept { a.swap(b); }
-
-// An event::Signal binds an event handler to a Unix signal.
-class Signal {
- public:
-  // Signal is constructible in the non-empty state.
-  // - Normally only |Manager::signal()| calls this.
-  Signal(ManagerPtr ptr, RecordPtr rec) noexcept : ptr_(std::move(ptr)),
+  Handle(ManagerPtr ptr, RecordPtr rec) noexcept : ptr_(std::move(ptr)),
                                                    rec_(std::move(rec)) {}
 
-  // Signal is default constructible in the empty state.
-  Signal() noexcept = default;
-
-  // Signal is moveable but not copyable.
-  Signal(const Signal&) = delete;
-  Signal(Signal&& x) noexcept = default;
-  Signal& operator=(const Signal&) = delete;
-  Signal& operator=(Signal&&) noexcept = default;
-
-  // Swaps this Signal event with another.
-  void swap(Signal& x) noexcept {
-    ptr_.swap(x.ptr_);
-    rec_.swap(x.rec_);
-  }
-
-  // Returns true iff this Signal event is non-empty.
-  explicit operator bool() const noexcept { return !!rec_; }
-
-  // Asserts that this Signal event is non-empty.
-  void assert_valid() const;
-
-  // Unbinds the Handler from future signal events.
-  // NOTE: If this was the last Handler bound to the signal, then the default
-  //       signal behavior is restored.
-  base::Result disable();
-
-  // Waits for all Handler calls to complete.
-  // PRECONDITION: |disable()| was called
-  void wait();
-
-  // Disowns any incomplete Handler calls.
-  // PRECONDITION: |disable()| was called
-  void disown();
-
-  // Combines the effects of the |disable()| and |wait()| methods.
-  base::Result release();
-
- private:
   ManagerPtr ptr_;
   RecordPtr rec_;
 };
 
-inline void swap(Signal& a, Signal& b) noexcept { a.swap(b); }
-
-// An event::Timer binds an event handler to a timer of some kind.
-// The timer is initially unarmed; use the Timer::set_* methods to arm.
-class Timer {
- public:
-  // Timer is constructible in the non-empty state.
-  // - Normally only |Manager::timer()| calls this.
-  Timer(ManagerPtr ptr, RecordPtr rec) noexcept : ptr_(std::move(ptr)),
-                                                  rec_(std::move(rec)) {}
-
-  // Timer is default constructible in the empty state.
-  Timer() noexcept = default;
-
-  // Timer is moveable but not copyable.
-  Timer(const Timer&) = delete;
-  Timer(Timer&& x) noexcept = default;
-  Timer& operator=(const Timer&) = delete;
-  Timer& operator=(Timer&&) noexcept = default;
-
-  // Swaps this Timer event with another.
-  void swap(Timer& x) noexcept {
-    ptr_.swap(x.ptr_);
-    rec_.swap(x.rec_);
-  }
-
-  // Returns true iff this Timer event is non-empty.
-  explicit operator bool() const noexcept { return !!rec_; }
-
-  // Asserts that this Timer event is non-empty.
-  void assert_valid() const;
-
-  // Arms the timer as a one-shot timer for the given absolute time.
-  // The time is specified in terms of the |base::system_monotonic_clock()|.
-  base::Result set_at(base::MonotonicTime at);
-  base::Result set_at(base::Time at) {
-    return set_at(base::system_monotonic_clock().convert(at));
-  }
-
-  // Arms the timer as a one-shot timer for the given time (relative to now).
-  base::Result set_delay(base::Duration delay);
-
-  // Arms the timer as a periodic timer with the given period.
-  base::Result set_periodic(base::Duration period);
-
-  // Arms the timer as a periodic timer with the given period.
-  // The first event will arrive at the given absolute time.
-  // The time is specified in terms of the |base::system_monotonic_clock()|.
-  base::Result set_periodic_at(base::Duration period, base::MonotonicTime at);
-  base::Result set_periodic_at(base::Duration period, base::Time at) {
-    return set_periodic_at(period, base::system_monotonic_clock().convert(at));
-  }
-
-  // Arms the timer as a periodic timer with the given period.
-  // The first event will arrive at the given time (relative to now).
-  base::Result set_periodic_delay(base::Duration period, base::Duration delay);
-
-  // Disarms the timer. The Timer remains valid, but it produces no further
-  // events until it is armed again.
-  base::Result cancel();
-
-  // Unbinds the Handler from future timer events and frees the timer.
-  base::Result disable();
-
-  // Waits for all Handler calls to complete.
-  // PRECONDITION: |disable()| was called
-  void wait();
-
-  // Disowns any incomplete Handler calls.
-  // PRECONDITION: |disable()| was called
-  void disown();
-
-  // Combines the effects of the |disable()| and |wait()| methods.
-  base::Result release();
-
- private:
-  ManagerPtr ptr_;
-  RecordPtr rec_;
-};
-
-inline void swap(Timer& a, Timer& b) noexcept { a.swap(b); }
-
-// An event::Generic binds an event handler to an arbitrary event.
-class Generic {
- public:
-  // Generic is constructible in the non-empty state.
-  // - Normally only |Manager::generic()| calls this.
-  Generic(ManagerPtr ptr, RecordPtr rec) noexcept : ptr_(std::move(ptr)),
-                                                    rec_(std::move(rec)) {}
-
-  // Generic is default constructible in the empty state.
-  Generic() noexcept = default;
-
-  // Generic is moveable but not copyable.
-  Generic(const Generic&) = delete;
-  Generic(Generic&& x) noexcept = default;
-  Generic& operator=(const Generic&) = delete;
-  Generic& operator=(Generic&&) noexcept = default;
-
-  // Swaps this Generic event with another.
-  void swap(Generic& x) noexcept {
-    ptr_.swap(x.ptr_);
-    rec_.swap(x.rec_);
-  }
-
-  // Returns true iff this Generic event is non-empty.
-  explicit operator bool() const noexcept { return !!rec_; }
-
-  // Asserts that this Generic event is non-empty.
-  void assert_valid() const;
-
-  // Fires the event, triggering the associated Handler.
-  // |value| will be available as |data.int_value| in the Handler.
-  base::Result fire(int value = 0) const;
-
-  // Unbinds the Handler from future events and frees any resources.
-  base::Result disable();
-
-  // Waits for all Handler calls to complete.
-  // PRECONDITION: |disable()| was called
-  void wait();
-
-  // Disowns any incomplete Handler calls.
-  // PRECONDITION: |disable()| was called
-  void disown();
-
-  // Combines the effects of the |disable()| and |wait()| methods.
-  base::Result release();
-
- private:
-  ManagerPtr ptr_;
-  RecordPtr rec_;
-};
-
-inline void swap(Generic& a, Generic& b) noexcept { a.swap(b); }
+inline void swap(Handle& a, Handle& b) noexcept { a.swap(b); }
 
 // A ManagerOptions holds user-available choices in the configuration of
 // Manager instances.
@@ -503,9 +342,9 @@ class ManagerOptions {
 //    std::condition_variable cv;
 //    bool done = false;
 //
-//    event::Timer timer;
+//    event::Handle timer;
 //    result = m.timer(&timer, event::handler([&] (event::Data data) {
-//      std::unique_lock<std::mutex> lock(mu);
+//      auto lock = base::acquire_lock(mu);
 //      std::cout << "Hello from timer!" << std::endl;
 //      done = true;
 //      cv.notify_all();
@@ -583,18 +422,17 @@ class Manager {
   }
 
   // Registers an event handler for a file descriptor.
-  base::Result fd(FileDescriptor* out, base::FD fd, Set set,
-                  HandlerPtr handler) const;
+  base::Result fd(Handle* out, base::FD fd, Set set, HandlerPtr handler) const;
 
   // Registers an event handler for a Unix signal.
-  base::Result signal(Signal* out, int signo, HandlerPtr handler) const;
+  base::Result signal(Handle* out, int signo, HandlerPtr handler) const;
 
   // Registers an event handler for a timer.
-  // The timer is initially disarmed. Use |Timer::set_*()| to arm it.
-  base::Result timer(Timer* out, HandlerPtr handler) const;
+  // The timer is initially disarmed. Use |Handle::set_*()| to arm it.
+  base::Result timer(Handle* out, HandlerPtr handler) const;
 
   // Registers an event handler for a generic event.
-  base::Result generic(Generic* out, HandlerPtr handler) const;
+  base::Result generic(Handle* out, HandlerPtr handler) const;
 
   // Arranges for |task->expire()| to be called at time |at|.
   base::Result set_deadline(Task* task, base::MonotonicTime at);

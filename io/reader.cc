@@ -507,7 +507,7 @@ class FDReader : public ReaderImpl {
     const std::size_t min;
     const std::size_t max;
     const base::Options options;
-    event::FileDescriptor rdevt;
+    event::Handle rdevt;
 
     ReadOp(event::Task* t, char* o, std::size_t* n, std::size_t mn,
            std::size_t mx, base::Options opts) noexcept
@@ -527,8 +527,8 @@ class FDReader : public ReaderImpl {
     const std::size_t max;
     const Writer writer;
     const base::Options options;
-    event::FileDescriptor rdevt;
-    event::FileDescriptor wrevt;
+    event::Handle rdevt;
+    event::Handle wrevt;
 
     WriteToOp(event::Task* t, std::size_t* n, std::size_t mx, Writer w,
               base::Options opts) noexcept : task(t),
@@ -558,15 +558,15 @@ class FDReader : public ReaderImpl {
  private:
   void process(base::Lock& lock);
   base::Result wake(event::Set set);
-  base::Result arm(event::FileDescriptor* evt, const base::FD& fd,
-                   event::Set set, const base::Options& o);
+  base::Result arm(event::Handle* evt, const base::FD& fd, event::Set set,
+                   const base::Options& o);
 
   const base::FD fd_;
   mutable std::mutex mu_;
-  std::condition_variable cv_;                // protected by mu_
-  std::deque<std::unique_ptr<Op>> q_;         // protected by mu_
-  std::vector<event::FileDescriptor> purge_;  // protected by mu_
-  std::size_t depth_;                         // protected by mu_
+  std::condition_variable cv_;         // protected by mu_
+  std::deque<std::unique_ptr<Op>> q_;  // protected by mu_
+  std::vector<event::Handle> purge_;   // protected by mu_
+  std::size_t depth_;                  // protected by mu_
 };
 
 FDReader::~FDReader() noexcept {
@@ -646,7 +646,7 @@ base::Result FDReader::wake(event::Set set) {
   return base::Result();
 }
 
-base::Result FDReader::arm(event::FileDescriptor* evt, const base::FD& fd,
+base::Result FDReader::arm(event::Handle* evt, const base::FD& fd,
                            event::Set set, const base::Options& o) {
   DCHECK_NOTNULL(evt);
   base::Result r;

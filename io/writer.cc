@@ -380,7 +380,7 @@ class FDWriter : public WriterImpl {
     const char* const ptr;
     const std::size_t len;
     const base::Options options;
-    event::FileDescriptor wrevt;
+    event::Handle wrevt;
 
     WriteOp(event::Task* t, std::size_t* n, const char* p, std::size_t l,
             base::Options opts) noexcept : task(t),
@@ -407,15 +407,15 @@ class FDWriter : public WriterImpl {
  private:
   void process(base::Lock& lock);
   base::Result wake(event::Set set);
-  base::Result arm(event::FileDescriptor* evt, const base::FD& fd,
-                   event::Set set, const base::Options& o);
+  base::Result arm(event::Handle* evt, const base::FD& fd, event::Set set,
+                   const base::Options& o);
 
   const base::FD fd_;
   mutable std::mutex mu_;
   std::condition_variable cv_;
-  std::deque<std::unique_ptr<Op>> q_;         // protected by mu_
-  std::vector<event::FileDescriptor> purge_;  // protected by mu_
-  std::size_t depth_;                         // protected by mu_
+  std::deque<std::unique_ptr<Op>> q_;  // protected by mu_
+  std::vector<event::Handle> purge_;   // protected by mu_
+  std::size_t depth_;                  // protected by mu_
 };
 
 FDWriter::~FDWriter() noexcept {
@@ -485,7 +485,7 @@ base::Result FDWriter::wake(event::Set set) {
   return base::Result();
 }
 
-base::Result FDWriter::arm(event::FileDescriptor* evt, const base::FD& fd,
+base::Result FDWriter::arm(event::Handle* evt, const base::FD& fd,
                            event::Set set, const base::Options& o) {
   DCHECK_NOTNULL(evt);
   base::Result r;
