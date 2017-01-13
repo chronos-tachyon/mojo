@@ -7,8 +7,10 @@
 
 #include <climits>
 #include <cstring>
+#include <functional>
 #include <iosfwd>
 #include <iterator>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -38,6 +40,8 @@ class StringPiece {
   using size_type = std::size_t;
   using difference_type = std::ptrdiff_t;
 
+  static constexpr size_type npos = SIZE_MAX;
+
  private:
   static constexpr size_type partial_strlen(const_pointer ptr,
                                             size_type sum) noexcept {
@@ -53,6 +57,11 @@ class StringPiece {
                ? 0
                : ((*p < *q) ? -1
                             : ((*p > *q) ? 1 : ce_memcmp(p + 1, q + 1, n - 1)));
+  }
+
+  static constexpr bool ce_memeq(const_pointer p, const_pointer q,
+                                 size_type n) noexcept {
+    return ce_memcmp(p, q, n) == 0;
   }
 
   template <typename T>
@@ -71,9 +80,42 @@ class StringPiece {
                : ((a.size() < b.size()) ? -1 : ((a.size() > b.size()) ? 1 : 0));
   }
 
- public:
-  static constexpr size_type npos = SIZE_MAX;
+  static constexpr size_type ce_find(char ch, const_pointer ptr, size_type len,
+                                     size_type index) noexcept {
+    return (index >= len) ? npos : ((ptr[index] == ch)
+                                        ? index
+                                        : ce_find(ch, ptr, len, index + 1));
+  }
 
+  static constexpr size_type ce_find(const_pointer sptr, size_type slen,
+                                     const_pointer ptr, size_type len,
+                                     size_type index) noexcept {
+    return (slen > len || index > len - slen)
+               ? npos
+               : (ce_memeq(ptr + index, sptr, slen)
+                      ? index
+                      : ce_find(sptr, slen, ptr, len, index + 1));
+  }
+
+  static constexpr size_type ce_rfind(char ch, const_pointer ptr,
+                                      size_type index) noexcept {
+    return (ptr[index] == ch)
+               ? index
+               : ((index == 0) ? npos : ce_rfind(ch, ptr, index - 1));
+  }
+
+  static constexpr size_type ce_rfind(const_pointer sptr, size_type slen,
+                                      const_pointer ptr, size_type index) {
+    return ce_memeq(ptr + index, sptr, slen)
+               ? index
+               : ((index == 0) ? npos : ce_rfind(sptr, slen, ptr, index - 1));
+  }
+
+  static constexpr size_type cap(size_type pos, size_type sz) noexcept {
+    return (pos > sz) ? sz : pos;
+  }
+
+ public:
   // StringPiece is default constructible, copyable, and moveable.
   // Move is indistinguishable from copy.
   constexpr StringPiece() noexcept : data_(nullptr), size_(0) {}
@@ -186,6 +228,26 @@ class StringPiece {
     return true;
   }
 
+  bool contains(StringPiece sp) const noexcept { return find(sp) != npos; }
+
+  constexpr size_type find(char ch, size_type pos = 0) const noexcept {
+    return ce_find(ch, data_, size_, pos);
+  }
+
+  constexpr size_type find(StringPiece sp, size_type pos = 0) const noexcept {
+    return ce_find(sp.data_, sp.size_, data_, size_, pos);
+  }
+
+  constexpr size_type rfind(char ch, size_type pos = npos) const noexcept {
+    return empty() ? npos : ce_rfind(ch, data_, cap(pos, size_ - 1));
+  }
+
+  constexpr size_type rfind(StringPiece sp, size_type pos = npos) const
+      noexcept {
+    return (sp.size_ > size_) ? npos : ce_rfind(sp.data_, sp.size_, data_,
+                                                cap(pos, size_ - sp.size_));
+  }
+
   void append_to(std::string* out) const;
   std::size_t length_hint() const noexcept { return size_; }
   std::string as_string() const { return std::string(data_, size_); }
@@ -268,6 +330,129 @@ constexpr StringPiece remove_suffix(StringPiece sp,
   return sp.has_suffix(suffix) ? sp.substring(0, sp.size() - suffix.size())
                                : sp;
 }
+
+class SplitterImpl {
+ protected:
+  SplitterImpl() noexcept = default;
+
+ public:
+  virtual ~SplitterImpl() noexcept = default;
+
+  // If |sp| can be split, splits it into |first| + |rest| and returns true.
+  // Otherwise, copies |sp| to |first| and returns false.
+  //
+  // Example (splitting on ','):
+  //    sp      | return  | first | rest
+  //    --------+---------+-------+----------
+  //    "a,b,c" | true    | "a"   | "b,c"
+  //    "b,c"   | true    | "b"   | "c"
+  //    "c"     | false   | "c"   | <ignored>
+  virtual bool chop(StringPiece* first, StringPiece* rest, StringPiece sp) const
+      noexcept = 0;
+
+  SplitterImpl(const SplitterImpl&) = delete;
+  SplitterImpl(SplitterImpl&&) = delete;
+  SplitterImpl& operator=(const SplitterImpl&) = delete;
+  SplitterImpl& operator=(SplitterImpl&&) = delete;
+};
+
+class Splitter {
+ public:
+  using Pointer = std::shared_ptr<SplitterImpl>;
+  using Predicate = std::function<bool(char)>;
+
+  // Splitter is constructible from an implementation.
+  Splitter(Pointer ptr) : ptr_(std::move(ptr)), lim_(SIZE_MAX), omit_(false) {}
+
+  // Splitter is default constructible.
+  Splitter() : Splitter(nullptr) {}
+
+  // Splitter is copyable and moveable.
+  Splitter(const Splitter&) = default;
+  Splitter(Splitter&&) = default;
+  Splitter& operator=(const Splitter&) = default;
+  Splitter& operator=(Splitter&&) = default;
+
+  // Returns true iff this Splitter is non-empty.
+  explicit operator bool() const noexcept { return !!ptr_; }
+
+  // Asserts that this Splitter is non-empty.
+  void assert_valid() const noexcept;
+
+  // Returns this Splitter's implementation.
+  const Pointer& implementation() const noexcept { return ptr_; }
+  Pointer& implementation() noexcept { return ptr_; }
+
+  // Trims all characters matching |pred|
+  // from the beginning and end of each item.
+  Splitter& trim(Predicate pred) noexcept {
+    trim_ = std::move(pred);
+    return *this;
+  }
+
+  // Trims |ch| from the beginning and end of each item.
+  Splitter& trim(char ch) {
+    trim_ = [ch](char x) -> bool { return ch == x; };
+    return *this;
+  }
+
+  // Trims whitespace from the beginning and end of each item.
+  Splitter& trim_whitespace() {
+    trim_ = [](char x) -> bool {
+      return x == ' ' || x == '\t' || (x >= '\n' && x <= '\r');
+    };
+    return *this;
+  }
+
+  // Limits the output to |n| items.
+  // - 0 is impossible; it is treated as 1
+  Splitter& limit(std::size_t n) noexcept {
+    lim_ = n;
+    return *this;
+  }
+
+  // Removes any limit on the number of items to be output.
+  Splitter& unlimited() noexcept {
+    lim_ = SIZE_MAX;
+    return *this;
+  }
+
+  // Make this splitter omit empty items.
+  //
+  // Example (splitting on ','):
+  //                Input: "a,,b,c"
+  //    Output (standard): {"a", "", "b", "c"}
+  //  Output (omit_empty): {"a", "b", "c"}
+  //
+  Splitter& omit_empty(bool value = true) noexcept {
+    omit_ = value;
+    return *this;
+  }
+
+  // Splits |sp| into pieces.
+  std::vector<StringPiece> split(StringPiece sp);
+
+  // Splits |sp| into pieces.  The pieces are returned as std::strings.
+  std::vector<std::string> split_strings(StringPiece sp);
+
+ private:
+  Pointer ptr_;
+  Predicate trim_;
+  std::size_t lim_;
+  bool omit_;
+};
+
+namespace split {
+
+using Predicate = std::function<bool(char)>;
+
+Splitter fixed_length(std::size_t len);
+Splitter on(char ch);
+Splitter on(std::string str);
+Splitter on(Predicate pred);
+Splitter on_pattern(StringPiece pattern);
+
+}  // namespace split
 
 }  // namespace base
 
