@@ -16,8 +16,8 @@ class FixedSplitter : public SplitterImpl {
  public:
   explicit FixedSplitter(std::size_t len) noexcept : len_(len) {}
 
-  bool chop(StringPiece* first, StringPiece* rest, StringPiece sp) const
-      noexcept override {
+  bool chop(StringPiece* first, StringPiece* rest,
+            StringPiece sp) const override {
     if (sp.size() > len_) {
       *first = sp.substring(0, len_);
       *rest = sp.substring(len_);
@@ -35,8 +35,8 @@ class CharSplitter : public SplitterImpl {
  public:
   explicit CharSplitter(char ch) noexcept : ch_(ch) {}
 
-  bool chop(StringPiece* first, StringPiece* rest, StringPiece sp) const
-      noexcept override {
+  bool chop(StringPiece* first, StringPiece* rest,
+            StringPiece sp) const override {
     auto index = sp.find(ch_);
     if (index != StringPiece::npos) {
       *first = sp.substring(0, index);
@@ -55,8 +55,8 @@ class StringSplitter : public SplitterImpl {
  public:
   explicit StringSplitter(std::string str) noexcept : str_(std::move(str)) {}
 
-  bool chop(StringPiece* first, StringPiece* rest, StringPiece sp) const
-      noexcept override {
+  bool chop(StringPiece* first, StringPiece* rest,
+            StringPiece sp) const override {
     if (str_.empty()) {
       if (!sp.empty()) {
         *first = sp.substring(0, 1);
@@ -65,9 +65,6 @@ class StringSplitter : public SplitterImpl {
       }
     } else {
       auto index = sp.find(str_);
-      LOG(INFO) << "sp=[" << sp << "], "
-                << "str=[" << str_ << "], "
-                << "index=" << index;
       if (index != StringPiece::npos) {
         *first = sp.substring(0, index);
         *rest = sp.substring(index + str_.size());
@@ -88,8 +85,8 @@ class PredicateSplitter : public SplitterImpl {
 
   explicit PredicateSplitter(Predicate pred) noexcept : pred_(pred) {}
 
-  bool chop(StringPiece* first, StringPiece* rest, StringPiece sp) const
-      noexcept override {
+  bool chop(StringPiece* first, StringPiece* rest,
+            StringPiece sp) const override {
     auto begin = sp.begin(), end = sp.end();
     auto it = begin;
     while (it != end) {
@@ -115,8 +112,8 @@ class PatternSplitter : public SplitterImpl {
     CHECK(re_.ok()) << ": " << re_.error();
   }
 
-  bool chop(StringPiece* first, StringPiece* rest, StringPiece sp) const
-      noexcept override {
+  bool chop(StringPiece* first, StringPiece* rest,
+            StringPiece sp) const override {
     re2::StringPiece input = sp;
     re2::StringPiece match;
     if (re_.Match(input, 0, input.size(), re2::RE2::UNANCHORED, &match, 1)) {
@@ -131,6 +128,44 @@ class PatternSplitter : public SplitterImpl {
 
  private:
   re2::RE2 re_;
+};
+
+class EmptyJoiner : public JoinerImpl {
+ public:
+  EmptyJoiner() noexcept = default;
+
+  void glue(std::string* out, StringPiece sp, bool) const override {
+    sp.append_to(out);
+  }
+  std::size_t hint() const noexcept override { return 0; }
+};
+
+class CharJoiner : public JoinerImpl {
+ public:
+  CharJoiner(char ch) noexcept : ch_(ch) {}
+
+  void glue(std::string* out, StringPiece sp, bool first) const override {
+    if (!first) out->push_back(ch_);
+    sp.append_to(out);
+  }
+  std::size_t hint() const noexcept override { return 1; }
+
+ private:
+  char ch_;
+};
+
+class StringJoiner : public JoinerImpl {
+ public:
+  StringJoiner(std::string str) noexcept : str_(std::move(str)) {}
+
+  void glue(std::string* out, StringPiece sp, bool first) const override {
+    if (!first) out->append(str_);
+    sp.append_to(out);
+  }
+  std::size_t hint() const noexcept override { return str_.size(); }
+
+ private:
+  std::string str_;
 };
 
 }  // anonymous namespace
@@ -150,7 +185,7 @@ void Splitter::assert_valid() const noexcept {
   LOG(FATAL) << "BUG! base::split::Splitter is empty";
 }
 
-std::vector<StringPiece> Splitter::split(StringPiece sp) {
+std::vector<StringPiece> Splitter::split(StringPiece sp) const {
   assert_valid();
   std::vector<StringPiece> out;
   StringPiece first, rest;
@@ -177,12 +212,29 @@ std::vector<StringPiece> Splitter::split(StringPiece sp) {
   return out;
 }
 
-std::vector<std::string> Splitter::split_strings(StringPiece sp) {
+std::vector<std::string> Splitter::split_strings(StringPiece sp) const {
   auto in = split(sp);
   std::vector<std::string> out;
   out.reserve(in.size());
   for (StringPiece sp : in) {
     out.push_back(sp);
+  }
+  return out;
+}
+
+std::string Joiner::join(const std::vector<StringPiece>& vec) const {
+  std::string out;
+  std::size_t size = 0;
+  for (StringPiece sp : vec) {
+    size += sp.size();
+  }
+  size += vec.size() * ptr_->hint();
+  out.reserve(size);
+  bool first = true;
+  for (StringPiece sp : vec) {
+    if (skip_ && sp.empty()) continue;
+    ptr_->glue(&out, sp, first);
+    first = false;
   }
   return out;
 }
@@ -208,4 +260,15 @@ Splitter on_pattern(StringPiece pattern) {
 }
 
 }  // namespace split
+namespace join {
+
+Joiner on() { return Joiner(std::make_shared<EmptyJoiner>()); }
+
+Joiner on(char ch) { return Joiner(std::make_shared<CharJoiner>(ch)); }
+
+Joiner on(std::string str) {
+  return Joiner(std::make_shared<StringJoiner>(std::move(str)));
+}
+
+}  // namespace join
 }  // namespace base

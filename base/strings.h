@@ -347,8 +347,8 @@ class SplitterImpl {
   //    "a,b,c" | true    | "a"   | "b,c"
   //    "b,c"   | true    | "b"   | "c"
   //    "c"     | false   | "c"   | <ignored>
-  virtual bool chop(StringPiece* first, StringPiece* rest, StringPiece sp) const
-      noexcept = 0;
+  virtual bool chop(StringPiece* first, StringPiece* rest,
+                    StringPiece sp) const = 0;
 
   SplitterImpl(const SplitterImpl&) = delete;
   SplitterImpl(SplitterImpl&&) = delete;
@@ -385,7 +385,7 @@ class Splitter {
 
   // Trims all characters matching |pred|
   // from the beginning and end of each item.
-  Splitter& trim(Predicate pred) noexcept {
+  Splitter& trim(Predicate pred) {
     trim_ = std::move(pred);
     return *this;
   }
@@ -417,7 +417,7 @@ class Splitter {
     return *this;
   }
 
-  // Make this splitter omit empty items.
+  // Make this Splitter omit empty items.
   //
   // Example (splitting on ','):
   //                Input: "a,,b,c"
@@ -430,16 +430,72 @@ class Splitter {
   }
 
   // Splits |sp| into pieces.
-  std::vector<StringPiece> split(StringPiece sp);
+  std::vector<StringPiece> split(StringPiece sp) const;
 
   // Splits |sp| into pieces.  The pieces are returned as std::strings.
-  std::vector<std::string> split_strings(StringPiece sp);
+  std::vector<std::string> split_strings(StringPiece sp) const;
 
  private:
   Pointer ptr_;
   Predicate trim_;
   std::size_t lim_;
   bool omit_;
+};
+
+class JoinerImpl {
+ protected:
+  JoinerImpl() noexcept = default;
+
+ public:
+  virtual ~JoinerImpl() noexcept = default;
+
+  virtual void glue(std::string* out, StringPiece sp, bool first) const = 0;
+  virtual std::size_t hint() const noexcept = 0;
+};
+
+class Joiner {
+ public:
+  using Pointer = std::shared_ptr<JoinerImpl>;
+
+  // Joiner is constructible from an implementation.
+  Joiner(Pointer ptr) : ptr_(std::move(ptr)), skip_(false) {}
+
+  // Joiner is default constructible.
+  Joiner() : Joiner(nullptr) {}
+
+  // Joiner is copyable and moveable.
+  Joiner(const Joiner&) = default;
+  Joiner(Joiner&&) = default;
+  Joiner& operator=(const Joiner&) = default;
+  Joiner& operator=(Joiner&&) = default;
+
+  // Returns true iff this Joiner is non-empty.
+  explicit operator bool() const noexcept { return !!ptr_; }
+
+  // Asserts that this Joiner is non-empty.
+  void assert_valid() const noexcept;
+
+  // Returns this Joiner's implementation.
+  const Pointer& implementation() const noexcept { return ptr_; }
+  Pointer& implementation() noexcept { return ptr_; }
+
+  // Make this Joiner skip empty items.
+  //
+  // Example (joining on ','):
+  //                Input: {"a", "", "b", "c"}
+  //    Output (standard): "a,,b,c"
+  //  Output (omit_empty): "a,b,c"
+  //
+  Joiner& skip_empty(bool value = true) noexcept {
+    skip_ = value;
+    return *this;
+  }
+
+  std::string join(const std::vector<StringPiece>& vec) const;
+
+ private:
+  Pointer ptr_;
+  bool skip_;
 };
 
 namespace split {
@@ -453,7 +509,13 @@ Splitter on(Predicate pred);
 Splitter on_pattern(StringPiece pattern);
 
 }  // namespace split
+namespace join {
 
+Joiner on();
+Joiner on(char ch);
+Joiner on(std::string str);
+
+}  // namespace join
 }  // namespace base
 
 #endif  // BASE_STRINGS_H

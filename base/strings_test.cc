@@ -432,3 +432,80 @@ TEST(Splitter, Pattern) {
     EXPECT_PRED_FORMAT2(vec_eq, row.expected, splitter.split(row.input));
   }
 }
+
+TEST(Joiner, Empty) {
+  struct TestRow {
+    std::vector<SP> input;
+    std::string expected;
+  };
+
+  auto joiner = base::join::on();
+  std::vector<TestRow> testdata{
+      {{}, ""},
+      {{"a"}, "a"},
+      {{"a", "b"}, "ab"},
+      {{"a", "b", "c"}, "abc"},
+  };
+  for (const auto& row : testdata) {
+    SCOPED_TRACE(stringify(row.input));
+    EXPECT_EQ(row.expected, joiner.join(row.input));
+  }
+}
+
+TEST(Joiner, Char) {
+  struct TestRow {
+    std::vector<SP> input;
+    std::string expected;
+  };
+
+  auto joiner = base::join::on(',');
+  std::vector<TestRow> testdata{
+      {{}, ""},
+      {{"a"}, "a"},
+      {{"a", "b"}, "a,b"},
+      {{"a", "b", "c"}, "a,b,c"},
+      {{"", "a", "b", "c"}, ",a,b,c"},
+      {{"a", "", "b", "c"}, "a,,b,c"},
+      {{"a", "b", "", "c"}, "a,b,,c"},
+      {{"a", "b", "c", ""}, "a,b,c,"},
+  };
+  for (const auto& row : testdata) {
+    SCOPED_TRACE(stringify(row.input));
+    EXPECT_EQ(row.expected, joiner.join(row.input));
+  }
+
+  joiner.skip_empty();
+  testdata = std::vector<TestRow>{
+      {{}, ""},
+      {{"a"}, "a"},
+      {{"a", "b"}, "a,b"},
+      {{"a", "b", "c"}, "a,b,c"},
+      {{"", "a", "b", "c"}, "a,b,c"},
+      {{"a", "", "b", "c"}, "a,b,c"},
+      {{"a", "b", "", "c"}, "a,b,c"},
+      {{"a", "b", "c", ""}, "a,b,c"},
+  };
+  for (const auto& row : testdata) {
+    SCOPED_TRACE(stringify(row.input));
+    EXPECT_EQ(row.expected, joiner.join(row.input));
+  }
+}
+
+TEST(Joiner, String) {
+  struct TestRow {
+    std::vector<SP> input;
+    std::string expected;
+  };
+
+  auto joiner = base::join::on("<>");
+  std::vector<TestRow> testdata{
+      {{}, ""},
+      {{"a"}, "a"},
+      {{"a", "b"}, "a<>b"},
+      {{"a", "b", "c"}, "a<>b<>c"},
+  };
+  for (const auto& row : testdata) {
+    SCOPED_TRACE(stringify(row.input));
+    EXPECT_EQ(row.expected, joiner.join(row.input));
+  }
+}
