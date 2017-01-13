@@ -9,7 +9,6 @@
 static const char kHelloWorld[] = "Hello, world!\n";
 
 static base::Result prepare_tree(file::FileSystemPtr fs, base::Options opts) {
-  event::Task task;
   file::File f;
   base::Result r;
 
@@ -18,31 +17,14 @@ static base::Result prepare_tree(file::FileSystemPtr fs, base::Options opts) {
   opts.get<file::Options>().perm_mask = 0;
   opts.get<file::Options>().user = "root";
   opts.get<file::Options>().group = "root";
-  opts.get<file::Options>().open_directory = true;
 
-  fs->open(&task, &f, "/foo", file::Mode::create_exclusive_wo_mode(), opts);
-  event::wait(io::get_manager(opts), &task);
-  r = task.result();
+  r = fs->mkdir("/foo", opts);
   if (!r) return r;
 
-  r = f.close(opts);
+  r = fs->mkdir("/quux", opts);
   if (!r) return r;
 
-  task.reset();
-  fs->open(&task, &f, "/quux", file::Mode::create_exclusive_wo_mode(), opts);
-  event::wait(io::get_manager(opts), &task);
-  r = task.result();
-  if (!r) return r;
-
-  r = f.close(opts);
-  if (!r) return r;
-
-  opts.get<file::Options>().open_directory = false;
-
-  task.reset();
-  fs->open(&task, &f, "/foo/bar", file::Mode::create_exclusive_wo_mode(), opts);
-  event::wait(io::get_manager(opts), &task);
-  r = task.result();
+  r = fs->open(&f, "/foo/bar", file::Mode::create_exclusive_wo_mode(), opts);
   if (!r) return r;
 
   std::size_t n;
@@ -58,21 +40,15 @@ TEST(MemFS, Stat) {
   ASSERT_OK(prepare_tree(fs, opts));
 
   file::Stat st;
-  auto stat = [&opts, &fs, &st](const std::string& path) {
-    event::Task task;
-    fs->stat(&task, &st, path, opts);
-    event::wait(io::get_manager(opts), &task);
-    return task.result();
-  };
 
-  EXPECT_OK(stat("/"));
+  EXPECT_OK(fs->stat(&st, "/", opts));
   EXPECT_EQ(file::FileType::directory, st.type);
   EXPECT_EQ("root", st.owner);
   EXPECT_EQ("root", st.group);
   EXPECT_EQ(0U, st.size);
   EXPECT_EQ(0U, st.size_blocks);
 
-  EXPECT_OK(stat("/foo/bar"));
+  EXPECT_OK(fs->stat(&st, "/foo/bar", opts));
   EXPECT_EQ(file::FileType::regular, st.type);
   EXPECT_EQ(14U, st.size);
   EXPECT_EQ(1U, st.size_blocks);
@@ -89,10 +65,7 @@ TEST(MemFS, Open) {
 
   file::File f;
   auto open = [&opts, &fs, &f](const std::string& path, file::Mode mode) {
-    event::Task task;
-    fs->open(&task, &f, path, mode, opts);
-    event::wait(io::get_manager(opts), &task);
-    return task.result();
+    return fs->open(&f, path, mode, opts);
   };
 
   char buf[32];
@@ -160,39 +133,23 @@ TEST(MemFS, MkDir) {
   opts.get<file::Options>().open_directory = true;
 
   file::Stat st;
-  auto stat = [&opts, &fs, &st](const std::string& path) {
-    event::Task task;
-    fs->stat(&task, &st, path, opts);
-    event::wait(io::get_manager(opts), &task);
-    return task.result();
-  };
 
-  auto mkdir = [&opts, &fs](const std::string& path) {
-    event::Task task;
-    file::File f;
-    fs->open(&task, &f, path, file::Mode::create_exclusive_wo_mode(), opts);
-    event::wait(io::get_manager(opts), &task);
-    base::Result r = task.result();
-    if (r) r = f.close(opts);
-    return r;
-  };
-
-  EXPECT_OK(stat("/foo"));
+  EXPECT_OK(fs->stat(&st, "/foo", opts));
   EXPECT_EQ(2U, st.link_count);
 
-  EXPECT_NOT_FOUND(stat("/foo/baz"));
+  EXPECT_NOT_FOUND(fs->stat(&st, "/foo/baz", opts));
 
-  EXPECT_OK(mkdir("/foo/baz"));
+  EXPECT_OK(fs->mkdir("/foo/baz", opts));
 
-  EXPECT_OK(stat("/foo/baz"));
+  EXPECT_OK(fs->stat(&st, "/foo/baz", opts));
   EXPECT_EQ(file::FileType::directory, st.type);
   EXPECT_EQ(2U, st.link_count);
   EXPECT_EQ(0700, uint16_t(st.perm));
 
-  EXPECT_OK(stat("/foo"));
+  EXPECT_OK(fs->stat(&st, "/foo", opts));
   EXPECT_EQ(3U, st.link_count);
 
-  EXPECT_ALREADY_EXISTS(mkdir("/foo/baz"));
+  EXPECT_ALREADY_EXISTS(fs->mkdir("/foo/baz", opts));
 }
 
 TEST(MemFile, EndToEnd) {
@@ -201,11 +158,8 @@ TEST(MemFile, EndToEnd) {
   ASSERT_OK(prepare_tree(fs, opts));
 
   const auto mode = file::Mode::create_exclusive_rw_mode();
-  event::Task task;
   file::File f;
-  fs->open(&task, &f, "/foo/baz", mode, opts);
-  event::wait(io::get_manager(opts), &task);
-  EXPECT_OK(task.result());
+  ASSERT_OK(fs->open(&f, "/foo/baz", mode, opts));
 
   char buf[32];
   std::size_t n;

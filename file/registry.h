@@ -32,7 +32,7 @@ class Registry {
   // Swaps this Registry with another.
   void swap(Registry& x) noexcept { items_.swap(x.items_); }
 
-  // Returns true iff this Registry has a non-empty list of Registry.
+  // Returns true iff this Registry has a non-empty set of FileSystemImpls.
   explicit operator bool() const noexcept { return !items_.empty(); }
 
   // Registers a FileSystemImpl at priority |prio|.
@@ -42,6 +42,7 @@ class Registry {
   // Undoes the previous registration that yielded |t|.
   void remove(base::token_t t);
 
+  // Finds the FileSystemImpl that implements |fsname|, or else returns NULL.
   FileSystemPtr find(const std::string& fsname) const;
 
  private:

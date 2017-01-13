@@ -27,45 +27,29 @@ TEST(LocalFS, Basics) {
   EXPECT_TRUE(!!fs);
   EXPECT_EQ("local", fs->name());
 
-  event::Task task;
   base::Options opts;
   file::StatFS statfs;
   file::Stat stat;
   file::File f;
 
-  fs->statfs(&task, &statfs, "/", opts);
-  event::wait(io::get_manager(opts), &task);
-  EXPECT_OK(task.result());
+  EXPECT_OK(fs->statfs(&statfs, "/", opts));
   std::cout << statfs << std::endl;
 
-  task.reset();
-  fs->stat(&task, &stat, "/dev/null", opts);
-  event::wait(io::get_manager(opts), &task);
-  EXPECT_OK(task.result());
+  EXPECT_OK(fs->stat(&stat, "/dev/null", opts));
   std::cout << stat << std::endl;
   EXPECT_EQ(file::FileType::char_device, stat.type);
   EXPECT_EQ(0666, uint16_t(stat.perm));
 
-  task.reset();
-  fs->stat(&task, &stat, "/dev/fd", opts);
-  event::wait(io::get_manager(opts), &task);
-  EXPECT_OK(task.result());
+  EXPECT_OK(fs->stat(&stat, "/dev/fd", opts));
   std::cout << stat << std::endl;
   EXPECT_EQ(file::FileType::directory, stat.type);
 
-  task.reset();
   opts.get<file::Options>().nofollow = true;
-  fs->stat(&task, &stat, "/dev/fd", opts);
-  event::wait(io::get_manager(opts), &task);
-  EXPECT_OK(task.result());
+  EXPECT_OK(fs->stat(&stat, "/dev/fd", opts));
   std::cout << stat << std::endl;
   EXPECT_EQ(file::FileType::symbolic_link, stat.type);
 
-  task.reset();
-  fs->open(&task, &f, "/dev/null", file::Mode::ro_mode(), opts);
-  event::wait(io::get_manager(opts), &task);
-  EXPECT_OK(task.result());
-
+  EXPECT_OK(fs->open(&f, "/dev/null", file::Mode::ro_mode(), opts));
   if (f) {
     std::string out;
     EXPECT_EOF(f.reader().read(&out, 16));
@@ -95,12 +79,9 @@ TEST(FDFile, EndToEnd) {
   base::Options opts;
   opts.get<file::Options>().create_perm = 0666;
   opts.get<file::Options>().perm_mask = 077;
-  event::Task task;
   file::File f;
   const auto mode = file::Mode::create_exclusive_rw_mode();
-  fs->open(&task, &f, path, mode, opts);
-  event::wait(io::get_manager(opts), &task);
-  ASSERT_OK(task.result());
+  ASSERT_OK(fs->open(&f, path, mode, opts));
 
   EXPECT_TRUE(f.filesystem() == fs);
   EXPECT_EQ(path, f.path());
