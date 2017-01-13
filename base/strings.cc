@@ -3,6 +3,8 @@
 
 #include "base/strings.h"
 
+#include <ostream>
+
 namespace base {
 
 constexpr std::size_t StringPiece::npos;

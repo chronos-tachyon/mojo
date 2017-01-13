@@ -7,10 +7,12 @@
 
 #include <climits>
 #include <cstring>
+#include <iosfwd>
 #include <iterator>
-#include <ostream>
 #include <string>
 #include <vector>
+
+#include "external/com_googlesource_code_re2/re2/stringpiece.h"
 
 namespace base {
 
@@ -37,21 +39,20 @@ class StringPiece {
   using difference_type = std::ptrdiff_t;
 
  private:
-  static constexpr size_type ce_strlen(const_pointer ptr,
-                                       size_type sum = 0) noexcept {
-    return (!ptr || !*ptr) ? sum : ce_strlen(ptr + 1, sum + 1);
+  static constexpr size_type partial_strlen(const_pointer ptr,
+                                            size_type sum) noexcept {
+    return !*ptr ? sum : partial_strlen(ptr + 1, sum + 1);
   }
-
-  template <typename T>
-  static constexpr int cmp(T a, T b) noexcept {
-    return ((a > b) ? 1 : ((a < b) ? -1 : 0));
+  static constexpr size_type ce_strlen(const_pointer ptr) noexcept {
+    return !ptr ? 0 : partial_strlen(ptr, 0);
   }
-
-  static constexpr int chain(int m, int n) noexcept { return (m != 0) ? m : n; }
 
   static constexpr int ce_memcmp(const_pointer p, const_pointer q,
                                  size_type n) noexcept {
-    return (n == 0) ? 0 : chain(cmp(*p, *q), ce_memcmp(p + 1, q + 1, n - 1));
+    return (n == 0)
+               ? 0
+               : ((*p < *q) ? -1
+                            : ((*p > *q) ? 1 : ce_memcmp(p + 1, q + 1, n - 1)));
   }
 
   template <typename T>
@@ -65,7 +66,9 @@ class StringPiece {
 
   static constexpr int final_compare(StringPiece a, StringPiece b,
                                      int n) noexcept {
-    return chain(n, cmp(a.size(), b.size()));
+    return (n != 0)
+               ? n
+               : ((a.size() < b.size()) ? -1 : ((a.size() > b.size()) ? 1 : 0));
   }
 
  public:
@@ -73,7 +76,7 @@ class StringPiece {
 
   // StringPiece is default constructible, copyable, and moveable.
   // Move is indistinguishable from copy.
-  constexpr StringPiece() noexcept : data_(""), size_(0) {}
+  constexpr StringPiece() noexcept : data_(nullptr), size_(0) {}
   constexpr StringPiece(const StringPiece&) noexcept = default;
   constexpr StringPiece(StringPiece&&) noexcept = default;
   StringPiece& operator=(const StringPiece&) noexcept = default;
@@ -81,28 +84,31 @@ class StringPiece {
 
   // StringPiece is constructible from a pointer and a length.
   constexpr StringPiece(const_pointer ptr, size_type len) noexcept
-      : data_(ptr&& len > 0 ? ptr : ""),
-        size_(ptr&& len > 0 ? len : 0) {}
+      : data_(ptr),
+        size_(len) {}
 
   // StringPiece is constructible from a C string.
-  constexpr StringPiece(const_pointer ptr) noexcept : data_(ptr ? ptr : ""),
-                                                      size_(ce_strlen(ptr)) {}
+  constexpr StringPiece(const_pointer ptr) noexcept
+      : StringPiece(ptr, ce_strlen(ptr)) {}
 
   // StringPiece is constructible from a std::string.
-  StringPiece(const std::string& str) noexcept : data_(str.data()),
-                                                 size_(str.size()) {}
+  StringPiece(const std::string& str) noexcept
+      : StringPiece(str.data(), str.size()) {}
 
   // StringPiece is constructible from a std::vector<char>.
-  StringPiece(const std::vector<char>& vec) noexcept : data_(vec.data()),
-                                                       size_(vec.size()) {}
+  StringPiece(const std::vector<char>& vec) noexcept
+      : StringPiece(vec.data(), vec.size()) {}
 
   // StringPiece is constructible from a string constant.
   template <std::size_t N>
   constexpr StringPiece(const char arr[N]) noexcept
-      : data_(arr),
-        size_(N >= 1 ? N - 1 : 0) {}
+      : StringPiece(arr, N >= 1 ? N - 1 : 0) {}
 
-  constexpr bool empty() const noexcept { return size_ != 0; }
+  // StringPiece is constructible from an re2::StringPiece.
+  StringPiece(re2::StringPiece sp) noexcept
+      : StringPiece(sp.data(), sp.size()) {}
+
+  constexpr bool empty() const noexcept { return size_ == 0; }
   constexpr const_pointer data() const noexcept { return data_; }
   constexpr size_type size() const noexcept { return size_; }
 
@@ -128,6 +134,10 @@ class StringPiece {
     return data_[i];
   }
 
+  constexpr int compare(StringPiece other) const noexcept {
+    return final_compare(*this, other, partial_compare(*this, other));
+  }
+
   constexpr StringPiece substring(size_type pos, size_type len = npos) const
       noexcept {
     return (pos >= size_)
@@ -144,13 +154,13 @@ class StringPiece {
     return (size_ >= n) ? StringPiece(data_ + size_ - n, n) : *this;
   }
 
-  constexpr bool has_prefix(StringPiece sp) noexcept {
-    return size() >= sp.size() && ce_memcmp(data(), sp.data(), sp.size()) == 0;
+  constexpr bool has_prefix(StringPiece sp) const noexcept {
+    return size_ >= sp.size_ && ce_memcmp(data_, sp.data_, sp.size_) == 0;
   }
 
-  constexpr bool has_suffix(StringPiece sp) noexcept {
-    return size() >= sp.size() &&
-           ce_memcmp(data() + size() - sp.size(), sp.data(), sp.size()) == 0;
+  constexpr bool has_suffix(StringPiece sp) const noexcept {
+    return size_ >= sp.size_ &&
+           ce_memcmp(data_ + size_ - sp.size_, sp.data_, sp.size_) == 0;
   }
 
   void remove_prefix(size_type n) noexcept {
@@ -164,18 +174,25 @@ class StringPiece {
     size_ -= n;
   }
 
-  friend constexpr int compare(StringPiece a, StringPiece b) noexcept {
-    return final_compare(a, b, partial_compare(a, b));
+  bool remove_prefix(StringPiece sp) noexcept {
+    if (!has_prefix(sp)) return false;
+    remove_prefix(sp.size());
+    return true;
   }
 
-  constexpr int compare(StringPiece other) noexcept {
-    return final_compare(*this, other, partial_compare(*this, other));
+  bool remove_suffix(StringPiece sp) noexcept {
+    if (!has_suffix(sp)) return false;
+    remove_suffix(sp.size());
+    return true;
   }
 
   void append_to(std::string* out) const;
   std::size_t length_hint() const noexcept { return size_; }
   std::string as_string() const { return std::string(data_, size_); }
   operator std::string() const { return as_string(); }
+  operator re2::StringPiece() const noexcept {
+    return re2::StringPiece(data_, size_);
+  }
 
  private:
   const_pointer data_;
@@ -183,6 +200,10 @@ class StringPiece {
 };
 
 std::ostream& operator<<(std::ostream& o, StringPiece sp);
+
+constexpr int compare(StringPiece a, StringPiece b) noexcept {
+  return a.compare(b);
+}
 
 constexpr bool operator==(StringPiece a, StringPiece b) noexcept {
   return compare(a, b) == 0;
@@ -203,18 +224,49 @@ constexpr bool operator>=(StringPiece a, StringPiece b) noexcept {
   return !(a < b);
 }
 
-constexpr bool has_prefix(StringPiece str, StringPiece prefix) noexcept {
-  return str.has_prefix(prefix);
-}
-
-constexpr bool has_suffix(StringPiece str, StringPiece suffix) noexcept {
-  return str.has_suffix(suffix);
-}
-
 constexpr StringPiece substring(
-    StringPiece str, StringPiece::size_type pos,
+    StringPiece sp, StringPiece::size_type pos,
     StringPiece::size_type len = StringPiece::npos) noexcept {
-  return str.substring(pos, len);
+  return sp.substring(pos, len);
+}
+
+constexpr StringPiece prefix(StringPiece sp,
+                             StringPiece::size_type len) noexcept {
+  return sp.prefix(len);
+}
+
+constexpr StringPiece suffix(StringPiece sp,
+                             StringPiece::size_type len) noexcept {
+  return sp.suffix(len);
+}
+
+constexpr bool has_prefix(StringPiece sp, StringPiece prefix) noexcept {
+  return sp.has_prefix(prefix);
+}
+
+constexpr bool has_suffix(StringPiece sp, StringPiece suffix) noexcept {
+  return sp.has_suffix(suffix);
+}
+
+constexpr StringPiece remove_prefix(StringPiece sp,
+                                    StringPiece::size_type len) noexcept {
+  return sp.substring(len);
+}
+
+constexpr StringPiece remove_prefix(StringPiece sp,
+                                    StringPiece prefix) noexcept {
+  return sp.has_prefix(prefix) ? sp.substring(prefix.size()) : sp;
+}
+
+constexpr StringPiece remove_suffix(StringPiece sp,
+                                    StringPiece::size_type len) noexcept {
+  return sp.substring(0, (sp.size() >= len) ? (sp.size() - len) : 0);
+}
+
+constexpr StringPiece remove_suffix(StringPiece sp,
+                                    StringPiece suffix) noexcept {
+  return sp.has_suffix(suffix) ? sp.substring(0, sp.size() - suffix.size())
+                               : sp;
 }
 
 }  // namespace base

@@ -39,6 +39,9 @@ cc_library(
     "token.h",
     "user.h",
   ],
+  deps = [
+    "//external:re2",
+  ],
   linkopts = ["-pthread"],
   visibility = ["//visibility:public"],
 )
@@ -126,6 +129,17 @@ cc_test(
 cc_test(
   name = "stopwatch_test",
   srcs = ["stopwatch_test.cc"],
+  deps = [
+    ":base",
+    "//external:gtest",
+  ],
+  size = "small",
+  timeout = "short",
+)
+
+cc_test(
+  name = "strings_test",
+  srcs = ["strings_test.cc"],
   deps = [
     ":base",
     "//external:gtest",
