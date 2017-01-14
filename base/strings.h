@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include "base/concat.h"
 #include "external/com_googlesource_code_re2/re2/stringpiece.h"
 
 namespace base {
@@ -509,6 +510,35 @@ class JoinerImpl {
   JoinerImpl& operator=(JoinerImpl&&) = delete;
 };
 
+class Join {
+ public:
+  using Pointer = std::shared_ptr<JoinerImpl>;
+  using Vector = std::vector<std::string>;
+
+  Join(const Join&) = default;
+  Join(Join&&) noexcept = default;
+  Join& operator=(const Join&) = default;
+  Join& operator=(Join&&) noexcept = default;
+
+  void append_to(std::string* out) const;
+  std::size_t length_hint() const noexcept;
+
+  operator std::string() const {
+    std::string out;
+    append_to(&out);
+    return out;
+  }
+
+ private:
+  friend class Joiner;
+
+  Join(Vector v, Pointer p, bool s) noexcept : vec_(std::move(v)), ptr_(std::move(p)), skip_(s) {}
+
+  Vector vec_;
+  Pointer ptr_;
+  bool skip_;
+};
+
 class Joiner {
  public:
   using Pointer = std::shared_ptr<JoinerImpl>;
@@ -547,7 +577,59 @@ class Joiner {
     return *this;
   }
 
-  std::string join(const std::vector<StringPiece>& vec) const;
+ private:
+  static void build_vector(std::vector<std::string>* out) {}
+
+  template <typename T>
+  static void build_vector(std::vector<std::string>* out, T&& arg) {
+    std::string tmp;
+    using base::append_to;
+    append_to(&tmp, std::forward<T>(arg));
+    out->push_back(std::move(tmp));
+  }
+
+  template <typename First, typename Second, typename... Rest>
+  static void build_vector(std::vector<std::string>* out, First&& first,
+                           Second&& second, Rest&&... rest) {
+    build_vector(out, std::forward<First>(first));
+    build_vector(out, std::forward<Second>(second),
+                 std::forward<Rest>(rest)...);
+  }
+
+ public:
+  Join join(const std::vector<StringPiece>& vec) const;
+  Join join(const std::vector<std::string>& vec) const;
+
+  template <typename... Args>
+  Join join(Args&&... args) const {
+    assert_valid();
+    std::vector<StringPiece> vec;
+    vec.resize(sizeof...(args));
+    build_vector(&vec, std::forward<Args>(args)...);
+    return Join(vec, ptr_, skip_);
+  }
+
+  void join_append(std::string* out, const std::vector<StringPiece>& vec) const {
+    join(vec).append_to(out);
+  }
+  void join_append(std::string* out, const std::vector<std::string>& vec) const {
+    join(vec).append_to(out);
+  }
+  template <typename... Args>
+  void join_append(std::string* out, Args&&... args) const {
+    join(std::forward<Args>(args)...).append_to(out);
+  }
+
+  std::string join_string(const std::vector<StringPiece>& vec) const {
+    return join(vec);
+  }
+  std::string join_string(const std::vector<std::string>& vec) const {
+    return join(vec);
+  }
+  template <typename... Args>
+  std::string join_string(Args&&... args) const {
+    return join(std::forward<Args>(args)...);
+  }
 
  private:
   Pointer ptr_;

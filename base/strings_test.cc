@@ -7,7 +7,11 @@
 
 using SP = base::StringPiece;
 
-static std::string stringify(const std::vector<SP>& vec) {
+static std::string S(std::string str) noexcept {
+  return std::move(str);
+}
+
+static std::string S(const std::vector<SP>& vec) {
   std::string out;
   out.push_back('[');
 
@@ -41,8 +45,8 @@ static testing::AssertionResult vec_eq(const char* lhs_expr,
   if (eq) return testing::AssertionSuccess();
   return testing::AssertionFailure() << lhs_expr << " differs from " << rhs_expr
                                      << "\n"
-                                     << "expected: " << stringify(lhs) << "\n"
-                                     << "  actual: " << stringify(rhs);
+                                     << "expected: " << S(lhs) << "\n"
+                                     << "  actual: " << S(rhs);
 }
 
 TEST(StringPiece, Construct) {
@@ -450,8 +454,8 @@ TEST(Joiner, Empty) {
       {{"a", "b", "c"}, "abc"},
   };
   for (const auto& row : testdata) {
-    SCOPED_TRACE(stringify(row.input));
-    EXPECT_EQ(row.expected, joiner.join(row.input));
+    SCOPED_TRACE(S(row.input));
+    EXPECT_EQ(row.expected, S(joiner.join(row.input)));
   }
 }
 
@@ -473,8 +477,8 @@ TEST(Joiner, Char) {
       {{"a", "b", "c", ""}, "a,b,c,"},
   };
   for (const auto& row : testdata) {
-    SCOPED_TRACE(stringify(row.input));
-    EXPECT_EQ(row.expected, joiner.join(row.input));
+    SCOPED_TRACE(S(row.input));
+    EXPECT_EQ(row.expected, S(joiner.join(row.input)));
   }
 
   joiner.skip_empty();
@@ -489,8 +493,8 @@ TEST(Joiner, Char) {
       {{"a", "b", "c", ""}, "a,b,c"},
   };
   for (const auto& row : testdata) {
-    SCOPED_TRACE(stringify(row.input));
-    EXPECT_EQ(row.expected, joiner.join(row.input));
+    SCOPED_TRACE(S(row.input));
+    EXPECT_EQ(row.expected, S(joiner.join(row.input)));
   }
 }
 
@@ -508,7 +512,7 @@ TEST(Joiner, String) {
       {{"a", "b", "c"}, "a<>b<>c"},
   };
   for (const auto& row : testdata) {
-    SCOPED_TRACE(stringify(row.input));
-    EXPECT_EQ(row.expected, joiner.join(row.input));
+    SCOPED_TRACE(S(row.input));
+    EXPECT_EQ(row.expected, S(joiner.join(row.input)));
   }
 }

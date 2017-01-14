@@ -168,6 +168,13 @@ class StringJoiner : public JoinerImpl {
   std::string str_;
 };
 
+static std::vector<std::string> V(const std::vector<StringPiece>& in) {
+  std::vector<std::string> out;
+  out.reserve(in.size());
+  for (StringPiece sp : in) out.push_back(sp);
+  return out;
+}
+
 }  // anonymous namespace
 
 constexpr std::size_t StringPiece::npos;
@@ -182,7 +189,7 @@ std::ostream& operator<<(std::ostream& o, StringPiece sp) {
 
 void Splitter::assert_valid() const noexcept {
   if (ptr_) return;
-  LOG(FATAL) << "BUG! base::split::Splitter is empty";
+  LOG(FATAL) << "BUG! base::Splitter is empty";
 }
 
 std::vector<StringPiece> Splitter::split(StringPiece sp) const {
@@ -210,30 +217,40 @@ std::vector<StringPiece> Splitter::split(StringPiece sp) const {
 }
 
 std::vector<std::string> Splitter::split_strings(StringPiece sp) const {
-  auto in = split(sp);
-  std::vector<std::string> out;
-  out.reserve(in.size());
-  for (StringPiece sp : in) {
-    out.push_back(sp);
-  }
-  return out;
+  return V(split(sp));
 }
 
-std::string Joiner::join(const std::vector<StringPiece>& vec) const {
-  std::string out;
-  std::size_t size = 0;
-  for (StringPiece sp : vec) {
-    size += sp.size();
-  }
-  size += vec.size() * ptr_->hint();
-  out.reserve(size);
+void Join::append_to(std::string* out) const {
   bool first = true;
-  for (StringPiece sp : vec) {
+  for (StringPiece sp : vec_) {
     if (skip_ && sp.empty()) continue;
-    ptr_->glue(&out, sp, first);
+    ptr_->glue(out, sp, first);
     first = false;
   }
-  return out;
+}
+
+std::size_t Join::length_hint() const noexcept {
+  if (vec_.empty()) return 0;
+  std::size_t sum = vec_.size() * ptr_->hint();
+  for (StringPiece sp : vec_) {
+    sum += sp.size();
+  }
+  return sum;
+}
+
+void Joiner::assert_valid() const noexcept {
+  if (ptr_) return;
+  LOG(FATAL) << "BUG! base::Joiner is empty";
+}
+
+Join Joiner::join(const std::vector<StringPiece>& vec) const {
+  assert_valid();
+  return Join(V(vec), ptr_, skip_);
+}
+
+Join Joiner::join(const std::vector<std::string>& vec) const {
+  assert_valid();
+  return Join(vec, ptr_, skip_);
 }
 
 namespace split {
