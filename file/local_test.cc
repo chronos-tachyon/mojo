@@ -124,6 +124,28 @@ TEST(FDFile, EndToEnd) {
   EXPECT_EQ(64, sz);
 
   EXPECT_OK(f.close(opts));
+
+  ASSERT_OK(fs->opendir(&f, dir, file::Mode::ro_mode(), opts));
+
+  std::vector<file::DirEntry> entries;
+  EXPECT_OK(f.readdir(&entries, opts));
+
+  EXPECT_EQ(3U, entries.size());
+  std::sort(entries.begin(), entries.end());
+  if (entries.size() > 0) {
+    EXPECT_EQ(".", entries[0].name);
+    EXPECT_EQ(file::FileType::directory, entries[0].type);
+  }
+  if (entries.size() > 1) {
+    EXPECT_EQ("..", entries[1].name);
+    EXPECT_EQ(file::FileType::directory, entries[1].type);
+  }
+  if (entries.size() > 2) {
+    EXPECT_EQ("foo", entries[2].name);
+    EXPECT_EQ(file::FileType::regular, entries[2].type);
+  }
+
+  EXPECT_OK(f.close(opts));
 }
 
 static void init() __attribute__((constructor));

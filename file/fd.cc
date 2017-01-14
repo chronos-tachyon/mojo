@@ -115,44 +115,16 @@ void FDFile::readdir(event::Task* task, std::vector<DirEntry>* out,
   if (!task->start()) return;
   out->clear();
 
-  auto fdpair = fd_->acquire_fd();
-  int dupfd = ::dup(fdpair.first);
-  if (dupfd == -1) {
-    int err_no = errno;
-    task->finish(base::Result::from_errno(err_no, "dup(2)"));
-    return;
-  }
-  auto cleanup0 = base::cleanup([dupfd] { ::close(dupfd); });
-  ::fcntl(dupfd, F_SETFD, FD_CLOEXEC);
-
-  DIR* dir = fdopendir(dupfd);
-  if (!dir) {
-    int err_no = errno;
-    task->finish(base::Result::from_errno(err_no, "fdopendir(3)"));
-    return;
-  }
-  auto cleanup1 = base::cleanup([dir] { ::closedir(dir); });
-  cleanup0.cancel();
-
-  long name_max = ::fpathconf(dupfd, _PC_NAME_MAX);
-  if (name_max < 255) name_max = 255;
-  std::size_t len = offsetof(struct dirent, d_name) + name_max + 1;
-  std::vector<char> buf(len);
-  struct dirent* bufptr = reinterpret_cast<struct dirent*>(buf.data());
-
-  while (true) {
-    struct dirent* ptr = nullptr;
-    int rc = ::readdir_r(dir, bufptr, &ptr);
-    if (rc != 0) {
-      task->finish(base::Result::from_errno(rc, "readdir_r(3)"));
-      return;
+  std::vector<base::DEntry> tmp;
+  auto r = base::readdir_all(&tmp, fd_, path().c_str());
+  if (r) {
+    for (auto& dent : tmp) {
+      unsigned char dtype = std::get<1>(dent);
+      std::string& name = std::get<2>(dent);
+      out->emplace_back(std::move(name), filetype_from_dtype(dtype));
     }
-    if (!ptr) break;
-    out->emplace_back(ptr->d_name, filetype_from_dtype(ptr->d_type));
   }
-
-  cleanup1.run();
-  task->finish_ok();
+  task->finish(std::move(r));
 }
 
 void FDFile::statfs(event::Task* task, StatFS* out,

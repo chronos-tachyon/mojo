@@ -42,6 +42,9 @@ struct DirEntry {
                                                        type(type) {}
 };
 
+bool operator==(const DirEntry& a, const DirEntry& b);
+bool operator<(const DirEntry& a, const DirEntry& b);
+
 struct StatFS {
   std::size_t optimal_block_size;
   std::size_t used_blocks;

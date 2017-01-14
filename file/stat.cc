@@ -28,6 +28,15 @@ void append_to(std::string* out, FileType type) {
 
 std::size_t length_hint(FileType) noexcept { return 13; }
 
+bool operator==(const DirEntry& a, const DirEntry& b) {
+  return a.name == b.name && a.type == b.type;
+}
+
+bool operator<(const DirEntry& a, const DirEntry& b) {
+  if (a.name != b.name) return a.name < b.name;
+  return a.type < b.type;
+}
+
 void Stat::append_to(std::string* out) const {
   base::concat_to(out, "Stat{type=", type, ", perm=", perm, ", owner=\"", owner,
                   "\", group=\"", group, "\", link_count=", link_count,
