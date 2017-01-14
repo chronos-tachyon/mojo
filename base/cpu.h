@@ -51,6 +51,8 @@ std::size_t num_packages(const std::vector<CPUInfo>& vec);
 std::size_t num_cores(const std::vector<CPUInfo>& vec);
 std::size_t num_processors(const std::vector<CPUInfo>& vec);
 
+Result allocate_core();
+
 }  // namespace base
 
 #endif  // BASE_CPU_H

@@ -192,6 +192,7 @@ class DispatcherOptions {
   DispatcherOptions() noexcept : type_(DispatcherType::system_dispatcher),
                                  min_(0),
                                  max_(0),
+                                 aff_(true),
                                  has_(0) {}
   DispatcherOptions(const DispatcherOptions&) = default;
   DispatcherOptions(DispatcherOptions&&) = default;
@@ -248,10 +249,17 @@ class DispatcherOptions {
   }
   void set_num_workers(std::size_t n) noexcept { set_num_workers(n, n); }
 
+  // The |affinity()| value specifies whether worker
+  // threads should be pinned to specific CPU cores.
+  bool affinity() const noexcept { return aff_; }
+  void reset_affinity() noexcept { aff_ = true; }
+  void set_affinity(bool value) noexcept { aff_ = value; }
+
  private:
   DispatcherType type_;
   std::size_t min_;
   std::size_t max_;
+  bool aff_;
   uint8_t has_;
 };
 

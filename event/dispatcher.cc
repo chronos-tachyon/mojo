@@ -40,10 +40,14 @@ struct reacquire_lock {
 
 struct dispatch_thread {
   Dispatcher* dispatcher;
+  bool affinity;
 
-  explicit dispatch_thread(Dispatcher* d) noexcept
-      : dispatcher(DCHECK_NOTNULL(d)) {}
-  void operator()() const noexcept { dispatcher->donate(true); }
+  dispatch_thread(Dispatcher* d, bool affinity) noexcept
+      : dispatcher(DCHECK_NOTNULL(d)), affinity(affinity) {}
+  void operator()() const noexcept {
+    if (affinity) base::allocate_core().expect_ok(__FILE__, __LINE__);
+    dispatcher->donate(true);
+  }
 };
 
 struct Work {
@@ -290,8 +294,9 @@ struct thread_monitor {
 // the other two.  The basic idea is to match threads to workload.
 class ThreadPoolDispatcher : public Dispatcher {
  public:
-  ThreadPoolDispatcher(std::size_t min, std::size_t max)
-      : min_(min),
+  ThreadPoolDispatcher(bool affinity, std::size_t min, std::size_t max)
+      : affinity_(affinity),
+        min_(min),
         max_(max),
         desired_(min),
         current_(0),
@@ -482,7 +487,7 @@ class ThreadPoolDispatcher : public Dispatcher {
       // Spin up new threads.
       std::size_t delta = desired_ - current_;
       while (delta != 0) {
-        std::thread(dispatch_thread(this)).detach();
+        std::thread(dispatch_thread(this, affinity_)).detach();
         --delta;
       }
     } else if (current_ > desired_) {
@@ -502,6 +507,7 @@ class ThreadPoolDispatcher : public Dispatcher {
     CHECK_EQ(desired_, current_);
   }
 
+  const bool affinity_;
   mutable std::mutex mu0_;
   mutable std::mutex mu1_;
   std::condition_variable work_cv_;  // mu0_: !work_.empty()
@@ -529,9 +535,10 @@ void assert_depth() noexcept { CHECK_EQ(l_depth, 0U); }
 base::Result new_dispatcher(DispatcherPtr* out, const DispatcherOptions& opts) {
   auto type = opts.type();
   std::size_t min, max;
-  bool has_min, has_max;
+  bool has_min, has_max, aff;
   std::tie(has_min, min) = opts.min_workers();
   std::tie(has_max, max) = opts.max_workers();
+  aff = opts.affinity();
 
   switch (type) {
     case DispatcherType::inline_dispatcher:
@@ -549,7 +556,7 @@ base::Result new_dispatcher(DispatcherPtr* out, const DispatcherOptions& opts) {
       if (min > max)
         return base::Result::invalid_argument(
             "bad event::DispatcherOptions: min_workers > max_workers");
-      *out = std::make_shared<ThreadPoolDispatcher>(min, max);
+      *out = std::make_shared<ThreadPoolDispatcher>(aff, min, max);
       break;
 
     case DispatcherType::system_dispatcher:
@@ -577,7 +584,7 @@ DispatcherPtr system_dispatcher() {
   auto lock = base::acquire_lock(g_sys_mu);
   if (g_sys_d == nullptr) g_sys_d = new DispatcherPtr;
   if (!*g_sys_d)
-    *g_sys_d = std::make_shared<ThreadPoolDispatcher>(1, num_cpus());
+    *g_sys_d = std::make_shared<ThreadPoolDispatcher>(true, 1, num_cpus());
   return *g_sys_d;
 }
 

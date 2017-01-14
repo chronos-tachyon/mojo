@@ -2,14 +2,17 @@
 
 #include <dirent.h>
 #include <fcntl.h>
+#include <sched.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <cerrno>
 #include <climits>
 #include <cstdlib>
+#include <map>
 #include <set>
 
 #include "base/concat.h"
@@ -35,8 +38,7 @@ static base::Result parse_uint(unsigned int* out, std::string str) {
   return base::Result();
 }
 
-static base::Result parse_list(std::vector<unsigned int>* out,
-                               StringPiece sp) {
+static base::Result parse_list(std::vector<unsigned int>* out, StringPiece sp) {
   CHECK_NOTNULL(out);
   out->clear();
 
@@ -127,7 +129,8 @@ base::Result fetch_cpuinfo(std::vector<CPUInfo>* out) {
       r = parse_uint(&core_id, sp);
       if (!r) return r;
 
-      path = concat("/sys/devices/system/cpu/cpu", id, "/topology/physical_package_id");
+      path = concat("/sys/devices/system/cpu/cpu", id,
+                    "/topology/physical_package_id");
       r = readfile(&buf, path.c_str());
       if (!r) return r;
 
@@ -185,6 +188,66 @@ std::size_t num_cores(const std::vector<CPUInfo>& vec) {
 
 std::size_t num_processors(const std::vector<CPUInfo>& vec) {
   return num(vec, [](const CPUInfo& cpu) { return cpu.processor_id; });
+}
+
+using Map = std::map<unsigned int, std::vector<CPUInfo>>;
+using Vec = std::vector<unsigned int>;
+
+static std::mutex g_mu;
+static Map* g_map = nullptr;
+static Vec* g_vec = nullptr;
+static std::size_t g_next = 0;
+
+static void next_core(std::vector<CPUInfo>* out) {
+  CHECK_NOTNULL(out);
+  out->clear();
+
+  const auto& cpus = cached_cpuinfo();
+
+  auto lock = acquire_lock(g_mu);
+
+  if (!g_vec) {
+    std::unique_ptr<Map> map(new Map);
+    std::unique_ptr<Vec> vec(new Vec);
+    for (const auto& cpu : cpus) {
+      auto& core = (*map)[cpu.core_id];
+      if (core.empty()) vec->push_back(cpu.core_id);
+      core.push_back(cpu);
+    }
+    g_map = map.release();
+    g_vec = vec.release();
+  }
+
+  std::size_t next = g_next;
+  g_next = (g_next + 1) % g_vec->size();
+
+  unsigned int core_id = (*g_vec)[next];
+  const auto& core = (*g_map)[core_id];
+  out->insert(out->end(), core.begin(), core.end());
+}
+
+static pid_t my_gettid() { return syscall(SYS_gettid); }
+
+Result allocate_core() {
+  std::vector<CPUInfo> cpus;
+  next_core(&cpus);
+
+  std::string str;
+  cpu_set_t set;
+  CPU_ZERO(&set);
+  for (const auto& cpu : cpus) {
+    concat_to(&str, cpu.processor_id, ", ");
+    CPU_SET(cpu.processor_id, &set);
+  }
+  if (!str.empty()) str.resize(str.size() - 2);
+
+  int rc = sched_setaffinity(0, sizeof(set), &set);
+  if (rc != 0) {
+    int err_no = errno;
+    return base::Result::from_errno(err_no, "sched_setaffinity(2)");
+  }
+  VLOG(1) << "Pinned thread " << my_gettid() << " to CPUs: " << str;
+  return base::Result();
 }
 
 }  // namespace base
