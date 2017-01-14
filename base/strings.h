@@ -259,23 +259,23 @@ class StringPiece {
   }
 
   template <typename Func>
-  void trim_leading(Func func) {
+  void ltrim(Func func) {
     while (!empty() && func(front())) remove_prefix(1);
   }
-  void trim_leading(char ch) { trim_leading(is_exactly(ch)); }
-  void trim_whitespace_leading() { trim_leading(is_whitespace()); }
+  void ltrim(char ch) { ltrim(is_exactly(ch)); }
+  void ltrim_whitespace() { ltrim(is_whitespace()); }
 
   template <typename Func>
-  void trim_trailing(Func func) {
+  void rtrim(Func func) {
     while (!empty() && func(back())) remove_suffix(1);
   }
-  void trim_trailing(char ch) { trim_trailing(is_exactly(ch)); }
-  void trim_whitespace_trailing() { trim_trailing(is_whitespace()); }
+  void rtrim(char ch) { rtrim(is_exactly(ch)); }
+  void rtrim_whitespace() { rtrim(is_whitespace()); }
 
   template <typename Func>
   void trim(Func func) {
-    trim_leading(func);
-    trim_trailing(func);
+    ltrim(func);
+    rtrim(func);
   }
   void trim(char ch) { trim(is_exactly(ch)); }
   void trim_whitespace() { trim(is_whitespace()); }
@@ -502,6 +502,11 @@ class JoinerImpl {
 
   virtual void glue(std::string* out, StringPiece sp, bool first) const = 0;
   virtual std::size_t hint() const noexcept = 0;
+
+  JoinerImpl(const JoinerImpl&) = delete;
+  JoinerImpl(JoinerImpl&&) = delete;
+  JoinerImpl& operator=(const JoinerImpl&) = delete;
+  JoinerImpl& operator=(JoinerImpl&&) = delete;
 };
 
 class Joiner {
