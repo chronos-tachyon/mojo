@@ -8,6 +8,7 @@ cc_library(
     "cleanup.cc",
     "clock.cc",
     "concat.cc",
+    "cpu.cc",
     "debug.cc",
     "duration.cc",
     "fd.cc",
@@ -26,6 +27,7 @@ cc_library(
     "cleanup.h",
     "clock.h",
     "concat.h",
+    "cpu.h",
     "debug.h",
     "duration.h",
     "fd.h",
@@ -200,6 +202,12 @@ cc_test(
   ],
   size = "small",
   timeout = "short",
+)
+
+cc_binary(
+  name = "cpu_list",
+  srcs = ["cpu_list.cc"],
+  deps = [":base"],
 )
 
 cc_binary(

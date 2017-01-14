@@ -7,7 +7,6 @@ cc_library(
     "callback.cc",
     "data.cc",
     "dispatcher.cc",
-    "dispatcher_numcores.cc",
     "handler.cc",
     "manager.cc",
     "poller.cc",

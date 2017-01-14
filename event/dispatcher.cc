@@ -17,6 +17,7 @@
 #include <typeinfo>
 
 #include "base/cleanup.h"
+#include "base/cpu.h"
 #include "base/logging.h"
 #include "base/mutex.h"
 
@@ -119,6 +120,10 @@ static void finalize(base::Lock& lock,
   for (auto& finalizer : vec) {
     finalize(std::move(finalizer));
   }
+}
+
+static std::size_t num_cpus() {
+  return base::num_processors(base::cached_cpuinfo());
 }
 
 // The implementation for inline Dispatchers is fairly minimal.
@@ -540,7 +545,7 @@ base::Result new_dispatcher(DispatcherPtr* out, const DispatcherOptions& opts) {
 
     case DispatcherType::threaded_dispatcher:
       if (!has_min) min = 1;
-      if (!has_max) max = std::max(min, num_cores());
+      if (!has_max) max = std::max(min, num_cpus());
       if (min > max)
         return base::Result::invalid_argument(
             "bad event::DispatcherOptions: min_workers > max_workers");
@@ -572,7 +577,7 @@ DispatcherPtr system_dispatcher() {
   auto lock = base::acquire_lock(g_sys_mu);
   if (g_sys_d == nullptr) g_sys_d = new DispatcherPtr;
   if (!*g_sys_d)
-    *g_sys_d = std::make_shared<ThreadPoolDispatcher>(1, num_cores());
+    *g_sys_d = std::make_shared<ThreadPoolDispatcher>(1, num_cpus());
   return *g_sys_d;
 }
 

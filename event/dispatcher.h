@@ -365,8 +365,6 @@ DispatcherPtr system_dispatcher();
 //
 void set_system_dispatcher(DispatcherPtr ptr);
 
-std::size_t num_cores();
-
 namespace internal {
 bool is_shallow() noexcept;
 void assert_depth() noexcept;
