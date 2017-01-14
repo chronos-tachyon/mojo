@@ -198,10 +198,7 @@ std::vector<StringPiece> Splitter::split(StringPiece sp) const {
       break;
     }
     more = ptr_->chop(&first, &rest, sp);
-    if (trim_) {
-      while (!first.empty() && trim_(first.front())) first.remove_prefix(1);
-      while (!first.empty() && trim_(first.back())) first.remove_suffix(1);
-    }
+    if (trim_) first.trim(trim_);
     sp = rest;
     if (omit_ && first.empty()) {
       --n;

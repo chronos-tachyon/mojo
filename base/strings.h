@@ -18,6 +18,20 @@
 
 namespace base {
 
+struct is_exactly {
+  char c;
+
+  constexpr is_exactly(char ch) noexcept : c(ch) {}
+  constexpr bool operator()(char ch) const noexcept { return ch == c; }
+};
+
+struct is_whitespace {
+  constexpr is_whitespace() noexcept = default;
+  constexpr bool operator()(char ch) const noexcept {
+    return ch == ' ' || ch == '\t' || (ch >= '\n' && ch <= '\r');
+  }
+};
+
 // StringPiece is a value type which holds a read-only view of a buffer, such
 // as a (piece of a) std::string. Take a StringPiece by value where you would
 // normally take a "const std::string&", especially in situations where you
@@ -205,6 +219,22 @@ class StringPiece {
            ce_memcmp(data_ + size_ - sp.size_, sp.data_, sp.size_) == 0;
   }
 
+  constexpr StringPiece strip_prefix(size_type len) const noexcept {
+    return substring(len);
+  }
+
+  constexpr StringPiece strip_prefix(StringPiece sp) const noexcept {
+    return has_prefix(sp) ? substring(sp.size()) : *this;
+  }
+
+  constexpr StringPiece strip_suffix(size_type len) const noexcept {
+    return substring(0, (size_ >= len) ? (size_ - len) : 0);
+  }
+
+  constexpr StringPiece strip_suffix(StringPiece sp) const noexcept {
+    return has_suffix(sp) ? substring(0, size_ - sp.size_) : *this;
+  }
+
   void remove_prefix(size_type n) noexcept {
     if (n > size_) n = size_;
     size_ -= n;
@@ -228,7 +258,31 @@ class StringPiece {
     return true;
   }
 
-  bool contains(StringPiece sp) const noexcept { return find(sp) != npos; }
+  template <typename Func>
+  void trim_leading(Func func) {
+    while (!empty() && func(front())) remove_prefix(1);
+  }
+  void trim_leading(char ch) { trim_leading(is_exactly(ch)); }
+  void trim_whitespace_leading() { trim_leading(is_whitespace()); }
+
+  template <typename Func>
+  void trim_trailing(Func func) {
+    while (!empty() && func(back())) remove_suffix(1);
+  }
+  void trim_trailing(char ch) { trim_trailing(is_exactly(ch)); }
+  void trim_whitespace_trailing() { trim_trailing(is_whitespace()); }
+
+  template <typename Func>
+  void trim(Func func) {
+    trim_leading(func);
+    trim_trailing(func);
+  }
+  void trim(char ch) { trim(is_exactly(ch)); }
+  void trim_whitespace() { trim(is_whitespace()); }
+
+  constexpr bool contains(StringPiece sp) const noexcept {
+    return find(sp) != npos;
+  }
 
   constexpr size_type find(char ch, size_type pos = 0) const noexcept {
     return ce_find(ch, data_, size_, pos);
@@ -310,25 +364,24 @@ constexpr bool has_suffix(StringPiece sp, StringPiece suffix) noexcept {
   return sp.has_suffix(suffix);
 }
 
-constexpr StringPiece remove_prefix(StringPiece sp,
-                                    StringPiece::size_type len) noexcept {
-  return sp.substring(len);
+constexpr StringPiece strip_prefix(StringPiece sp,
+                                   StringPiece::size_type len) noexcept {
+  return sp.strip_prefix(len);
 }
 
-constexpr StringPiece remove_prefix(StringPiece sp,
-                                    StringPiece prefix) noexcept {
-  return sp.has_prefix(prefix) ? sp.substring(prefix.size()) : sp;
+constexpr StringPiece strip_prefix(StringPiece sp,
+                                   StringPiece prefix) noexcept {
+  return sp.strip_prefix(prefix);
 }
 
-constexpr StringPiece remove_suffix(StringPiece sp,
-                                    StringPiece::size_type len) noexcept {
-  return sp.substring(0, (sp.size() >= len) ? (sp.size() - len) : 0);
+constexpr StringPiece strip_suffix(StringPiece sp,
+                                   StringPiece::size_type len) noexcept {
+  return sp.strip_suffix(len);
 }
 
-constexpr StringPiece remove_suffix(StringPiece sp,
-                                    StringPiece suffix) noexcept {
-  return sp.has_suffix(suffix) ? sp.substring(0, sp.size() - suffix.size())
-                               : sp;
+constexpr StringPiece strip_suffix(StringPiece sp,
+                                   StringPiece suffix) noexcept {
+  return sp.strip_suffix(suffix);
 }
 
 class SplitterImpl {
@@ -392,15 +445,13 @@ class Splitter {
 
   // Trims |ch| from the beginning and end of each item.
   Splitter& trim(char ch) {
-    trim_ = [ch](char x) -> bool { return ch == x; };
+    trim_ = is_exactly(ch);
     return *this;
   }
 
   // Trims whitespace from the beginning and end of each item.
   Splitter& trim_whitespace() {
-    trim_ = [](char x) -> bool {
-      return x == ' ' || x == '\t' || (x >= '\n' && x <= '\r');
-    };
+    trim_ = is_whitespace();
     return *this;
   }
 

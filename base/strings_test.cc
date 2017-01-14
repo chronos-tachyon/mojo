@@ -180,29 +180,29 @@ TEST(StringPiece, Substring) {
   static_assert(foo.has_suffix("ghi"), "");
   static_assert(!foo.has_suffix("x"), "");
 
-  static_assert(base::remove_prefix(foo, 0) == "abcdefghi", "");
-  static_assert(base::remove_prefix(foo, 1) == "bcdefghi", "");
-  static_assert(base::remove_prefix(foo, 3) == "defghi", "");
-  static_assert(base::remove_prefix(foo, 8) == "i", "");
-  static_assert(base::remove_prefix(foo, 9) == "", "");
-  static_assert(base::remove_prefix(foo, 10) == "", "");
+  static_assert(foo.strip_prefix(0) == "abcdefghi", "");
+  static_assert(foo.strip_prefix(1) == "bcdefghi", "");
+  static_assert(foo.strip_prefix(3) == "defghi", "");
+  static_assert(foo.strip_prefix(8) == "i", "");
+  static_assert(foo.strip_prefix(9) == "", "");
+  static_assert(foo.strip_prefix(10) == "", "");
 
-  static_assert(base::remove_prefix(foo, "") == "abcdefghi", "");
-  static_assert(base::remove_prefix(foo, "a") == "bcdefghi", "");
-  static_assert(base::remove_prefix(foo, "abc") == "defghi", "");
-  static_assert(base::remove_prefix(foo, "x") == "abcdefghi", "");
+  static_assert(foo.strip_prefix("") == "abcdefghi", "");
+  static_assert(foo.strip_prefix("a") == "bcdefghi", "");
+  static_assert(foo.strip_prefix("abc") == "defghi", "");
+  static_assert(foo.strip_prefix("x") == "abcdefghi", "");
 
-  static_assert(base::remove_suffix(foo, 0) == "abcdefghi", "");
-  static_assert(base::remove_suffix(foo, 1) == "abcdefgh", "");
-  static_assert(base::remove_suffix(foo, 3) == "abcdef", "");
-  static_assert(base::remove_suffix(foo, 8) == "a", "");
-  static_assert(base::remove_suffix(foo, 9) == "", "");
-  static_assert(base::remove_suffix(foo, 10) == "", "");
+  static_assert(foo.strip_suffix(0) == "abcdefghi", "");
+  static_assert(foo.strip_suffix(1) == "abcdefgh", "");
+  static_assert(foo.strip_suffix(3) == "abcdef", "");
+  static_assert(foo.strip_suffix(8) == "a", "");
+  static_assert(foo.strip_suffix(9) == "", "");
+  static_assert(foo.strip_suffix(10) == "", "");
 
-  static_assert(base::remove_suffix(foo, "") == "abcdefghi", "");
-  static_assert(base::remove_suffix(foo, "i") == "abcdefgh", "");
-  static_assert(base::remove_suffix(foo, "ghi") == "abcdef", "");
-  static_assert(base::remove_suffix(foo, "x") == "abcdefghi", "");
+  static_assert(foo.strip_suffix("") == "abcdefghi", "");
+  static_assert(foo.strip_suffix("i") == "abcdefgh", "");
+  static_assert(foo.strip_suffix("ghi") == "abcdef", "");
+  static_assert(foo.strip_suffix("x") == "abcdefghi", "");
 
   SP sp = foo;
   EXPECT_FALSE(sp.remove_prefix("xyz"));
