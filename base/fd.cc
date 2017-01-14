@@ -159,16 +159,17 @@ Result readdir_all(std::vector<DEntry>* out, FD fd, const char* what) {
     const char* ptr = buf.data();
     const char* end = ptr + nread;
     while (ptr != end) {
+      constexpr std::size_t kUL = sizeof(unsigned long);
+      constexpr std::size_t kUS = sizeof(unsigned short);
+
       unsigned long ino;
       unsigned short reclen;
       unsigned char type;
-      ::memcpy(&ino, ptr, sizeof(unsigned long));
-      ::memcpy(&reclen, ptr + 2 * sizeof(unsigned long),
-               sizeof(unsigned short));
+      ::memcpy(&ino, ptr, kUL);
+      ::memcpy(&reclen, ptr + 2 * kUL, kUS);
       type = *(ptr + reclen - 1);
-      const char* p = ptr + 2 * sizeof(unsigned long) + sizeof(unsigned short);
-      const char* q = ptr + reclen - 2;
-      out->emplace_back(ino, type, std::string(p, q - p));
+      const char* p = ptr + 2 * kUL + kUS;
+      out->emplace_back(ino, type, std::string(p));
       ptr += reclen;
     }
   }
