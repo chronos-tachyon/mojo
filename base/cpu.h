@@ -1,3 +1,7 @@
+// base/cpu.h - Information about the local system's CPUs
+// Copyright © 2017 by Donald King <chronos@chronos-tachyon.net>
+// Available under the MIT License. See LICENSE for details.
+
 #ifndef BASE_CPU_H
 #define BASE_CPU_H
 
