@@ -258,24 +258,24 @@ class StringPiece {
     return true;
   }
 
-  template <typename Func>
-  void ltrim(Func func) {
-    while (!empty() && func(front())) remove_prefix(1);
+  template <typename Predicate>
+  void ltrim(Predicate pred) {
+    while (!empty() && pred(front())) remove_prefix(1);
   }
   void ltrim(char ch) { ltrim(is_exactly(ch)); }
   void ltrim_whitespace() { ltrim(is_whitespace()); }
 
-  template <typename Func>
-  void rtrim(Func func) {
-    while (!empty() && func(back())) remove_suffix(1);
+  template <typename Predicate>
+  void rtrim(Predicate pred) {
+    while (!empty() && pred(back())) remove_suffix(1);
   }
   void rtrim(char ch) { rtrim(is_exactly(ch)); }
   void rtrim_whitespace() { rtrim(is_whitespace()); }
 
-  template <typename Func>
-  void trim(Func func) {
-    ltrim(func);
-    rtrim(func);
+  template <typename Predicate>
+  void trim(Predicate pred) {
+    ltrim(pred);
+    rtrim(pred);
   }
   void trim(char ch) { trim(is_exactly(ch)); }
   void trim_whitespace() { trim(is_whitespace()); }
