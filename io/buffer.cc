@@ -19,14 +19,14 @@ static char* alloc(std::size_t len) {
   return ptr;
 }
 
-OwnedBuffer::OwnedBuffer(std::size_t len) : ptr_(alloc(len)), len_(len) {}
+OwnedBuffer::OwnedBuffer(std::size_t len) : data_(alloc(len)), size_(len) {}
 
 OwnedBuffer::OwnedBuffer(std::unique_ptr<char[]> ptr, std::size_t len) noexcept
-    : ptr_(std::move(ptr)),
-      len_(len) {
-  CHECK(len_ == 0 || ptr_.get() != nullptr);
-  if (len_ == 0) ptr_ = nullptr;
-  if (len_ > 0) ::bzero(ptr_.get(), len_);
+    : data_(std::move(ptr)),
+      size_(len) {
+  CHECK(size_ == 0 || data_);
+  if (size_ == 0) data_ = nullptr;
+  if (size_ > 0) ::bzero(data_.get(), size_);
 }
 
 std::size_t BufferPool::pool_size() const noexcept {

@@ -12,6 +12,8 @@
 #include <string>
 #include <vector>
 
+#include "base/strings.h"
+
 namespace io {
 
 // Helper function for rounding up to the next power of 2.
@@ -29,10 +31,14 @@ __attribute__((const)) inline std::size_t next_power_of_two(
 // The ConstBuffer does *NOT* own the memory.
 class ConstBuffer {
  public:
-  constexpr ConstBuffer() noexcept : ptr_(nullptr), len_(0) {}
+  constexpr ConstBuffer(const char* ptr, std::size_t len) noexcept
+      : data_(ptr),
+        size_(len) {}
 
-  constexpr ConstBuffer(const char* ptr, std::size_t len)
-      : ptr_(len > 0 ? ptr : nullptr), len_(len) {}
+  constexpr ConstBuffer() noexcept : ConstBuffer(nullptr, 0) {}
+
+  constexpr ConstBuffer(base::StringPiece sp) noexcept
+      : ConstBuffer(sp.data(), sp.size()) {}
 
   ConstBuffer(const std::string& str) : ConstBuffer(str.data(), str.size()) {}
 
@@ -43,40 +49,40 @@ class ConstBuffer {
   ConstBuffer(const std::array<char, N>& arr)
       : ConstBuffer(arr.data(), arr.size()) {}
 
-  constexpr const char* data() const noexcept { return ptr_; }
-  constexpr std::size_t size() const noexcept { return len_; }
-  explicit constexpr operator bool() const noexcept { return ptr_ != nullptr; }
+  explicit constexpr operator bool() const noexcept { return size_ != 0; }
+  constexpr const char* data() const noexcept { return data_; }
+  constexpr std::size_t size() const noexcept { return size_; }
 
  private:
-  const char* ptr_;
-  std::size_t len_;
+  const char* data_;
+  std::size_t size_;
 };
 
 // A Buffer points to a block of read-write memory.
 // The Buffer does *NOT* own the memory.
 class Buffer {
  public:
-  constexpr Buffer() noexcept : ptr_(nullptr), len_(0) {}
+  constexpr Buffer(char* ptr, std::size_t len) noexcept : data_(ptr),
+                                                          size_(len) {}
 
-  constexpr Buffer(char* ptr, std::size_t len)
-      : ptr_(len > 0 ? ptr : nullptr), len_(len) {}
+  constexpr Buffer() noexcept : Buffer(nullptr, 0) {}
 
   Buffer(std::vector<char>& vec) : Buffer(vec.data(), vec.size()) {}
 
   template <std::size_t N>
   Buffer(std::array<char, N>& arr) : Buffer(arr.data(), arr.size()) {}
 
-  constexpr char* data() const noexcept { return ptr_; }
-  constexpr std::size_t size() const noexcept { return len_; }
-  explicit constexpr operator bool() const noexcept { return ptr_ != nullptr; }
+  explicit constexpr operator bool() const noexcept { return size_ != 0; }
+  constexpr char* data() const noexcept { return data_; }
+  constexpr std::size_t size() const noexcept { return size_; }
 
   constexpr operator ConstBuffer() const noexcept {
-    return ConstBuffer(ptr_, len_);
+    return ConstBuffer(data_, size_);
   }
 
  private:
-  char* ptr_;
-  std::size_t len_;
+  char* data_;
+  std::size_t size_;
 };
 
 // An OwnedBuffer points to (and owns) a block of read-write memory.
@@ -89,17 +95,17 @@ class OwnedBuffer {
   OwnedBuffer(std::unique_ptr<char[]> ptr, std::size_t len) noexcept;
 
   // OwnedBuffer can be default constructed as an empty buffer.
-  OwnedBuffer() noexcept : ptr_(nullptr), len_(0) {}
+  OwnedBuffer() noexcept : data_(nullptr), size_(0) {}
 
   // OwnedBuffer is moveable.
-  OwnedBuffer(OwnedBuffer&& x) noexcept : ptr_(std::move(x.ptr_)),
-                                          len_(x.len_) {
-    x.len_ = 0;
+  OwnedBuffer(OwnedBuffer&& x) noexcept : data_(std::move(x.data_)),
+                                          size_(x.size_) {
+    x.size_ = 0;
   }
   OwnedBuffer& operator=(OwnedBuffer&& x) noexcept {
-    ptr_ = std::move(x.ptr_);
-    len_ = x.len_;
-    x.len_ = 0;
+    data_ = std::move(x.data_);
+    size_ = x.size_;
+    x.size_ = 0;
     return *this;
   }
 
@@ -107,17 +113,17 @@ class OwnedBuffer {
   OwnedBuffer(const OwnedBuffer&) = delete;
   OwnedBuffer& operator=(const OwnedBuffer&) = delete;
 
-  char* data() noexcept { return ptr_.get(); }
-  const char* data() const noexcept { return ptr_.get(); }
-  std::size_t size() const noexcept { return len_; }
-  explicit operator bool() const noexcept { return !!ptr_; }
+  char* data() noexcept { return data_.get(); }
+  const char* data() const noexcept { return data_.get(); }
+  std::size_t size() const noexcept { return size_; }
+  explicit operator bool() const noexcept { return !!data_; }
 
   operator Buffer() noexcept { return Buffer(data(), size()); }
   operator ConstBuffer() const noexcept { return ConstBuffer(data(), size()); }
 
  private:
-  std::unique_ptr<char[]> ptr_;
-  std::size_t len_;
+  std::unique_ptr<char[]> data_;
+  std::size_t size_;
 };
 
 struct null_pool_t {
@@ -131,12 +137,13 @@ static constexpr null_pool_t null_pool = {};
 class BufferPool {
  public:
   // BufferPools are normally constructed with a fixed buffer size.
-  BufferPool(std::size_t size) noexcept : size_(next_power_of_two(size)),
-                                          guts_(std::make_shared<Guts>()) {}
+  BufferPool(std::size_t size, std::size_t max_buffers = 16) noexcept
+      : size_(next_power_of_two(size)),
+        guts_(std::make_shared<Guts>(max_buffers)) {}
 
   // BufferPools can be constructed with a null pool. A pool in such a state
   // will always allocate for |take()| and will always release for |give()|.
-  // - Use |reserve(0)| to force a non-null pool.
+  // - Use |reserve(0)| to force an empty but non-null pool.
   BufferPool(std::size_t size, null_pool_t) noexcept
       : size_(next_power_of_two(size)),
         guts_() {}
@@ -191,7 +198,7 @@ class BufferPool {
     std::vector<OwnedBuffer> pool;
     std::size_t max;
 
-    Guts() noexcept : max(16) {}
+    explicit Guts(std::size_t max) noexcept : max(max) {}
   };
 
   std::size_t size_;
