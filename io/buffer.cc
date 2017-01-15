@@ -42,11 +42,14 @@ std::size_t BufferPool::pool_max() const noexcept {
 }
 
 void BufferPool::set_pool_max(std::size_t n) noexcept {
-  if (!guts_) guts_ = std::make_shared<Guts>();
-  auto lock = base::acquire_lock(guts_->mu);
-  guts_->max = n;
-  while (guts_->pool.size() > guts_->max) {
-    guts_->pool.pop_back();
+  if (guts_) {
+    auto lock = base::acquire_lock(guts_->mu);
+    guts_->max = n;
+    while (guts_->pool.size() > guts_->max) {
+      guts_->pool.pop_back();
+    }
+  } else {
+    guts_ = std::make_shared<Guts>(n);
   }
 }
 
@@ -57,11 +60,16 @@ void BufferPool::flush() {
 }
 
 void BufferPool::reserve(std::size_t count) {
-  if (!guts_) guts_ = std::make_shared<Guts>();
-  auto lock = base::acquire_lock(guts_->mu);
-  if (count > guts_->max) count = guts_->max;
-  while (guts_->pool.size() < count) {
-    guts_->pool.push_back(OwnedBuffer(size_));
+  if (guts_) {
+    auto lock = base::acquire_lock(guts_->mu);
+    if (count > guts_->max) count = guts_->max;
+    while (guts_->pool.size() < count) {
+      guts_->pool.push_back(OwnedBuffer(size_));
+    }
+  } else {
+    std::size_t n = 16;
+    if (n < count) n = count;
+    guts_ = std::make_shared<Guts>(n);
   }
 }
 
