@@ -5,8 +5,9 @@
 int main(int argc, char** argv) {
   if (argc != 2 || argv[1][0] == '-') {
     fprintf(stderr,
-        "Canonicalizes a path, resolving symlinks along the way.\n"
-        "Usage: %s <path>\n", argv[0]);
+            "Canonicalizes a path, resolving symlinks along the way.\n"
+            "Usage: %s <path>\n",
+            argv[0]);
     return 2;
   }
 

@@ -13,12 +13,8 @@ TEST(Mode, AsString) {
   };
 
   std::vector<TestItem> testdata{
-      {"r", 0x01, true},
-      {"rw", 0x03, true},
-      {"wt", 0x22, true},
-      {"wcx", 0x1a, true},
-      {"wct", 0x2a, true},
-      {"wa", 0x06, true},
+      {"r", 0x01, true},   {"rw", 0x03, true},  {"wt", 0x22, true},
+      {"wcx", 0x1a, true}, {"wct", 0x2a, true}, {"wa", 0x06, true},
   };
 
   for (const auto& row : testdata) {

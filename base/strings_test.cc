@@ -7,9 +7,7 @@
 
 using SP = base::StringPiece;
 
-static std::string S(std::string str) noexcept {
-  return std::move(str);
-}
+static std::string S(std::string str) noexcept { return std::move(str); }
 
 static std::string S(const std::vector<SP>& vec) {
   std::string out;
@@ -332,9 +330,7 @@ TEST(Splitter, Char) {
     std::vector<SP> expected;
   };
   std::vector<TestRow> testdata{
-      {"a", {"a"}},
-      {"a,b", {"a", "b"}},
-      {"a,b,c", {"a", "b,c"}},
+      {"a", {"a"}}, {"a,b", {"a", "b"}}, {"a,b,c", {"a", "b,c"}},
   };
   for (const auto& row : testdata) {
     SCOPED_TRACE(row.input);
@@ -383,9 +379,7 @@ TEST(Splitter, Str) {
     std::vector<SP> expected;
   };
   std::vector<TestRow> testdata{
-      {"a", {"a"}},
-      {"a<>b", {"a", "b"}},
-      {"a<>b<>c", {"a", "b<>c"}},
+      {"a", {"a"}}, {"a<>b", {"a", "b"}}, {"a<>b<>c", {"a", "b<>c"}},
   };
   for (const auto& row : testdata) {
     SCOPED_TRACE(row.input);
@@ -394,9 +388,7 @@ TEST(Splitter, Str) {
 }
 
 TEST(Splitter, Pred) {
-  auto ws = [](char ch) {
-    return ch == ' ' || ch == '\t';
-  };
+  auto ws = [](char ch) { return ch == ' ' || ch == '\t'; };
   auto splitter = base::split::on(ws).limit(2);
   struct TestRow {
     SP input;
@@ -448,10 +440,7 @@ TEST(Joiner, Empty) {
 
   auto joiner = base::join::on();
   std::vector<TestRow> testdata{
-      {{}, ""},
-      {{"a"}, "a"},
-      {{"a", "b"}, "ab"},
-      {{"a", "b", "c"}, "abc"},
+      {{}, ""}, {{"a"}, "a"}, {{"a", "b"}, "ab"}, {{"a", "b", "c"}, "abc"},
   };
   for (const auto& row : testdata) {
     SCOPED_TRACE(S(row.input));

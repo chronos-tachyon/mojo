@@ -32,7 +32,8 @@ namespace event {
 namespace {
 
 static constexpr Set kFdMust = Set::hangup_bit() | Set::error_bit();
-static constexpr Set kFdCan = Set::readable_bit() | Set::writable_bit() | Set::priority_bit() | kFdMust;
+static constexpr Set kFdCan =
+    Set::readable_bit() | Set::writable_bit() | Set::priority_bit() | kFdMust;
 
 static base::Result is_disabled() {
   return base::Result::failed_precondition("event::Handle has been disabled");
@@ -561,7 +562,8 @@ base::Result ManagerImpl::signal_add(std::unique_ptr<Record>* out, int signo,
   }
   DCHECK_EQ(added_sig, added_src);
 
-  auto myrec = make_unique<Record>(t, d_, std::move(handler), Set::signal_bit());
+  auto myrec =
+      make_unique<Record>(t, d_, std::move(handler), Set::signal_bit());
   src.records.push_back(myrec.get());
   auto cleanup1 = base::cleanup([this, t, added_src, &src] {
     src.records.pop_back();
@@ -627,7 +629,8 @@ base::Result ManagerImpl::generic_add(std::unique_ptr<Record>* out,
   auto& src = sources_[t];
   src.type = SourceType::generic;
 
-  auto myrec = make_unique<Record>(t, d_, std::move(handler), Set::generic_bit());
+  auto myrec =
+      make_unique<Record>(t, d_, std::move(handler), Set::generic_bit());
   src.records.push_back(myrec.get());
   *out = std::move(myrec);
   return base::Result();
@@ -678,7 +681,7 @@ base::Result ManagerImpl::modify(Record* myrec, Set set) {
 }
 
 base::Result ManagerImpl::arm(Record* myrec, base::Duration delay,
-                                    base::Duration period, bool delay_abs) {
+                              base::Duration period, bool delay_abs) {
   DCHECK_NOTNULL(myrec);
 
   auto lock0 = base::acquire_lock(mu_);
@@ -939,7 +942,8 @@ void ManagerImpl::donate_forever(base::Lock& lock) noexcept {
   }
 }
 
-void ManagerImpl::schedule(CallbackVec* cbvec, Record* rec, Set set, Data data) {
+void ManagerImpl::schedule(CallbackVec* cbvec, Record* rec, Set set,
+                           Data data) {
   DCHECK_NOTNULL(rec);
   auto lock = base::acquire_lock(rec->mu);
   if (rec->disabled) return;
@@ -973,7 +977,8 @@ void ManagerImpl::handle_event(CallbackVec* cbvec, base::token_t t, Set set) {
       break;
 
     default:
-      LOG(DFATAL) << "BUG: unexpected event handler type " << uint16_t(src.type);
+      LOG(DFATAL) << "BUG: unexpected event handler type "
+                  << uint16_t(src.type);
   }
 }
 
@@ -1113,7 +1118,7 @@ base::Result Handle::set_periodic(base::Duration period) {
 }
 
 base::Result Handle::set_periodic_at(base::Duration period,
-                                    base::MonotonicTime at) {
+                                     base::MonotonicTime at) {
   assert_valid();
   base::Duration delay = at.since_epoch();
   if (period.is_zero() || period.is_neg())
@@ -1126,7 +1131,7 @@ base::Result Handle::set_periodic_at(base::Duration period,
 }
 
 base::Result Handle::set_periodic_delay(base::Duration period,
-                                       base::Duration delay) {
+                                        base::Duration delay) {
   assert_valid();
   if (period.is_zero() || period.is_neg())
     return base::Result::invalid_argument(

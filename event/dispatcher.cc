@@ -43,7 +43,8 @@ struct dispatch_thread {
   bool affinity;
 
   dispatch_thread(Dispatcher* d, bool affinity) noexcept
-      : dispatcher(DCHECK_NOTNULL(d)), affinity(affinity) {}
+      : dispatcher(DCHECK_NOTNULL(d)),
+        affinity(affinity) {}
   void operator()() const noexcept {
     if (affinity) base::allocate_core().expect_ok(__FILE__, __LINE__);
     dispatcher->donate(true);

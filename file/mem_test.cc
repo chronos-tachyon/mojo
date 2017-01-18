@@ -83,7 +83,8 @@ TEST(MemFS, Open) {
   EXPECT_OK(f.writer().write(&n, "abc\n"));
   EXPECT_OK(f.close());
 
-  EXPECT_ALREADY_EXISTS(open("/foo/baz", file::Mode::create_exclusive_wo_mode()));
+  EXPECT_ALREADY_EXISTS(
+      open("/foo/baz", file::Mode::create_exclusive_wo_mode()));
 
   EXPECT_OK(open("/foo/baz", file::Mode::create_truncate_rw_mode()));
   EXPECT_OK(f.reader().read(buf, &n, 0, sizeof(buf), opts));

@@ -35,8 +35,7 @@ static std::string stringify(const Vec& vec) {
 
 static testing::AssertionResult same_vector(const char* lhs_expr,
                                             const char* rhs_expr,
-                                            const Vec& lhs,
-                                            const Vec& rhs) {
+                                            const Vec& lhs, const Vec& rhs) {
   bool eq = (lhs.size() == rhs.size());
   if (eq) {
     for (std::size_t i = 0, n = lhs.size(); i < n; ++i) {
