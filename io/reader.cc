@@ -30,6 +30,8 @@
 #include "base/cleanup.h"
 #include "base/logging.h"
 #include "base/mutex.h"
+#include "io/buffer.h"
+#include "io/chain.h"
 #include "io/writer.h"
 
 namespace io {
@@ -1079,6 +1081,104 @@ bool MultiReader::Op::process(MultiReader* reader) {
   subtask.on_finished(event::callback(closure));
   return false;
 }
+
+class BufferedReader : public ReaderImpl {
+ public:
+  BufferedReader(Reader r, PoolPtr p, std::size_t max_buffers) noexcept
+      : r_(std::move(r)),
+        chain_(std::move(p), max_buffers),
+        closed_(false) {
+    chain_.set_rdfn([this](const base::Options& opts) { fill_callback(opts); });
+  }
+
+  BufferedReader(Reader r, PoolPtr p) noexcept : r_(std::move(r)),
+                                                 chain_(std::move(p)),
+                                                 closed_(false) {
+    chain_.set_rdfn([this](const base::Options& opts) { fill_callback(opts); });
+  }
+
+  BufferedReader(Reader r, std::size_t buffer_size, std::size_t max_buffers)
+      : r_(std::move(r)), chain_(buffer_size, max_buffers), closed_(false) {
+    chain_.set_rdfn([this](const base::Options& opts) { fill_callback(opts); });
+  }
+
+  BufferedReader(Reader r) : r_(std::move(r)), chain_(), closed_(false) {
+    chain_.set_rdfn([this](const base::Options& opts) { fill_callback(opts); });
+  }
+
+  std::size_t ideal_block_size() const noexcept override {
+    return chain_.pool()->buffer_size();
+  }
+
+  void read(event::Task* task, char* out, std::size_t* n, std::size_t min,
+            std::size_t max, const base::Options& opts) override {
+    chain_.read(task, out, n, min, max, opts);
+  }
+
+  void close(event::Task* task, const base::Options& opts) override {
+    CHECK_NOTNULL(task);
+    auto lock = base::acquire_lock(mu_);
+    auto r = reader_closed();
+    if (closed_) {
+      if (task->start()) task->finish(std::move(r));
+      return;
+    }
+    chain_.fail_writes(r);
+    chain_.fail_reads(r);
+    chain_.flush();
+    chain_.process();
+    closed_ = true;
+    lock.unlock();
+    r_.close(task, opts);
+  }
+
+ private:
+  struct FillHelper : public event::Callback {
+    event::Task task;
+    BufferedReader* self;
+    OwnedBuffer buffer;
+    std::size_t length;
+    std::size_t n;
+
+    explicit FillHelper(BufferedReader* s, const base::Options& opts) noexcept
+        : self(s),
+          buffer(self->chain_.pool()->take()),
+          length(self->chain_.optimal_fill()),
+          n(0) {
+      self->r_.read(&task, buffer.data(), &n, 1, length, opts);
+    }
+
+    base::Result run() override {
+      base::Result r;
+      if (task.result_will_throw()) {
+        r = base::Result::unknown();
+      } else {
+        r = task.result();
+      }
+      if (r) {
+        std::size_t nn = 0;
+        self->chain_.fill(&nn, buffer.data(), n);
+        CHECK_EQ(nn, n);
+      } else {
+        self->chain_.fail_reads(r);
+      }
+      self->chain_.pool()->give(std::move(buffer));
+      self->chain_.process();
+      return base::Result();
+    }
+  };
+
+  void fill_callback(const base::Options& opts) {
+    auto helper = base::backport::make_unique<FillHelper>(this, opts);
+    auto* h = helper.get();
+    h->task.on_finished(std::move(helper));
+  }
+
+  const Reader r_;
+  Chain chain_;
+  mutable std::mutex mu_;
+  bool closed_;
+};
 }  // anonymous namespace
 
 Reader reader(ReadFn rfn, CloseFn cfn) {
@@ -1117,6 +1217,28 @@ Reader fdreader(base::FD fd) {
 
 Reader multireader(std::vector<Reader> readers) {
   return Reader(std::make_shared<MultiReader>(std::move(readers)));
+}
+
+template <typename... Args>
+static Reader make_bufferedreader(Args&&... args) {
+  return Reader(std::make_shared<BufferedReader>(std::forward<Args>(args)...));
+}
+
+Reader bufferedreader(Reader r, PoolPtr pool, std::size_t max_buffers) {
+  return make_bufferedreader(std::move(r), std::move(pool), max_buffers);
+}
+
+Reader bufferedreader(Reader r, PoolPtr pool) {
+  return make_bufferedreader(std::move(r), std::move(pool));
+}
+
+Reader bufferedreader(Reader r, std::size_t buffer_size,
+                      std::size_t max_buffers) {
+  return make_bufferedreader(std::move(r), buffer_size, max_buffers);
+}
+
+Reader bufferedreader(Reader r) {
+  return make_bufferedreader(std::move(r));
 }
 
 base::Result reader_closed() {

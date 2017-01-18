@@ -940,6 +940,109 @@ TEST(MultiReader, Threaded) {
 }
 
 // }}}
+// BufferedReader {{{
+
+static void TestBufferedReader(const base::Options& o, const char* what) {
+  base::Pipe pipe;
+  ASSERT_OK(base::make_pipe(&pipe));
+
+  LOG(INFO) << "made pipes";
+
+  std::mutex mu;
+  std::condition_variable cv;
+  std::size_t x = 0, y = 0;
+
+  std::thread t1([&pipe, &mu, &cv, &x, &y] {
+    auto lock = base::acquire_lock(mu);
+
+    while (x < 1) cv.wait(lock);
+    LOG(INFO) << "T1 awoken: x = " << x;
+    EXPECT_OK(base::write_exactly(pipe.write, "abcd", 4, "pipe"));
+    LOG(INFO) << "wrote: abcd";
+
+    while (x < 2) cv.wait(lock);
+    LOG(INFO) << "T1 awoken: x = " << x;
+    EXPECT_OK(base::write_exactly(pipe.write, "efgh", 4, "pipe"));
+    LOG(INFO) << "wrote: efgh";
+
+    ++y;
+    cv.notify_all();
+    LOG(INFO) << "woke T0: y = " << y;
+
+    while (x < 3) cv.wait(lock);
+    LOG(INFO) << "T1 awoken: x = " << x;
+    EXPECT_OK(base::write_exactly(pipe.write, "ijkl", 4, "pipe"));
+    LOG(INFO) << "wrote: ijkl";
+  });
+
+  LOG(INFO) << "spawned thread";
+
+  io::Reader r = io::bufferedreader(io::fdreader(pipe.read), 4U, 4U);
+
+  LOG(INFO) << "made bufferedreader";
+
+  char buf[8];
+  std::size_t n;
+
+  EXPECT_OK(r.read(buf, &n, 0, 8, o));
+  EXPECT_EQ(0U, n);
+  LOG(INFO) << "read zero bytes";
+
+  auto lock = base::acquire_lock(mu);
+  ++x;
+  cv.notify_all();
+  LOG(INFO) << "woke T1: x = " << x;
+  lock.unlock();
+
+  LOG(INFO) << "initiating read #1";
+  EXPECT_OK(r.read(buf, &n, 1, 8, o));
+  LOG(INFO) << "read #1 complete";
+  EXPECT_EQ(4U, n);
+  EXPECT_EQ("abcd", std::string(buf, n));
+
+  lock.lock();
+  ++x;
+  cv.notify_all();
+  LOG(INFO) << "woke T1: x = " << x;
+  while (y < 1) cv.wait(lock);
+  LOG(INFO) << "T0 awoken: y = " << y;
+  lock.unlock();
+
+  event::Task task;
+  LOG(INFO) << "initiating read #2";
+  r.read(&task, buf, &n, 8, 8, o);
+
+  lock.lock();
+  ++x;
+  cv.notify_all();
+  LOG(INFO) << "woke T1: x = " << x;
+  lock.unlock();
+
+  event::wait(io::get_manager(o), &task);
+  LOG(INFO) << "read #2 complete";
+  EXPECT_OK(task.result());
+  EXPECT_EQ(8U, n);
+  EXPECT_EQ("efghijkl", std::string(buf, n));
+
+  t1.join();
+  base::log_flush();
+}
+
+TEST(BufferedReader, Threaded) {
+  event::ManagerOptions mo;
+  mo.set_threaded_mode();
+  mo.set_num_pollers(2);
+  mo.dispatcher().set_num_workers(2);
+  event::Manager m;
+  ASSERT_OK(event::new_manager(&m, mo));
+
+  base::Options o;
+  o.get<io::Options>().manager = m;
+  TestBufferedReader(o, "threaded");
+  m.shutdown();
+}
+
+// }}}
 
 static void init() __attribute__((constructor));
 static void init() {

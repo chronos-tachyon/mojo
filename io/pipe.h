@@ -18,10 +18,10 @@ struct Pipe {
   Pipe(Reader r, Writer w) noexcept : read(std::move(r)), write(std::move(w)) {}
 };
 
-Pipe make_pipe();
-Pipe make_pipe(std::size_t block_size, std::size_t max_buffers);
-Pipe make_pipe(PoolPtr pool);
 Pipe make_pipe(PoolPtr pool, std::size_t max_buffers);
+Pipe make_pipe(PoolPtr pool);
+Pipe make_pipe(std::size_t buffer_size, std::size_t max_buffers);
+Pipe make_pipe();
 
 void make_pipe(Reader* r, Writer* w);  // backward compatibility
 

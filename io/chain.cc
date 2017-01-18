@@ -12,19 +12,74 @@
 #include "io/reader.h"
 #include "io/writer.h"
 
+static constexpr std::size_t kDefaultBufferSize = 1U << 16;  // 64 KiB
+static constexpr std::size_t kDefaultMaxBuffers = 16;
+
 namespace io {
 
-Chain::Chain(Func rdfn, Func wrfn, PoolPtr pool, std::size_t max_buffers)
-    : rdfn_(std::move(rdfn)),
-      wrfn_(std::move(wrfn)),
-      pool_(CHECK_NOTNULL(std::move(pool))),
+Chain::Chain(PoolPtr pool, std::size_t max_buffers) noexcept
+    : pool_(CHECK_NOTNULL(std::move(pool))),
       max_(max_buffers),
       rdpos_(0),
       wrpos_(0),
-      rdbusy_(false),
-      wrbusy_(false) {
+      loop_(0) {
+  CHECK_GT(pool_->buffer_size(), 0U);
+  CHECK_GE(max_, 3U);
+  vec_.reserve(max_);
+}
+
+Chain::Chain(PoolPtr pool) noexcept
+    : pool_(CHECK_NOTNULL(std::move(pool))),
+      max_(std::max(std::size_t(3), pool_->max())),
+      rdpos_(0),
+      wrpos_(0),
+      loop_(0) {
   CHECK_GT(pool_->buffer_size(), 0U);
   vec_.reserve(max_);
+}
+
+Chain::Chain(std::size_t buffer_size, std::size_t max_buffers)
+    : pool_(make_pool(buffer_size, max_buffers)),
+      max_(max_buffers),
+      rdpos_(0),
+      wrpos_(0),
+      loop_(0) {
+  CHECK_GT(buffer_size, 0U);
+  CHECK_GE(max_, 3U);
+  vec_.reserve(max_);
+}
+
+Chain::Chain()
+    : pool_(make_pool(kDefaultBufferSize, kDefaultMaxBuffers)),
+      max_(kDefaultMaxBuffers),
+      rdpos_(0),
+      wrpos_(0),
+      loop_(0) {
+  vec_.reserve(max_);
+}
+
+void Chain::set_rdfn(Func rdfn) {
+  auto lock = base::acquire_lock(mu_);
+  rdfn_ = std::move(rdfn);
+}
+
+void Chain::set_wrfn(Func wrfn) {
+  auto lock = base::acquire_lock(mu_);
+  wrfn_ = std::move(wrfn);
+}
+
+std::size_t Chain::optimal_fill() const noexcept {
+  std::size_t blocknum, offset;
+  auto lock = base::acquire_lock(mu_);
+  xlate_locked(&blocknum, &offset, wrpos_);
+  return pool_->buffer_size() - offset;
+}
+
+std::size_t Chain::optimal_drain() const noexcept {
+  std::size_t blocknum, offset;
+  auto lock = base::acquire_lock(mu_);
+  xlate_locked(&blocknum, &offset, wrpos_);
+  return std::min(pool_->buffer_size() - offset, wrpos_ - rdpos_);
 }
 
 void Chain::fill(std::size_t* n, const char* ptr, std::size_t len) {
@@ -158,19 +213,16 @@ void Chain::drain_locked(std::size_t* n, char* ptr, std::size_t len) noexcept {
 }
 
 void Chain::process_locked(base::Lock& lock) noexcept {
-  bool write_progress = true;
-  bool read_progress = true;
-  while (write_progress || read_progress) {
-    write_progress = writes_locked(lock);
-    read_progress = reads_locked(lock);
+  ++loop_;
+  if (loop_ > 1) return;
+  auto cleanup = base::cleanup([this] { loop_ = 0; });
+
+  while (loop_ > 0) {
+    if (!writes_locked(lock) && !reads_locked(lock)) --loop_;
   }
 }
 
 bool Chain::reads_locked(base::Lock& lock) noexcept {
-  if (rdbusy_) return false;
-  rdbusy_ = true;
-  auto cleanup = base::cleanup([this] { rdbusy_ = false; });
-
   bool some = false;
   bool want = false;
   while (!rdq_.empty()) {
@@ -186,20 +238,17 @@ bool Chain::reads_locked(base::Lock& lock) noexcept {
   }
 
   if (want && rdfn_) {
+    auto fn = rdfn_;
     const auto& opts = rdq_.front()->options;
     lock.unlock();
     auto reacquire = base::cleanup([&lock] { lock.lock(); });
-    some = rdfn_(this, opts) || some;
+    fn(opts);
   }
 
   return some;
 }
 
 bool Chain::writes_locked(base::Lock& lock) noexcept {
-  if (wrbusy_) return false;
-  wrbusy_ = true;
-  auto cleanup = base::cleanup([this] { wrbusy_ = false; });
-
   bool some = false;
   bool want = false;
   while (!wrq_.empty()) {
@@ -215,10 +264,11 @@ bool Chain::writes_locked(base::Lock& lock) noexcept {
   }
 
   if (want && wrfn_) {
+    auto fn = wrfn_;
     const auto& opts = wrq_.front()->options;
     lock.unlock();
     auto reacquire = base::cleanup([&lock] { lock.lock(); });
-    some = wrfn_(this, opts) || some;
+    fn(opts);
   }
 
   return some;
@@ -260,26 +310,6 @@ Chain::Progress Chain::write_locked(base::Lock& lock,
     return Chain::Progress::partial;
   }
   return Chain::Progress::none;
-}
-
-ChainPtr make_chain(Chain::Func rdfn, Chain::Func wrfn, PoolPtr pool,
-                    std::size_t max_buffers) {
-  return std::make_shared<Chain>(std::move(rdfn), std::move(wrfn),
-                                 std::move(pool), max_buffers);
-}
-
-ChainPtr make_chain(Chain::Func rdfn, Chain::Func wrfn, PoolPtr pool) {
-  std::size_t max_buffers = CHECK_NOTNULL(pool.get())->max();
-  return std::make_shared<Chain>(std::move(rdfn), std::move(wrfn),
-                                 std::move(pool), max_buffers);
-}
-
-ChainPtr make_chain(PoolPtr pool, std::size_t max_buffers) {
-  return make_chain(nullptr, nullptr, std::move(pool), max_buffers);
-}
-
-ChainPtr make_chain(PoolPtr pool) {
-  return make_chain(nullptr, nullptr, std::move(pool));
 }
 
 }  // namespace io

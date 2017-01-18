@@ -26,7 +26,8 @@ class Chain {
  public:
   // Func is a callback that requests that the Chain's owner should call some
   // sequence of |fill()|, |drain()|, |fail_reads()|, |fail_writes()|, and/or
-  // |flush()| to unblock forward progress.
+  // |flush()| to unblock forward progress, followed by |process()| to request
+  // reprocessing.
   //
   // - When called in the |rdfn| role, the goal is to fulfill a |read()|
   //   operation, so the Chain's owner should call |fill()| or |fail_reads()|.
@@ -39,15 +40,23 @@ class Chain {
   //
   //   In the case of |fail_writes()|, |fail_reads()| may also be appropriate.
   //
-  // Returns true if more processing should be attempted immediately, or false
-  // if the Chain's owner will arrange for |process()| to be called at a later
-  // time.
-  //
-  using Func = std::function<bool(Chain* chain, const base::Options& opts)>;
+  using Func = std::function<void(const base::Options& opts)>;
 
-  Chain(Func rdfn, Func wrfn, PoolPtr pool, std::size_t max_buffers);
+  explicit Chain(PoolPtr pool, std::size_t max_buffers) noexcept;
+  explicit Chain(PoolPtr pool) noexcept;
+  explicit Chain(std::size_t buffer_size, std::size_t max_buffers);
+  explicit Chain();
 
   const PoolPtr& pool() const noexcept { return pool_; }
+
+  // Populates the rdfn and wrfn callbacks.
+  // Typically called once immediately after construction.
+  void set_rdfn(Func rdfn);
+  void set_wrfn(Func wrfn);
+
+  // Returns the optimal size for the next |fill()| or |drain()| call.
+  std::size_t optimal_fill() const noexcept;
+  std::size_t optimal_drain() const noexcept;
 
   // Fill the queue with bytes.
   void fill(std::size_t* n, const char* ptr, std::size_t len);
@@ -127,29 +136,20 @@ class Chain {
   Progress read_locked(base::Lock& lock, const ReadOp* op) noexcept;
   Progress write_locked(base::Lock& lock, const WriteOp* op) noexcept;
 
-  const Func rdfn_;
-  const Func wrfn_;
   const PoolPtr pool_;
   const std::size_t max_;
   mutable std::mutex mu_;
   std::vector<OwnedBuffer> vec_;
   std::deque<std::unique_ptr<const ReadOp>> rdq_;
   std::deque<std::unique_ptr<const WriteOp>> wrq_;
+  Func rdfn_;
+  Func wrfn_;
   base::Result rderr_;
   base::Result wrerr_;
   std::size_t rdpos_;
   std::size_t wrpos_;
-  bool rdbusy_;
-  bool wrbusy_;
+  std::size_t loop_;
 };
-
-using ChainPtr = std::shared_ptr<Chain>;
-
-ChainPtr make_chain(Chain::Func rdfn, Chain::Func wrfn, PoolPtr pool,
-                    std::size_t max_buffers);
-ChainPtr make_chain(Chain::Func rdfn, Chain::Func wrfn, PoolPtr pool);
-ChainPtr make_chain(PoolPtr pool, std::size_t max_buffers);
-ChainPtr make_chain(PoolPtr pool);
 
 }  // namespace io
 

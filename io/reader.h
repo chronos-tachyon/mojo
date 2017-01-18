@@ -368,6 +368,14 @@ Reader fdreader(base::FD fd);
 // Returns a Reader that concatenates multiple streams into one.
 Reader multireader(std::vector<Reader> readers);
 
+// Wraps a Reader in I/O buffering.
+Reader bufferedreader(Reader r, PoolPtr pool, std::size_t max_buffers);
+Reader bufferedreader(Reader r, PoolPtr pool);
+Reader bufferedreader(Reader r, std::size_t buffer_size,
+                      std::size_t max_buffers);
+Reader bufferedreader(Reader r);
+
+// Returns an archetypal error result for performing I/O on a closed io::Reader.
 base::Result reader_closed();
 
 }  // namespace io

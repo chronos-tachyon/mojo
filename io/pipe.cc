@@ -32,13 +32,27 @@ struct Guts {
   bool rdclosed;
   bool wrclosed;
 
-  Guts(PoolPtr pool, std::size_t max_buffers) noexcept
-      : chain(nullptr, nullptr, std::move(pool), max_buffers),
+  explicit Guts(PoolPtr pool, std::size_t max_buffers) noexcept
+      : chain(std::move(pool), max_buffers),
         rdclosed(false),
         wrclosed(false) {}
+
+  explicit Guts(PoolPtr pool) noexcept : chain(std::move(pool)),
+                                         rdclosed(false),
+                                         wrclosed(false) {}
+
+  explicit Guts(std::size_t buffer_size, std::size_t max_buffers)
+      : chain(buffer_size, max_buffers), rdclosed(false), wrclosed(false) {}
+
+  explicit Guts() : chain(), rdclosed(false), wrclosed(false) {}
 };
 
 using GutsPtr = std::shared_ptr<Guts>;
+
+template <typename... Args>
+static GutsPtr make_guts(Args&&... args) {
+  return std::make_shared<Guts>(std::forward<Args>(args)...);
+}
 
 class PipeReader : public ReaderImpl {
  public:
@@ -127,26 +141,24 @@ class PipeWriter : public WriterImpl {
 
 }  // anonymous namespace
 
-Pipe make_pipe() { return make_pipe(kPipeIdealBlockSize, kPipeMaxBlocks); }
-
-Pipe make_pipe(std::size_t block_size, std::size_t max_buffers) {
-  auto pool = make_pool(block_size, max_buffers);
-  return make_pipe(std::move(pool), max_buffers);
-}
-
-Pipe make_pipe(PoolPtr pool) {
-  CHECK_NOTNULL(pool.get());
-  auto max = std::max(std::size_t(3), pool->max());
-  return make_pipe(std::move(pool), max);
-}
-
-Pipe make_pipe(PoolPtr pool, std::size_t max_buffers) {
-  CHECK_NOTNULL(pool.get());
-  CHECK_GE(max_buffers, 3U);
-  auto guts = std::make_shared<Guts>(std::move(pool), max_buffers);
+static Pipe make_pipe(GutsPtr guts) {
   return Pipe(Reader(std::make_shared<PipeReader>(guts)),
               Writer(std::make_shared<PipeWriter>(guts)));
 }
+
+Pipe make_pipe(PoolPtr pool, std::size_t max_buffers) {
+  return make_pipe(make_guts(std::move(pool), max_buffers));
+}
+
+Pipe make_pipe(PoolPtr pool) {
+  return make_pipe(make_guts(std::move(pool)));
+}
+
+Pipe make_pipe(std::size_t buffer_size, std::size_t max_buffers) {
+  return make_pipe(make_guts(buffer_size, max_buffers));
+}
+
+Pipe make_pipe() { return make_pipe(make_guts()); }
 
 void make_pipe(Reader* r, Writer* w) {
   CHECK_NOTNULL(r);
