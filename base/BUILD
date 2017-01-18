@@ -11,6 +11,7 @@ cc_library(
     "cpu.cc",
     "debug.cc",
     "duration.cc",
+    "endian.cc",
     "fd.cc",
     "logging.cc",
     "mutex.cc",
@@ -30,6 +31,7 @@ cc_library(
     "cpu.h",
     "debug.h",
     "duration.h",
+    "endian.h",
     "fd.h",
     "logging.h",
     "mutex.h",
@@ -85,6 +87,17 @@ cc_test(
 cc_test(
   name = "duration_test",
   srcs = ["duration_test.cc"],
+  deps = [
+    ":base",
+    "//external:gtest",
+  ],
+  size = "small",
+  timeout = "short",
+)
+
+cc_test(
+  name = "endian_test",
+  srcs = ["endian_test.cc"],
   deps = [
     ":base",
     "//external:gtest",
