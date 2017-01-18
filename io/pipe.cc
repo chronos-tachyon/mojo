@@ -8,193 +8,126 @@
 
 #include "base/cleanup.h"
 #include "base/logging.h"
+#include "io/buffer.h"
+#include "io/chain.h"
 
-static constexpr std::size_t kPipeIdealBlockSize = 1U << 20;  // 1 MiB
+namespace io {
+
+namespace {
 
 static base::Result closed_pipe() {
   return base::Result::failed_precondition("io::Pipe is closed");
 }
 
-namespace io {
+static constexpr std::size_t kPipeIdealBlockSize = 1U << 16;  // 64 KiB
+static constexpr std::size_t kPipeMaxBlocks = 16;
 
-namespace {
-struct PipeGuts {
-  struct ReadOp {
-    event::Task* const task;
-    char* const out;
-    std::size_t* const n;
-    const std::size_t min;
-    const std::size_t max;
-    const base::Options options;
-
-    ReadOp(event::Task* t, char* o, std::size_t* n, std::size_t mn,
-           std::size_t mx, base::Options opts) noexcept
-        : task(t),
-          out(o),
-          n(n),
-          min(mn),
-          max(mx),
-          options(std::move(opts)) {}
-
-    bool process(base::Lock& lock, PipeGuts* guts);
-  };
-
+struct Guts {
   mutable std::mutex mu;
-  bool write_closed;
-  bool read_closed;
-  std::vector<char> buffer;
-  std::deque<std::unique_ptr<ReadOp>> queue;
+  Chain chain;
+  bool rdclosed;
+  bool wrclosed;
 
-  PipeGuts() noexcept : write_closed(false), read_closed(false) {}
-
-  void process(base::Lock& lock) {
-    while (!queue.empty()) {
-      auto op = std::move(queue.front());
-      queue.pop_front();
-      if (!op->process(lock, this)) {
-        queue.push_front(std::move(op));
-        break;
-      }
-    }
-  }
+  Guts(PoolPtr pool, std::size_t max_buffers) noexcept
+      : chain(nullptr, nullptr, std::move(pool), max_buffers),
+        rdclosed(false),
+        wrclosed(false) {}
 };
 
-bool PipeGuts::ReadOp::process(base::Lock& lock, PipeGuts* guts) {
-  auto& buf = guts->buffer;
-  if (buf.size() >= min) {
-    std::size_t count = buf.size();
-    if (count > max) count = max;
-    ::memcpy(out, buf.data(), count);
-    *n = count;
-    auto it = buf.begin();
-    buf.erase(it, it + count);
-    lock.unlock();
-    auto cleanup = base::cleanup([&lock] { lock.lock(); });
-    task->finish_ok();
-    return true;
-  }
-  if (guts->write_closed) {
-    ::memcpy(out, buf.data(), buf.size());
-    *n = buf.size();
-    buf.clear();
-    lock.unlock();
-    auto cleanup = base::cleanup([&lock] { lock.lock(); });
-    task->finish(base::Result::eof());
-    return true;
-  }
-  return false;
-}
+using GutsPtr = std::shared_ptr<Guts>;
 
 class PipeReader : public ReaderImpl {
  public:
-  explicit PipeReader(std::shared_ptr<PipeGuts> g) noexcept
-      : guts_(std::move(g)) {}
+  explicit PipeReader(GutsPtr guts) noexcept
+      : guts_(DCHECK_NOTNULL(std::move(guts))),
+        bufsz_(guts_->chain.pool()->buffer_size()) {}
 
-  ~PipeReader() noexcept {
-    auto lock = base::acquire_lock(guts_->mu);
-    close_guts(lock);
-  }
+  ~PipeReader() noexcept { close_impl(); }
 
-  std::size_t ideal_block_size() const noexcept override {
-    return kPipeIdealBlockSize;
-  }
+  std::size_t ideal_block_size() const noexcept override { return bufsz_; }
 
   void read(event::Task* task, char* out, std::size_t* n, std::size_t min,
             std::size_t max, const base::Options& opts) override {
-    if (!prologue(task, out, n, min, max)) return;
-    auto lock = base::acquire_lock(guts_->mu);
-    if (guts_->read_closed) {
-      task->finish(closed_pipe());
-      return;
-    }
-    guts_->queue.emplace_back(
-        new PipeGuts::ReadOp(task, out, n, min, max, opts));
-    guts_->process(lock);
+    guts_->chain.read(task, out, n, min, max, opts);
   }
 
   void close(event::Task* task, const base::Options& opts) override {
-    if (!prologue(task)) return;
-    base::Result r;
-    auto lock = base::acquire_lock(guts_->mu);
-    if (guts_->read_closed) {
-      r = closed_pipe();
-      lock.unlock();
-    } else {
-      close_guts(lock);
+    bool was = close_impl();
+    CHECK_NOTNULL(task);
+    if (task->start()) {
+      if (was)
+        task->finish(closed_pipe());
+      else
+        task->finish_ok();
     }
-    task->finish(std::move(r));
   }
 
  private:
-  void close_guts(base::Lock& lock) noexcept {
-    guts_->write_closed = true;
-    guts_->read_closed = true;
-    auto q = std::move(guts_->queue);
-    guts_->buffer.clear();
-    guts_->queue.clear();
-    lock.unlock();
-    for (const auto& op : q) {
-      op->task->finish_cancel();  // TODO: more appropriate error?
-    }
+  bool close_impl() {
+    auto lock = base::acquire_lock(guts_->mu);
+    if (guts_->rdclosed) return true;
+    auto r = closed_pipe();
+    guts_->chain.fail_writes(r);
+    guts_->chain.fail_reads(r);
+    guts_->chain.flush();
+    guts_->chain.process();
+    guts_->rdclosed = true;
+    guts_->wrclosed = true;
+    return false;
   }
 
-  std::shared_ptr<PipeGuts> guts_;
+  GutsPtr guts_;
+  const std::size_t bufsz_;
 };
 
 class PipeWriter : public WriterImpl {
  public:
-  explicit PipeWriter(std::shared_ptr<PipeGuts> g) noexcept
-      : guts_(std::move(g)) {}
+  explicit PipeWriter(GutsPtr guts) noexcept
+      : guts_(DCHECK_NOTNULL(std::move(guts))),
+        bufsz_(guts_->chain.pool()->buffer_size()) {}
 
-  ~PipeWriter() noexcept {
-    auto lock = base::acquire_lock(guts_->mu);
-    guts_->write_closed = true;
-    guts_->process(lock);
-  }
+  ~PipeWriter() noexcept { close_impl(); }
 
-  std::size_t ideal_block_size() const noexcept override {
-    return kPipeIdealBlockSize;
-  }
+  std::size_t ideal_block_size() const noexcept override { return bufsz_; }
 
   void write(event::Task* task, std::size_t* n, const char* ptr,
              std::size_t len, const base::Options& opts) override {
-    if (!prologue(task, n, ptr, len)) return;
-    base::Result r;
-    auto lock = base::acquire_lock(guts_->mu);
-    if (guts_->write_closed) {
-      r = closed_pipe();
-    } else {
-      auto& buf = guts_->buffer;
-      buf.insert(buf.end(), ptr, ptr + len);
-      *n = len;
-      guts_->process(lock);
-    }
-    lock.unlock();
-    task->finish(std::move(r));
+    guts_->chain.write(task, n, ptr, len, opts);
   }
 
   void close(event::Task* task, const base::Options& opts) override {
-    base::Result r;
-    auto lock = base::acquire_lock(guts_->mu);
-    if (guts_->write_closed) {
-      r = closed_pipe();
-    } else {
-      guts_->write_closed = true;
-      guts_->process(lock);
+    bool was = close_impl();
+    CHECK_NOTNULL(task);
+    if (task->start()) {
+      if (was)
+        task->finish(closed_pipe());
+      else
+        task->finish_ok();
     }
-    lock.unlock();
-    if (prologue(task)) task->finish(std::move(r));
   }
 
  private:
-  std::shared_ptr<PipeGuts> guts_;
+  bool close_impl() {
+    auto lock = base::acquire_lock(guts_->mu);
+    if (guts_->wrclosed) return true;
+    guts_->chain.fail_writes(closed_pipe());
+    guts_->chain.fail_reads(base::Result::eof());
+    guts_->chain.process();
+    guts_->wrclosed = true;
+    return false;
+  }
+
+  GutsPtr guts_;
+  const std::size_t bufsz_;
 };
+
 }  // anonymous namespace
 
 void make_pipe(Reader* r, Writer* w) {
   CHECK_NOTNULL(r);
   CHECK_NOTNULL(w);
-  auto guts = std::make_shared<PipeGuts>();
+  auto pool = make_pool(kPipeIdealBlockSize, kPipeMaxBlocks);
+  auto guts = std::make_shared<Guts>(std::move(pool), kPipeMaxBlocks);
   *r = Reader(std::make_shared<PipeReader>(guts));
   *w = Writer(std::make_shared<PipeWriter>(std::move(guts)));
 }

@@ -5,6 +5,7 @@ cc_library(
   name = "io",
   srcs = [
     "buffer.cc",
+    "chain.cc",
     "common.cc",
     "options.cc",
     "pipe.cc",
@@ -14,6 +15,7 @@ cc_library(
   ],
   hdrs = [
     "buffer.h",
+    "chain.h",
     "common.h",
     "options.h",
     "pipe.h",
