@@ -52,8 +52,7 @@ struct CopyHelper {
     return lcm(wblksz, rblksz);
   }
 
-  static PoolPtr choose_pool(std::size_t block_size,
-                                const base::Options& o) {
+  static PoolPtr choose_pool(std::size_t block_size, const base::Options& o) {
     PoolPtr pool = o.get<io::Options>().pool;
     if (pool && pool->buffer_size() >= block_size)
       return pool;
