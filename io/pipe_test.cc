@@ -8,9 +8,9 @@
 #include "io/pipe.h"
 
 TEST(Pipe, EndToEnd) {
-  io::Reader r;
-  io::Writer w;
-  io::make_pipe(&r, &w);
+  io::Pipe pipe = io::make_pipe();
+  io::Reader r = std::move(pipe.read);
+  io::Writer w = std::move(pipe.write);
 
   base::Options o;
   event::Manager m = io::get_manager(o);
