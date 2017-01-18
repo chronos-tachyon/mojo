@@ -24,7 +24,8 @@ bool WriterImpl::prologue(event::Task* task, std::size_t* n, const char* ptr,
                           std::size_t len) {
   CHECK_NOTNULL(task);
   CHECK_NOTNULL(n);
-  CHECK(len == 0 || ptr != nullptr);
+  CHECK_GE(len, 0U);
+  if (len > 0) CHECK_NOTNULL(ptr);
 
   bool start = task->start();
   if (start) *n = 0;
@@ -35,6 +36,7 @@ bool WriterImpl::prologue(event::Task* task, std::size_t* n, std::size_t max,
                           const Reader& r) {
   CHECK_NOTNULL(task);
   CHECK_NOTNULL(n);
+  CHECK_GE(max, 0U);
   r.assert_valid();
 
   bool start = task->start();

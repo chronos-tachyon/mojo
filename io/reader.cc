@@ -46,9 +46,10 @@ static TransferMode default_transfer_mode() noexcept {
 bool ReaderImpl::prologue(event::Task* task, char* out, std::size_t* n,
                           std::size_t min, std::size_t max) {
   CHECK_NOTNULL(task);
-  CHECK_NOTNULL(out);
   CHECK_NOTNULL(n);
+  CHECK_GE(min, 0U);
   CHECK_LE(min, max);
+  if (max > 0) CHECK_NOTNULL(out);
 
   bool start = task->start();
   if (start) *n = 0;
@@ -59,6 +60,7 @@ bool ReaderImpl::prologue(event::Task* task, std::size_t* n, std::size_t max,
                           const Writer& w) {
   CHECK_NOTNULL(task);
   CHECK_NOTNULL(n);
+  CHECK_GE(max, 0U);
   w.assert_valid();
 
   bool start = task->start();
