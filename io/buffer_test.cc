@@ -7,26 +7,6 @@
 
 #include "io/buffer.h"
 
-TEST(NextPow8, Basics) {
-  EXPECT_EQ(1U, io::next_power_of_two(0U));
-  EXPECT_EQ(1U, io::next_power_of_two(1U));
-  EXPECT_EQ(2U, io::next_power_of_two(2U));
-  EXPECT_EQ(4U, io::next_power_of_two(3U));
-  EXPECT_EQ(4U, io::next_power_of_two(4U));
-  EXPECT_EQ(8U, io::next_power_of_two(5U));
-  EXPECT_EQ(8U, io::next_power_of_two(7U));
-  EXPECT_EQ(8U, io::next_power_of_two(8U));
-  EXPECT_EQ(16U, io::next_power_of_two(9U));
-  EXPECT_EQ(16U, io::next_power_of_two(15U));
-  EXPECT_EQ(16U, io::next_power_of_two(16U));
-  EXPECT_EQ(32U, io::next_power_of_two(17U));
-  EXPECT_EQ(32U, io::next_power_of_two(31U));
-  EXPECT_EQ(32U, io::next_power_of_two(32U));
-  EXPECT_EQ(64U, io::next_power_of_two(33U));
-  EXPECT_EQ(64U, io::next_power_of_two(63U));
-  EXPECT_EQ(64U, io::next_power_of_two(64U));
-}
-
 TEST(OwnedBuffer, Move) {
   io::OwnedBuffer buf0 = io::OwnedBuffer(64);
   EXPECT_TRUE(buf0.data() != nullptr);
@@ -49,64 +29,41 @@ TEST(OwnedBuffer, Move) {
   EXPECT_EQ(64U, buf2.size());
 }
 
-TEST(BufferPool, Null) {
-  io::BufferPool pool(4096, io::null_pool);
-  EXPECT_EQ(0U, pool.pool_size());
-  EXPECT_EQ(0U, pool.pool_max());
+TEST(Pool, EndToEnd) {
+  io::PoolPtr pool = io::make_pool(4096, 2);
+  EXPECT_EQ(4096U, pool->buffer_size());
+  EXPECT_EQ(2U, pool->max());
+  EXPECT_EQ(0U, pool->size());
+
+  pool->reserve(2);
+  EXPECT_EQ(2U, pool->size());
 
   std::string expected(4096, '\0');
 
-  io::OwnedBuffer x = pool.take();
-  EXPECT_EQ(0U, pool.pool_size());
-  EXPECT_EQ(0U, pool.pool_max());
+  io::OwnedBuffer x = pool->take();
+  EXPECT_EQ(1U, pool->size());
   EXPECT_EQ(4096U, x.size());
   EXPECT_EQ(expected, std::string(x.data(), x.size()));
 
-  io::OwnedBuffer y = pool.take();
-  EXPECT_EQ(0U, pool.pool_size());
-  EXPECT_EQ(0U, pool.pool_max());
+  io::OwnedBuffer y = pool->take();
+  EXPECT_EQ(0U, pool->size());
   EXPECT_EQ(4096U, y.size());
   EXPECT_EQ(expected, std::string(y.data(), y.size()));
   EXPECT_TRUE(x.data() != y.data());
 
-  pool.give(std::move(x));
-  EXPECT_EQ(0U, pool.pool_size());
-  EXPECT_EQ(0U, pool.pool_max());
+  io::OwnedBuffer z = pool->take();
+  EXPECT_EQ(0U, pool->size());
+  EXPECT_EQ(4096U, z.size());
+  EXPECT_EQ(expected, std::string(z.data(), z.size()));
+  EXPECT_TRUE(x.data() != z.data());
+  EXPECT_TRUE(y.data() != z.data());
 
-  pool.give(std::move(y));
-  EXPECT_EQ(0U, pool.pool_size());
-  EXPECT_EQ(0U, pool.pool_max());
-}
+  pool->give(std::move(x));
+  EXPECT_EQ(1U, pool->size());
 
-TEST(BufferPool, NotNull) {
-  io::BufferPool pool(4096);
-  EXPECT_EQ(0U, pool.pool_size());
-  EXPECT_EQ(16U, pool.pool_max());
+  pool->give(std::move(y));
+  EXPECT_EQ(2U, pool->size());
 
-  pool.reserve(2);
-  EXPECT_EQ(2U, pool.pool_size());
-  EXPECT_EQ(16U, pool.pool_max());
-
-  std::string expected(4096, '\0');
-
-  io::OwnedBuffer x = pool.take();
-  EXPECT_EQ(1U, pool.pool_size());
-  EXPECT_EQ(16U, pool.pool_max());
-  EXPECT_EQ(4096U, x.size());
-  EXPECT_EQ(expected, std::string(x.data(), x.size()));
-
-  io::OwnedBuffer y = pool.take();
-  EXPECT_EQ(0U, pool.pool_size());
-  EXPECT_EQ(16U, pool.pool_max());
-  EXPECT_EQ(4096U, y.size());
-  EXPECT_EQ(expected, std::string(y.data(), y.size()));
-  EXPECT_TRUE(x.data() != y.data());
-
-  pool.give(std::move(x));
-  EXPECT_EQ(1U, pool.pool_size());
-  EXPECT_EQ(16U, pool.pool_max());
-
-  pool.give(std::move(y));
-  EXPECT_EQ(2U, pool.pool_size());
-  EXPECT_EQ(16U, pool.pool_max());
+  pool->give(std::move(z));
+  EXPECT_EQ(2U, pool->size());
 }

@@ -40,8 +40,8 @@ struct Options : public base::OptionsType {
   // Use this event::Manager to perform async I/O.
   event::Manager manager;
 
-  // Use this BufferPool (if provided) for obtaining scratch buffers.
-  BufferPool pool;
+  // Use this io::Pool (if provided) for obtaining scratch buffers.
+  PoolPtr pool;
 
   // Overrides the preferred I/O block size, or 0 to use the default.
   // - If non-zero, this value should almost certainly be a power of two.

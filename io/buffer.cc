@@ -5,10 +5,21 @@
 
 #include <cstring>
 
+#include "base/debug.h"
 #include "base/logging.h"
 #include "base/mutex.h"
 
 namespace io {
+
+__attribute__((const)) inline std::size_t next_power_of_two(
+    std::size_t n) noexcept {
+  static constexpr std::size_t MAX = ~std::size_t(0);
+  static constexpr std::size_t MAXPOW2 = (MAX >> 1) + 1;
+  if (n > MAXPOW2) return MAX;
+  std::size_t x = 1;
+  while (x < n) x <<= 1;
+  return x;
+}
 
 static char* alloc(std::size_t len) {
   char* ptr = nullptr;
@@ -29,72 +40,50 @@ OwnedBuffer::OwnedBuffer(std::unique_ptr<char[]> ptr, std::size_t len) noexcept
   if (size_ > 0) ::bzero(data_.get(), size_);
 }
 
-std::size_t BufferPool::pool_size() const noexcept {
-  if (!guts_) return 0;
-  auto lock = base::acquire_lock(guts_->mu);
-  return guts_->pool.size();
+Pool::Pool(std::size_t size, std::size_t max_buffers) noexcept
+    : size_(next_power_of_two(size)),
+      max_(max_buffers) {
+  CHECK_GT(size, 0U);
+  vec_.reserve(max_);
 }
 
-std::size_t BufferPool::pool_max() const noexcept {
-  if (!guts_) return 0;
-  auto lock = base::acquire_lock(guts_->mu);
-  return guts_->max;
+std::size_t Pool::size() const noexcept {
+  auto lock = base::acquire_lock(mu_);
+  return vec_.size();
 }
 
-void BufferPool::set_pool_max(std::size_t n) noexcept {
-  if (guts_) {
-    auto lock = base::acquire_lock(guts_->mu);
-    guts_->max = n;
-    while (guts_->pool.size() > guts_->max) {
-      guts_->pool.pop_back();
-    }
-  } else {
-    guts_ = std::make_shared<Guts>(n);
-  }
+void Pool::flush() noexcept {
+  auto lock = base::acquire_lock(mu_);
+  vec_.clear();
 }
 
-void BufferPool::flush() {
-  if (!guts_) return;
-  auto lock = base::acquire_lock(guts_->mu);
-  guts_->pool.clear();
+void Pool::reserve(std::size_t count) {
+  if (count > max_) count = max_;
+  auto lock = base::acquire_lock(mu_);
+  while (vec_.size() < count) vec_.push_back(OwnedBuffer(size_));
 }
 
-void BufferPool::reserve(std::size_t count) {
-  if (guts_) {
-    auto lock = base::acquire_lock(guts_->mu);
-    if (count > guts_->max) count = guts_->max;
-    while (guts_->pool.size() < count) {
-      guts_->pool.push_back(OwnedBuffer(size_));
-    }
-  } else {
-    std::size_t n = 16;
-    if (n < count) n = count;
-    guts_ = std::make_shared<Guts>(n);
-  }
-}
-
-void BufferPool::give(OwnedBuffer buf) {
+void Pool::give(OwnedBuffer buf) noexcept {
+  ::bzero(buf.data(), buf.size());
   if (buf.size() != size_) {
-    LOG(DFATAL) << "BUG: This io::BufferPool only accepts " << size_
+    LOG(DFATAL) << "BUG: This io::Pool only accepts " << size_
                 << "-byte buffers, but was given a " << buf.size()
                 << "-byte buffer!";
     return;
   }
-  if (!guts_) return;
-  auto lock = base::acquire_lock(guts_->mu);
-  guts_->pool.push_back(std::move(buf));
+  auto lock = base::acquire_lock(mu_);
+  if (vec_.size() < max_) vec_.push_back(std::move(buf));
 }
 
-OwnedBuffer BufferPool::take() {
+OwnedBuffer Pool::take() {
   OwnedBuffer buf;
-  if (guts_) {
-    auto lock = base::acquire_lock(guts_->mu);
-    if (!guts_->pool.empty()) {
-      buf = std::move(guts_->pool.back());
-      guts_->pool.pop_back();
-    }
+  auto lock = base::acquire_lock(mu_);
+  if (vec_.empty()) {
+    buf = OwnedBuffer(size_);
+  } else {
+    buf = std::move(vec_.back());
+    vec_.pop_back();
   }
-  if (!buf) buf = OwnedBuffer(size_);
   return buf;
 }
 

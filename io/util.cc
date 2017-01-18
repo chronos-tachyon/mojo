@@ -19,7 +19,7 @@ struct CopyHelper {
   const Reader reader;
   const base::Options options;
   const std::size_t block_size;
-  BufferPool pool;
+  PoolPtr pool;
   OwnedBuffer buffer;
   event::Task subtask;
   std::size_t n;
@@ -35,7 +35,7 @@ struct CopyHelper {
         options(std::move(opts)),
         block_size(compute_block_size(writer, reader, options)),
         pool(choose_pool(block_size, options)),
-        buffer(pool.take()),
+        buffer(pool->take()),
         n(0),
         eof(false) {
     VLOG(6) << "io::CopyHelper::CopyHelper: max=" << max;
@@ -52,13 +52,13 @@ struct CopyHelper {
     return lcm(wblksz, rblksz);
   }
 
-  static BufferPool choose_pool(std::size_t block_size,
+  static PoolPtr choose_pool(std::size_t block_size,
                                 const base::Options& o) {
-    BufferPool pool = o.get<io::Options>().pool;
-    if (pool.buffer_size() >= block_size)
+    PoolPtr pool = o.get<io::Options>().pool;
+    if (pool && pool->buffer_size() >= block_size)
       return pool;
     else
-      return BufferPool(block_size, null_pool);
+      return make_pool(block_size, 0);
   }
 
   void begin() {

@@ -83,12 +83,12 @@ struct StringReadHelper {
   event::Task* const task;
   std::string* const out;
   event::Task subtask;
-  BufferPool pool;
+  PoolPtr pool;
   OwnedBuffer buffer;
   std::size_t n;
   bool give_back;
 
-  StringReadHelper(event::Task* t, std::string* o, BufferPool p, OwnedBuffer b,
+  StringReadHelper(event::Task* t, std::string* o, PoolPtr p, OwnedBuffer b,
                    bool g)
       : task(t),
         out(o),
@@ -99,7 +99,7 @@ struct StringReadHelper {
 
   base::Result run() {
     out->append(buffer.data(), n);
-    if (give_back) pool.give(std::move(buffer));
+    if (give_back) pool->give(std::move(buffer));
     event::propagate_result(task, &subtask);
     delete this;
     return base::Result();
@@ -114,11 +114,11 @@ void Reader::read(event::Task* task, std::string* out, std::size_t min,
   if (!task->start()) return;
   out->clear();
 
-  BufferPool pool = opts.get<io::Options>().pool;
+  PoolPtr pool = opts.get<io::Options>().pool;
   OwnedBuffer buf;
   bool give_back;
-  if (pool.pool_size() >= max) {
-    buf = pool.take();
+  if (pool && pool->size() >= max) {
+    buf = pool->take();
     give_back = true;
   } else {
     buf = OwnedBuffer(max);
