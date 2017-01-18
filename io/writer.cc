@@ -20,14 +20,6 @@
 
 namespace io {
 
-static void propagate_result(event::Task* dst, const event::Task* src) {
-  try {
-    dst->finish(src->result());
-  } catch (...) {
-    dst->finish_exception(std::current_exception());
-  }
-}
-
 bool WriterImpl::prologue(event::Task* task, std::size_t* n, const char* ptr,
                           std::size_t len) {
   CHECK_NOTNULL(task);
@@ -310,7 +302,7 @@ class BufferWriter : public WriterImpl {
     base::Result run() override {
       *buflen += *n;
       lock.unlock();
-      propagate_result(task, &subtask);
+      event::propagate_result(task, &subtask);
       return base::Result();
     }
   };

@@ -39,25 +39,6 @@ using RC = base::ResultCode;
 static constexpr std::size_t kSendfileMax = 4U << 20;  // 4 MiB
 static constexpr std::size_t kSpliceMax = 4U << 20;    // 4 MiB
 
-static void propagate_result(event::Task* dst, const event::Task* src) {
-  try {
-    dst->finish(src->result());
-  } catch (...) {
-    dst->finish_exception(std::current_exception());
-  }
-}
-
-static bool propagate_failure(event::Task* dst, const event::Task* src) {
-  try {
-    base::Result r = src->result();
-    if (r) return true;
-    dst->finish(std::move(r));
-  } catch (...) {
-    dst->finish_exception(std::current_exception());
-  }
-  return false;
-}
-
 static TransferMode default_transfer_mode() noexcept {
   return TransferMode::read_write;  // TODO: probe this on first access
 }
@@ -119,7 +100,7 @@ struct StringReadHelper {
   base::Result run() {
     out->append(buffer.data(), n);
     if (give_back) pool.give(std::move(buffer));
-    propagate_result(task, &subtask);
+    event::propagate_result(task, &subtask);
     delete this;
     return base::Result();
   }
@@ -324,7 +305,7 @@ class LimitedReader : public ReaderImpl {
       CHECK_GE(*remaining, *n);
       *remaining -= *n;
       lock.unlock();
-      if (propagate_failure(task, &subtask)) {
+      if (!event::propagate_failure(task, &subtask)) {
         if (eof)
           task->finish(base::Result::eof());
         else
@@ -432,7 +413,7 @@ class StringOrBufferReader : public ReaderImpl {
     base::Result run() override {
       *pos += *n;
       lock.unlock();
-      propagate_result(task, &subtask);
+      event::propagate_result(task, &subtask);
       return base::Result();
     }
   };
@@ -966,7 +947,7 @@ class MultiReader : public ReaderImpl {
       lock.unlock();
       bool propagated = false;
       for (std::size_t i = 0; i < size; ++i) {
-        if (!propagate_failure(task, &subtasks[i])) {
+        if (event::propagate_failure(task, &subtasks[i])) {
           propagated = true;
           break;
         }
@@ -1061,7 +1042,7 @@ bool MultiReader::Op::process(MultiReader* reader) {
   }
 
   if (code != RC::OK && code != RC::END_OF_FILE) {
-    propagate_result(task, &subtask);
+    event::propagate_result(task, &subtask);
     return true;
   }
 

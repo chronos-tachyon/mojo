@@ -243,6 +243,13 @@ class Task {
   std::vector<Task*> subtasks_;
 };
 
+// Finishes |dst| with the result of |src|.
+void propagate_result(event::Task* dst, const event::Task* src);
+
+// Finishes |dst| with the error result of |src| and returns true.
+// If |src|'s result is not an error, does NOT finish |dst| and returns false.
+bool propagate_failure(event::Task* dst, const event::Task* src);
+
 }  // namespace event
 
 #endif  // EVENT_TASK_H

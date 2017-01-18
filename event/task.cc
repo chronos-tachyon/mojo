@@ -296,4 +296,23 @@ void Task::finish_impl(base::Lock& lock) {
   lifo_callbacks(std::move(on_finish));
 }
 
+void propagate_result(event::Task* dst, const event::Task* src) {
+  try {
+    dst->finish(src->result());
+  } catch (...) {
+    dst->finish_exception(std::current_exception());
+  }
+}
+
+bool propagate_failure(event::Task* dst, const event::Task* src) {
+  try {
+    base::Result r = src->result();
+    if (r) return false;
+    dst->finish(std::move(r));
+  } catch (...) {
+    dst->finish_exception(std::current_exception());
+  }
+  return true;
+}
+
 }  // namespace event
