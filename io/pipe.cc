@@ -150,9 +150,7 @@ Pipe make_pipe(PoolPtr pool, std::size_t max_buffers) {
   return make_pipe(make_guts(std::move(pool), max_buffers));
 }
 
-Pipe make_pipe(PoolPtr pool) {
-  return make_pipe(make_guts(std::move(pool)));
-}
+Pipe make_pipe(PoolPtr pool) { return make_pipe(make_guts(std::move(pool))); }
 
 Pipe make_pipe(std::size_t buffer_size, std::size_t max_buffers) {
   return make_pipe(make_guts(buffer_size, max_buffers));
