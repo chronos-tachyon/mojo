@@ -41,6 +41,18 @@ using RC = base::ResultCode;
 static constexpr std::size_t kSendfileMax = 4U << 20;  // 4 MiB
 static constexpr std::size_t kSpliceMax = 4U << 20;    // 4 MiB
 
+static constexpr bool s16_holds_smallest() {
+  return std::numeric_limits<int16_t>::min() < -0x7fff;
+}
+
+static constexpr bool s32_holds_smallest() {
+  return std::numeric_limits<int32_t>::min() < -0x7fffffff;
+}
+
+static constexpr bool s64_holds_smallest() {
+  return std::numeric_limits<int64_t>::min() < -0x7fffffffffffffffLL;
+}
+
 static TransferMode default_transfer_mode() noexcept {
   return TransferMode::read_write;  // TODO: probe this on first access
 }
@@ -137,6 +149,502 @@ void Reader::read(event::Task* task, std::string* out, std::size_t min,
   helper->subtask.on_finished(event::callback(closure));
 }
 
+void Reader::read_u8(event::Task* task, uint8_t* out,
+                     const base::Options& opts) const {
+  struct Helper : public event::Callback {
+    event::Task subtask;
+    event::Task* const task;
+    uint8_t* out;
+    char lone;
+    std::size_t n;
+
+    Helper(event::Task* t, uint8_t* o) noexcept : task(t),
+                                                  out(o),
+                                                  lone(0),
+                                                  n(0) {}
+
+    base::Result run() override {
+      // TODO: consider adding ReaderImpl::unread() [default not_implemented] to
+      // avoid data loss in the error result case
+      *out = *reinterpret_cast<const unsigned char*>(&lone);
+      event::propagate_result(task, &subtask);
+      return base::Result();
+    }
+  };
+
+  CHECK_NOTNULL(task);
+  CHECK_NOTNULL(out);
+  if (!task->start()) return;
+  *out = 0;
+
+  auto helper = base::backport::make_unique<Helper>(task, out);
+  auto* h = helper.get();
+  task->add_subtask(&h->subtask);
+  read(&h->subtask, &h->lone, &h->n, 1, 1, opts);
+  h->subtask.on_finished(std::move(helper));
+}
+
+void Reader::read_u16(event::Task* task, uint16_t* out,
+                      const base::Endian* endian,
+                      const base::Options& opts) const {
+  struct Helper : public event::Callback {
+    event::Task subtask;
+    event::Task* const task;
+    uint16_t* const out;
+    const base::Endian* const endian;
+    char buf[2];
+    std::size_t n;
+
+    Helper(event::Task* t, uint16_t* o, const base::Endian* e) noexcept
+        : task(t),
+          out(o),
+          endian(e),
+          n(0) {}
+
+    base::Result run() override {
+      // TODO: consider adding ReaderImpl::unread() [default not_implemented] to
+      // avoid data loss in the error result case
+      if (event::propagate_failure(task, &subtask)) return base::Result();
+      *out = endian->get_u16(buf);
+      task->finish_ok();
+      return base::Result();
+    }
+  };
+
+  CHECK_NOTNULL(task);
+  CHECK_NOTNULL(out);
+  CHECK_NOTNULL(endian);
+  if (!task->start()) return;
+  *out = 0;
+
+  auto helper = base::backport::make_unique<Helper>(task, out, endian);
+  auto* h = helper.get();
+  task->add_subtask(&h->subtask);
+  read(&h->subtask, h->buf, &h->n, 2, 2, opts);
+  h->subtask.on_finished(std::move(helper));
+}
+
+void Reader::read_u32(event::Task* task, uint32_t* out,
+                      const base::Endian* endian,
+                      const base::Options& opts) const {
+  struct Helper : public event::Callback {
+    event::Task subtask;
+    event::Task* const task;
+    uint32_t* const out;
+    const base::Endian* const endian;
+    char buf[4];
+    std::size_t n;
+
+    Helper(event::Task* t, uint32_t* o, const base::Endian* e) noexcept
+        : task(t),
+          out(o),
+          endian(e),
+          n(0) {}
+
+    base::Result run() override {
+      // TODO: consider adding ReaderImpl::unread() [default not_implemented] to
+      // avoid data loss in the error result case
+      if (event::propagate_failure(task, &subtask)) return base::Result();
+      *out = endian->get_u32(buf);
+      task->finish_ok();
+      return base::Result();
+    }
+  };
+
+  CHECK_NOTNULL(task);
+  CHECK_NOTNULL(out);
+  CHECK_NOTNULL(endian);
+  if (!task->start()) return;
+  *out = 0;
+
+  auto helper = base::backport::make_unique<Helper>(task, out, endian);
+  auto* h = helper.get();
+  task->add_subtask(&h->subtask);
+  read(&h->subtask, h->buf, &h->n, 4, 4, opts);
+  h->subtask.on_finished(std::move(helper));
+}
+
+void Reader::read_u64(event::Task* task, uint64_t* out,
+                      const base::Endian* endian,
+                      const base::Options& opts) const {
+  struct Helper : public event::Callback {
+    event::Task subtask;
+    event::Task* const task;
+    uint64_t* const out;
+    const base::Endian* const endian;
+    char buf[8];
+    std::size_t n;
+
+    Helper(event::Task* t, uint64_t* o, const base::Endian* e) noexcept
+        : task(t),
+          out(o),
+          endian(e),
+          n(0) {}
+
+    base::Result run() override {
+      // TODO: consider adding ReaderImpl::unread() [default not_implemented] to
+      // avoid data loss in the error result case
+      if (event::propagate_failure(task, &subtask)) return base::Result();
+      *out = endian->get_u64(buf);
+      task->finish_ok();
+      return base::Result();
+    }
+  };
+
+  CHECK_NOTNULL(task);
+  CHECK_NOTNULL(out);
+  CHECK_NOTNULL(endian);
+  if (!task->start()) return;
+  *out = 0;
+
+  auto helper = base::backport::make_unique<Helper>(task, out, endian);
+  auto* h = helper.get();
+  task->add_subtask(&h->subtask);
+  read(&h->subtask, h->buf, &h->n, 8, 8, opts);
+  h->subtask.on_finished(std::move(helper));
+}
+
+void Reader::read_s8(event::Task* task, int8_t* out,
+                     const base::Options& opts) const {
+  struct Helper : public event::Callback {
+    event::Task subtask;
+    event::Task* const task;
+    int8_t* out;
+    char lone;
+    std::size_t n;
+
+    Helper(event::Task* t, int8_t* o) noexcept : task(t),
+                                                 out(o),
+                                                 lone(0),
+                                                 n(0) {}
+
+    base::Result run() override {
+      // TODO: consider adding ReaderImpl::unread() [default not_implemented] to
+      // avoid data loss in the error result case
+      uint8_t tmp = *reinterpret_cast<const unsigned char*>(&lone);
+      static constexpr uint8_t K = uint8_t(1U) << 7;
+      if (tmp < K)
+        *out = tmp;
+      else
+        *out = -int8_t(~tmp) - 1;
+      event::propagate_result(task, &subtask);
+      return base::Result();
+    }
+  };
+
+  CHECK_NOTNULL(task);
+  CHECK_NOTNULL(out);
+  if (!task->start()) return;
+  *out = 0;
+
+  auto helper = base::backport::make_unique<Helper>(task, out);
+  auto* h = helper.get();
+  task->add_subtask(&h->subtask);
+  read(&h->subtask, &h->lone, &h->n, 1, 1, opts);
+  h->subtask.on_finished(std::move(helper));
+}
+
+void Reader::read_s16(event::Task* task, int16_t* out,
+                      const base::Endian* endian,
+                      const base::Options& opts) const {
+  struct Helper : public event::Callback {
+    event::Task subtask;
+    event::Task* const task;
+    int16_t* const out;
+    const base::Endian* const endian;
+    char buf[2];
+    std::size_t n;
+
+    Helper(event::Task* t, int16_t* o, const base::Endian* e) noexcept
+        : task(t),
+          out(o),
+          endian(e),
+          n(0) {}
+
+    base::Result run() override {
+      // TODO: consider adding ReaderImpl::unread() [default not_implemented] to
+      // avoid data loss in the error result case
+      if (event::propagate_failure(task, &subtask)) return base::Result();
+      uint16_t tmp = endian->get_u16(buf);
+      static constexpr uint16_t K = uint16_t(1U) << 15;
+      if (tmp == K && !s16_holds_smallest()) {
+        task->finish(base::Result::out_of_range(
+            "int16_t cannot hold -2**15 on this platform"));
+        return base::Result();
+      }
+      if (tmp < K)
+        *out = tmp;
+      else
+        *out = -int16_t(~tmp) - 1;
+      task->finish_ok();
+      return base::Result();
+    }
+  };
+
+  CHECK_NOTNULL(task);
+  CHECK_NOTNULL(out);
+  CHECK_NOTNULL(endian);
+  if (!task->start()) return;
+  *out = 0;
+
+  auto helper = base::backport::make_unique<Helper>(task, out, endian);
+  auto* h = helper.get();
+  task->add_subtask(&h->subtask);
+  read(&h->subtask, h->buf, &h->n, 2, 2, opts);
+  h->subtask.on_finished(std::move(helper));
+}
+
+void Reader::read_s32(event::Task* task, int32_t* out,
+                      const base::Endian* endian,
+                      const base::Options& opts) const {
+  struct Helper : public event::Callback {
+    event::Task subtask;
+    event::Task* const task;
+    int32_t* const out;
+    const base::Endian* const endian;
+    char buf[4];
+    std::size_t n;
+
+    Helper(event::Task* t, int32_t* o, const base::Endian* e) noexcept
+        : task(t),
+          out(o),
+          endian(e),
+          n(0) {}
+
+    base::Result run() override {
+      // TODO: consider adding ReaderImpl::unread() [default not_implemented] to
+      // avoid data loss in the error result case
+      if (event::propagate_failure(task, &subtask)) return base::Result();
+      uint32_t tmp = endian->get_u32(buf);
+      static constexpr uint32_t K = uint32_t(1U) << 31;
+      if (tmp == K && !s32_holds_smallest()) {
+        task->finish(base::Result::out_of_range(
+            "int32_t cannot hold -2**31 on this platform"));
+        return base::Result();
+      }
+      if (tmp < K)
+        *out = tmp;
+      else
+        *out = -int32_t(~tmp) - 1;
+      task->finish_ok();
+      return base::Result();
+    }
+  };
+
+  CHECK_NOTNULL(task);
+  CHECK_NOTNULL(out);
+  CHECK_NOTNULL(endian);
+  if (!task->start()) return;
+  *out = 0;
+
+  auto helper = base::backport::make_unique<Helper>(task, out, endian);
+  auto* h = helper.get();
+  task->add_subtask(&h->subtask);
+  read(&h->subtask, h->buf, &h->n, 4, 4, opts);
+  h->subtask.on_finished(std::move(helper));
+}
+
+void Reader::read_s64(event::Task* task, int64_t* out,
+                      const base::Endian* endian,
+                      const base::Options& opts) const {
+  struct Helper : public event::Callback {
+    event::Task subtask;
+    event::Task* const task;
+    int64_t* const out;
+    const base::Endian* const endian;
+    char buf[8];
+    std::size_t n;
+
+    Helper(event::Task* t, int64_t* o, const base::Endian* e) noexcept
+        : task(t),
+          out(o),
+          endian(e),
+          n(0) {}
+
+    base::Result run() override {
+      // TODO: consider adding ReaderImpl::unread() [default not_implemented] to
+      // avoid data loss in the error result case
+      if (event::propagate_failure(task, &subtask)) return base::Result();
+      uint64_t tmp = endian->get_u64(buf);
+      static constexpr uint64_t K = uint64_t(1U) << 63;
+      if (tmp == K && !s64_holds_smallest()) {
+        task->finish(base::Result::out_of_range(
+            "int64_t cannot hold -2**63 on this platform"));
+        return base::Result();
+      }
+      if (tmp < K)
+        *out = tmp;
+      else
+        *out = -int64_t(~tmp) - 1;
+      task->finish_ok();
+      return base::Result();
+    }
+  };
+
+  CHECK_NOTNULL(task);
+  CHECK_NOTNULL(out);
+  CHECK_NOTNULL(endian);
+  if (!task->start()) return;
+  *out = 0;
+
+  auto helper = base::backport::make_unique<Helper>(task, out, endian);
+  auto* h = helper.get();
+  task->add_subtask(&h->subtask);
+  read(&h->subtask, h->buf, &h->n, 8, 8, opts);
+  h->subtask.on_finished(std::move(helper));
+}
+
+void Reader::read_uvarint(event::Task* task, uint64_t* out,
+                          const base::Options& opts) const {
+  struct Helper {
+    event::Task subtask;
+    const Reader reader;
+    event::Task* const task;
+    uint64_t* const out;
+    const base::Options options;
+    char buf[10];
+    std::size_t n;
+    std::size_t x;
+
+    Helper(Reader r, event::Task* t, uint64_t* o, base::Options opts) noexcept
+        : reader(std::move(r)),
+          task(t),
+          out(o),
+          options(std::move(opts)),
+          n(0),
+          x(0) {
+      ::bzero(buf, sizeof(buf));
+    }
+
+    void next() {
+      task->add_subtask(&subtask);
+      reader.read(&subtask, buf + x, &n, 1, 1, options);
+      subtask.on_finished(event::callback([this] {
+        read_complete();
+        return base::Result();
+      }));
+    }
+
+    void read_complete() {
+      auto destroy = base::cleanup([this] { delete this; });
+
+      // TODO: consider adding ReaderImpl::unread() [default not_implemented]
+      // to avoid data loss in the error result case
+      if (event::propagate_failure(task, &subtask)) return;
+
+      const auto* p = reinterpret_cast<const unsigned char*>(&buf);
+      if ((p[x] & 0x80U) == 0) {
+        using W = uint64_t;
+        *out = W(p[0] & 0x7fU) | (W(p[1] & 0x7fU) << 7) |
+               (W(p[2] & 0x7fU) << 14) | (W(p[3] & 0x7fU) << 21) |
+               (W(p[4] & 0x7fU) << 28) | (W(p[5] & 0x7fU) << 35) |
+               (W(p[6] & 0x7fU) << 42) | (W(p[7] & 0x7fU) << 49) |
+               (W(p[8] & 0x7fU) << 56) | (W(p[9] & 0x01U) << 63);
+        task->finish_ok();
+        return;
+      }
+
+      ++x;
+      if (x >= sizeof(buf)) {
+        task->finish(base::Result::data_loss("invalid varint byte sequence"));
+        return;
+      }
+
+      destroy.cancel();
+      subtask.reset();
+      next();
+    }
+  };
+
+  CHECK_NOTNULL(task);
+  CHECK_NOTNULL(out);
+  if (!task->start()) return;
+  *out = 0;
+
+  auto* h = new Helper(*this, task, out, opts);
+  h->next();
+}
+
+void Reader::read_svarint(event::Task* task, int64_t* out,
+                          const base::Options& opts) const {
+  struct Helper : public event::Callback {
+    event::Task subtask;
+    event::Task* const task;
+    int64_t* const out;
+    uint64_t tmp;
+
+    Helper(event::Task* t, int64_t* o) noexcept : task(t), out(o) {}
+
+    base::Result run() override {
+      if (!event::propagate_failure(task, &subtask)) {
+        static constexpr uint64_t K = uint64_t(1U) << 63;
+        if (tmp == K && !s64_holds_smallest()) {
+          task->finish(base::Result::out_of_range(
+              "int64_t cannot hold -2**63 on this platform"));
+        } else {
+          if (tmp < K)
+            *out = tmp;
+          else
+            *out = -int64_t(~tmp) - 1;
+          task->finish_ok();
+        }
+      }
+      return base::Result();
+    }
+  };
+
+  CHECK_NOTNULL(task);
+  CHECK_NOTNULL(out);
+  if (!task->start()) return;
+  *out = 0;
+
+  auto helper = base::backport::make_unique<Helper>(task, out);
+  auto* h = helper.get();
+  task->add_subtask(&h->subtask);
+  read_uvarint(&h->subtask, &h->tmp, opts);
+  h->subtask.on_finished(std::move(helper));
+}
+
+void Reader::read_svarint_zigzag(event::Task* task, int64_t* out,
+                                 const base::Options& opts) const {
+  struct Helper : public event::Callback {
+    event::Task subtask;
+    event::Task* const task;
+    int64_t* const out;
+    uint64_t tmp;
+
+    Helper(event::Task* t, int64_t* o) noexcept : task(t), out(o) {}
+
+    base::Result run() override {
+      if (!event::propagate_failure(task, &subtask)) {
+        static constexpr uint64_t K = 0xffffffffffffffffULL;
+        if (tmp == K && !s64_holds_smallest()) {
+          task->finish(base::Result::out_of_range(
+              "int64_t cannot hold -2**63 on this platform"));
+        } else {
+          if (tmp & 1)
+            *out = -int64_t(tmp >> 1) - 1;
+          else
+            *out = int64_t(tmp >> 1);
+          task->finish_ok();
+        }
+      }
+      return base::Result();
+    }
+  };
+
+  CHECK_NOTNULL(task);
+  CHECK_NOTNULL(out);
+  if (!task->start()) return;
+  *out = 0;
+
+  auto helper = base::backport::make_unique<Helper>(task, out);
+  auto* h = helper.get();
+  task->add_subtask(&h->subtask);
+  read_uvarint(&h->subtask, &h->tmp, opts);
+  h->subtask.on_finished(std::move(helper));
+}
+
 base::Result Reader::read(char* out, std::size_t* n, std::size_t min,
                           std::size_t max, const base::Options& opts) const {
   event::Task task;
@@ -149,6 +657,92 @@ base::Result Reader::read(std::string* out, std::size_t min, std::size_t max,
                           const base::Options& opts) const {
   event::Task task;
   read(&task, out, min, max, opts);
+  event::wait(get_manager(opts), &task);
+  return task.result();
+}
+
+base::Result Reader::read_u8(uint8_t* out, const base::Options& opts) const {
+  event::Task task;
+  read_u8(&task, out, opts);
+  event::wait(get_manager(opts), &task);
+  return task.result();
+}
+
+base::Result Reader::read_u16(uint16_t* out, const base::Endian* endian,
+                              const base::Options& opts) const {
+  event::Task task;
+  read_u16(&task, out, endian, opts);
+  event::wait(get_manager(opts), &task);
+  return task.result();
+}
+
+base::Result Reader::read_u32(uint32_t* out, const base::Endian* endian,
+                              const base::Options& opts) const {
+  event::Task task;
+  read_u32(&task, out, endian, opts);
+  event::wait(get_manager(opts), &task);
+  return task.result();
+}
+
+base::Result Reader::read_u64(uint64_t* out, const base::Endian* endian,
+                              const base::Options& opts) const {
+  event::Task task;
+  read_u64(&task, out, endian, opts);
+  event::wait(get_manager(opts), &task);
+  return task.result();
+}
+
+base::Result Reader::read_s8(int8_t* out, const base::Options& opts) const {
+  event::Task task;
+  read_s8(&task, out, opts);
+  event::wait(get_manager(opts), &task);
+  return task.result();
+}
+
+base::Result Reader::read_s16(int16_t* out, const base::Endian* endian,
+                              const base::Options& opts) const {
+  event::Task task;
+  read_s16(&task, out, endian, opts);
+  event::wait(get_manager(opts), &task);
+  return task.result();
+}
+
+base::Result Reader::read_s32(int32_t* out, const base::Endian* endian,
+                              const base::Options& opts) const {
+  event::Task task;
+  read_s32(&task, out, endian, opts);
+  event::wait(get_manager(opts), &task);
+  return task.result();
+}
+
+base::Result Reader::read_s64(int64_t* out, const base::Endian* endian,
+                              const base::Options& opts) const {
+  event::Task task;
+  read_s64(&task, out, endian, opts);
+  event::wait(get_manager(opts), &task);
+  return task.result();
+}
+
+base::Result Reader::read_uvarint(uint64_t* out,
+                                  const base::Options& opts) const {
+  event::Task task;
+  read_uvarint(&task, out, opts);
+  event::wait(get_manager(opts), &task);
+  return task.result();
+}
+
+base::Result Reader::read_svarint(int64_t* out,
+                                  const base::Options& opts) const {
+  event::Task task;
+  read_svarint(&task, out, opts);
+  event::wait(get_manager(opts), &task);
+  return task.result();
+}
+
+base::Result Reader::read_svarint_zigzag(int64_t* out,
+                                         const base::Options& opts) const {
+  event::Task task;
+  read_svarint_zigzag(&task, out, opts);
   event::wait(get_manager(opts), &task);
   return task.result();
 }
@@ -1237,9 +1831,7 @@ Reader bufferedreader(Reader r, std::size_t buffer_size,
   return make_bufferedreader(std::move(r), buffer_size, max_buffers);
 }
 
-Reader bufferedreader(Reader r) {
-  return make_bufferedreader(std::move(r));
-}
+Reader bufferedreader(Reader r) { return make_bufferedreader(std::move(r)); }
 
 base::Result reader_closed() {
   return base::Result::from_errno(EBADF, "io::Reader is closed");

@@ -943,89 +943,251 @@ TEST(MultiReader, Threaded) {
 // BufferedReader {{{
 
 static void TestBufferedReader(const base::Options& o, const char* what) {
-  base::Pipe pipe;
-  ASSERT_OK(base::make_pipe(&pipe));
+  std::string path;
+  base::FD fd;
+  ASSERT_OK(
+      base::make_tempfile(&path, &fd, "io_reader_TestBufferedReader_XXXXXXXX"));
+  auto cleanup = base::cleanup([&path] { ::unlink(path.c_str()); });
 
-  LOG(INFO) << "made pipes";
+  constexpr unsigned char kBytes[] = {
+      0x00,                                            // 8-bit datum #0
+      0x7f,                                            // 8-bit datum #1
+      0x81,                                            // 8-bit datum #2
+      0xff,                                            // 8-bit datum #3
+      0x00, 0x00,                                      // 16-bit datum #0
+      0x7f, 0xff,                                      // 16-bit datum #1
+      0x80, 0x01,                                      // 16-bit datum #2
+      0xff, 0xff,                                      // 16-bit datum #3
+      0x00, 0x00, 0x00, 0x00,                          // 32-bit datum #0
+      0x7f, 0xff, 0xff, 0xff,                          // 32-bit datum #1
+      0x80, 0x00, 0x00, 0x01,                          // 32-bit datum #2
+      0xff, 0xff, 0xff, 0xff,                          // 32-bit datum #3
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  // 64-bit datum #0
+      0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,  // 64-bit datum #1
+      0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,  // 64-bit datum #2
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,  // 64-bit datum #3
+  };
+  const char* ptr = reinterpret_cast<const char*>(kBytes);
+  std::size_t len = sizeof(kBytes);
+  ASSERT_OK(base::write_exactly(fd, ptr, len, path.c_str()));
+  ASSERT_OK(base::seek(nullptr, fd, 0, SEEK_SET));
 
-  std::mutex mu;
-  std::condition_variable cv;
-  std::size_t x = 0, y = 0;
+  io::Reader r = io::bufferedreader(io::fdreader(fd));
 
-  std::thread t1([&pipe, &mu, &cv, &x, &y] {
-    auto lock = base::acquire_lock(mu);
+  uint8_t u8 = 0;
+  EXPECT_OK(r.read_u8(&u8, o));
+  EXPECT_EQ(0x00U, u8);
+  EXPECT_OK(r.read_u8(&u8, o));
+  EXPECT_EQ(0x7fU, u8);
+  EXPECT_OK(r.read_u8(&u8, o));
+  EXPECT_EQ(0x81U, u8);
+  EXPECT_OK(r.read_u8(&u8, o));
+  EXPECT_EQ(0xffU, u8);
 
-    while (x < 1) cv.wait(lock);
-    LOG(INFO) << "T1 awoken: x = " << x;
-    EXPECT_OK(base::write_exactly(pipe.write, "abcd", 4, "pipe"));
-    LOG(INFO) << "wrote: abcd";
+  uint16_t u16 = 0;
+  EXPECT_OK(r.read_u16(&u16, base::kBigEndian, o));
+  EXPECT_EQ(0x0000U, u16);
+  EXPECT_OK(r.read_u16(&u16, base::kBigEndian, o));
+  EXPECT_EQ(0x7fffU, u16);
+  EXPECT_OK(r.read_u16(&u16, base::kBigEndian, o));
+  EXPECT_EQ(0x8001U, u16);
+  EXPECT_OK(r.read_u16(&u16, base::kBigEndian, o));
+  EXPECT_EQ(0xffffU, u16);
 
-    while (x < 2) cv.wait(lock);
-    LOG(INFO) << "T1 awoken: x = " << x;
-    EXPECT_OK(base::write_exactly(pipe.write, "efgh", 4, "pipe"));
-    LOG(INFO) << "wrote: efgh";
+  uint32_t u32 = 0;
+  EXPECT_OK(r.read_u32(&u32, base::kBigEndian, o));
+  EXPECT_EQ(0x00000000U, u32);
+  EXPECT_OK(r.read_u32(&u32, base::kBigEndian, o));
+  EXPECT_EQ(0x7fffffffU, u32);
+  EXPECT_OK(r.read_u32(&u32, base::kBigEndian, o));
+  EXPECT_EQ(0x80000001U, u32);
+  EXPECT_OK(r.read_u32(&u32, base::kBigEndian, o));
+  EXPECT_EQ(0xffffffffU, u32);
 
-    ++y;
-    cv.notify_all();
-    LOG(INFO) << "woke T0: y = " << y;
+  uint64_t u64 = 0;
+  EXPECT_OK(r.read_u64(&u64, base::kBigEndian, o));
+  EXPECT_EQ(0x0000000000000000ULL, u64);
+  EXPECT_OK(r.read_u64(&u64, base::kBigEndian, o));
+  EXPECT_EQ(0x7fffffffffffffffULL, u64);
+  EXPECT_OK(r.read_u64(&u64, base::kBigEndian, o));
+  EXPECT_EQ(0x8000000000000001ULL, u64);
+  EXPECT_OK(r.read_u64(&u64, base::kBigEndian, o));
+  EXPECT_EQ(0xffffffffffffffffULL, u64);
 
-    while (x < 3) cv.wait(lock);
-    LOG(INFO) << "T1 awoken: x = " << x;
-    EXPECT_OK(base::write_exactly(pipe.write, "ijkl", 4, "pipe"));
-    LOG(INFO) << "wrote: ijkl";
-  });
+  EXPECT_EOF(r.read_u8(&u8, o));
 
-  LOG(INFO) << "spawned thread";
+  ASSERT_OK(base::seek(nullptr, fd, 0, SEEK_SET));
+  r = io::bufferedreader(io::fdreader(fd));
 
-  io::Reader r = io::bufferedreader(io::fdreader(pipe.read), 4U, 4U);
+  int8_t s8 = 0;
+  EXPECT_OK(r.read_s8(&s8, o));
+  EXPECT_EQ(0x00, s8);
+  EXPECT_OK(r.read_s8(&s8, o));
+  EXPECT_EQ(0x7f, s8);
+  EXPECT_OK(r.read_s8(&s8, o));
+  EXPECT_EQ(-0x7f, s8);
+  EXPECT_OK(r.read_s8(&s8, o));
+  EXPECT_EQ(-0x01, s8);
 
-  LOG(INFO) << "made bufferedreader";
+  int16_t s16 = 0;
+  EXPECT_OK(r.read_s16(&s16, base::kBigEndian, o));
+  EXPECT_EQ(0x0000, s16);
+  EXPECT_OK(r.read_s16(&s16, base::kBigEndian, o));
+  EXPECT_EQ(0x7fff, s16);
+  EXPECT_OK(r.read_s16(&s16, base::kBigEndian, o));
+  EXPECT_EQ(-0x7fff, s16);
+  EXPECT_OK(r.read_s16(&s16, base::kBigEndian, o));
+  EXPECT_EQ(-0x0001, s16);
 
-  char buf[8];
-  std::size_t n;
+  int32_t s32 = 0;
+  EXPECT_OK(r.read_s32(&s32, base::kBigEndian, o));
+  EXPECT_EQ(0x00000000, s32);
+  EXPECT_OK(r.read_s32(&s32, base::kBigEndian, o));
+  EXPECT_EQ(0x7fffffff, s32);
+  EXPECT_OK(r.read_s32(&s32, base::kBigEndian, o));
+  EXPECT_EQ(-0x7fffffff, s32);
+  EXPECT_OK(r.read_s32(&s32, base::kBigEndian, o));
+  EXPECT_EQ(-0x00000001, s32);
 
-  EXPECT_OK(r.read(buf, &n, 0, 8, o));
-  EXPECT_EQ(0U, n);
-  LOG(INFO) << "read zero bytes";
+  int64_t s64 = 0;
+  EXPECT_OK(r.read_s64(&s64, base::kBigEndian, o));
+  EXPECT_EQ(0x0000000000000000LL, s64);
+  EXPECT_OK(r.read_s64(&s64, base::kBigEndian, o));
+  EXPECT_EQ(0x7fffffffffffffffLL, s64);
+  EXPECT_OK(r.read_s64(&s64, base::kBigEndian, o));
+  EXPECT_EQ(-0x7fffffffffffffffLL, s64);
+  EXPECT_OK(r.read_s64(&s64, base::kBigEndian, o));
+  EXPECT_EQ(-0x0000000000000001LL, s64);
 
-  auto lock = base::acquire_lock(mu);
-  ++x;
-  cv.notify_all();
-  LOG(INFO) << "woke T1: x = " << x;
-  lock.unlock();
+  EXPECT_EOF(r.read_u8(&u8, o));
 
-  LOG(INFO) << "initiating read #1";
-  EXPECT_OK(r.read(buf, &n, 1, 8, o));
-  LOG(INFO) << "read #1 complete";
-  EXPECT_EQ(4U, n);
-  EXPECT_EQ("abcd", std::string(buf, n));
+  ASSERT_OK(base::seek(nullptr, fd, 0, SEEK_SET));
+  {
+    auto fdpair = fd->acquire_fd();
+    ASSERT_EQ(0, ::ftruncate(fdpair.first, 0));
+  }
 
-  lock.lock();
-  ++x;
-  cv.notify_all();
-  LOG(INFO) << "woke T1: x = " << x;
-  while (y < 1) cv.wait(lock);
-  LOG(INFO) << "T0 awoken: y = " << y;
-  lock.unlock();
+  constexpr unsigned char kVarintBytes[] = {
+      0x00,              // 0, 0, 0
+      0x01,              // 1, 1, -1
+      0x02,              // 2, 2, 1
+      0x03,              // 3, 3, -2
+      0x04,              // 4, 4, 2
+      0x7f,              // 127, 127, -64
+      0xac, 0x02,        // 300, 300, 150
+      0xff, 0x7f,        // 16383, 16383, -8192
+      0xff, 0xff, 0x03,  // 65535, 65535, -32768
+      0xfe, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0x01,  // UINT64MAX - 1, -2, INT64MAX
+  };
 
-  event::Task task;
-  LOG(INFO) << "initiating read #2";
-  r.read(&task, buf, &n, 8, 8, o);
+  ptr = reinterpret_cast<const char*>(kVarintBytes);
+  len = sizeof(kVarintBytes);
+  ASSERT_OK(base::write_exactly(fd, ptr, len, path.c_str()));
+  ASSERT_OK(base::seek(nullptr, fd, 0, SEEK_SET));
 
-  lock.lock();
-  ++x;
-  cv.notify_all();
-  LOG(INFO) << "woke T1: x = " << x;
-  lock.unlock();
+  r = io::bufferedreader(io::fdreader(fd));
 
-  event::wait(io::get_manager(o), &task);
-  LOG(INFO) << "read #2 complete";
-  EXPECT_OK(task.result());
-  EXPECT_EQ(8U, n);
-  EXPECT_EQ("efghijkl", std::string(buf, n));
+  EXPECT_OK(r.read_uvarint(&u64, o));
+  EXPECT_EQ(0U, u64);
+  EXPECT_OK(r.read_uvarint(&u64, o));
+  EXPECT_EQ(1U, u64);
+  EXPECT_OK(r.read_uvarint(&u64, o));
+  EXPECT_EQ(2U, u64);
+  EXPECT_OK(r.read_uvarint(&u64, o));
+  EXPECT_EQ(3U, u64);
+  EXPECT_OK(r.read_uvarint(&u64, o));
+  EXPECT_EQ(4U, u64);
+  EXPECT_OK(r.read_uvarint(&u64, o));
+  EXPECT_EQ(127U, u64);
+  EXPECT_OK(r.read_uvarint(&u64, o));
+  EXPECT_EQ(300U, u64);
+  EXPECT_OK(r.read_uvarint(&u64, o));
+  EXPECT_EQ(16383U, u64);
+  EXPECT_OK(r.read_uvarint(&u64, o));
+  EXPECT_EQ(65535U, u64);
+  EXPECT_OK(r.read_uvarint(&u64, o));
+  EXPECT_EQ(0xfffffffffffffffeULL, u64);
 
-  t1.join();
+  EXPECT_EOF(r.read_uvarint(&u64, o));
+
+  ASSERT_OK(base::seek(nullptr, fd, 0, SEEK_SET));
+  r = io::bufferedreader(io::fdreader(fd));
+
+  EXPECT_OK(r.read_svarint(&s64, o));
+  EXPECT_EQ(0, s64);
+  EXPECT_OK(r.read_svarint(&s64, o));
+  EXPECT_EQ(1, s64);
+  EXPECT_OK(r.read_svarint(&s64, o));
+  EXPECT_EQ(2, s64);
+  EXPECT_OK(r.read_svarint(&s64, o));
+  EXPECT_EQ(3, s64);
+  EXPECT_OK(r.read_svarint(&s64, o));
+  EXPECT_EQ(4, s64);
+  EXPECT_OK(r.read_svarint(&s64, o));
+  EXPECT_EQ(127, s64);
+  EXPECT_OK(r.read_svarint(&s64, o));
+  EXPECT_EQ(300, s64);
+  EXPECT_OK(r.read_svarint(&s64, o));
+  EXPECT_EQ(16383, s64);
+  EXPECT_OK(r.read_svarint(&s64, o));
+  EXPECT_EQ(65535, s64);
+  EXPECT_OK(r.read_svarint(&s64, o));
+  EXPECT_EQ(-2, s64);
+
+  EXPECT_EOF(r.read_svarint(&s64, o));
+
+  ASSERT_OK(base::seek(nullptr, fd, 0, SEEK_SET));
+  r = io::bufferedreader(io::fdreader(fd));
+
+  EXPECT_OK(r.read_svarint_zigzag(&s64, o));
+  EXPECT_EQ(0, s64);
+  EXPECT_OK(r.read_svarint_zigzag(&s64, o));
+  EXPECT_EQ(-1, s64);
+  EXPECT_OK(r.read_svarint_zigzag(&s64, o));
+  EXPECT_EQ(1, s64);
+  EXPECT_OK(r.read_svarint_zigzag(&s64, o));
+  EXPECT_EQ(-2, s64);
+  EXPECT_OK(r.read_svarint_zigzag(&s64, o));
+  EXPECT_EQ(2, s64);
+  EXPECT_OK(r.read_svarint_zigzag(&s64, o));
+  EXPECT_EQ(-64, s64);
+  EXPECT_OK(r.read_svarint_zigzag(&s64, o));
+  EXPECT_EQ(150, s64);
+  EXPECT_OK(r.read_svarint_zigzag(&s64, o));
+  EXPECT_EQ(-8192, s64);
+  EXPECT_OK(r.read_svarint_zigzag(&s64, o));
+  EXPECT_EQ(-32768, s64);
+  EXPECT_OK(r.read_svarint_zigzag(&s64, o));
+  EXPECT_EQ(0x7fffffffffffffffLL, s64);
+
+  EXPECT_EOF(r.read_svarint_zigzag(&s64, o));
+
   base::log_flush();
+}
+
+TEST(BufferedReader, Inline) {
+  event::ManagerOptions mo;
+  mo.set_inline_mode();
+  event::Manager m;
+  ASSERT_OK(event::new_manager(&m, mo));
+
+  base::Options o;
+  o.get<io::Options>().manager = m;
+  TestBufferedReader(o, "inline");
+  m.shutdown();
+}
+
+TEST(BufferedReader, Async) {
+  event::ManagerOptions mo;
+  mo.set_async_mode();
+  event::Manager m;
+  ASSERT_OK(event::new_manager(&m, mo));
+
+  base::Options o;
+  o.get<io::Options>().manager = m;
+  TestBufferedReader(o, "async");
+  m.shutdown();
 }
 
 TEST(BufferedReader, Threaded) {
@@ -1045,7 +1207,4 @@ TEST(BufferedReader, Threaded) {
 // }}}
 
 static void init() __attribute__((constructor));
-static void init() {
-  base::log_single_threaded();
-  base::log_stderr_set_level(VLOG_LEVEL(6));
-}
+static void init() { base::log_stderr_set_level(VLOG_LEVEL(6)); }

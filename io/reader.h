@@ -11,6 +11,7 @@
 #include <limits>
 #include <type_traits>
 
+#include "base/endian.h"
 #include "base/fd.h"
 #include "base/result.h"
 #include "event/task.h"
@@ -279,6 +280,68 @@ class Reader {
       const base::Options& opts = base::default_options()) const {
     return read(out, len, len, opts);
   }
+
+  // }}}
+  // Read a single integer {{{
+
+  // Reads a single 1-, 2-, 4-, or 8-byte unsigned integer.
+  void read_u8(event::Task* task, uint8_t* out,
+               const base::Options& opts = base::default_options()) const;
+  void read_u16(event::Task* task, uint16_t* out, const base::Endian* endian,
+                const base::Options& opts = base::default_options()) const;
+  void read_u32(event::Task* task, uint32_t* out, const base::Endian* endian,
+                const base::Options& opts = base::default_options()) const;
+  void read_u64(event::Task* task, uint64_t* out, const base::Endian* endian,
+                const base::Options& opts = base::default_options()) const;
+
+  // Reads a single 1-, 2-, 4-, or 8-byte signed 2's-complement integer.
+  void read_s8(event::Task* task, int8_t* out,
+               const base::Options& opts = base::default_options()) const;
+  void read_s16(event::Task* task, int16_t* out, const base::Endian* endian,
+                const base::Options& opts = base::default_options()) const;
+  void read_s32(event::Task* task, int32_t* out, const base::Endian* endian,
+                const base::Options& opts = base::default_options()) const;
+  void read_s64(event::Task* task, int64_t* out, const base::Endian* endian,
+                const base::Options& opts = base::default_options()) const;
+
+  // Reads a variable-length integer encoded in Protocol Buffer format.
+  void read_uvarint(event::Task* task, uint64_t* out,
+                    const base::Options& opts = base::default_options()) const;
+  void read_svarint(event::Task* task, int64_t* out,
+                    const base::Options& opts = base::default_options()) const;
+  void read_svarint_zigzag(
+      event::Task* task, int64_t* out,
+      const base::Options& opts = base::default_options()) const;
+
+  // Synchronous versions of the functions above.
+  base::Result read_u8(
+      uint8_t* out, const base::Options& opts = base::default_options()) const;
+  base::Result read_u16(
+      uint16_t* out, const base::Endian* endian,
+      const base::Options& opts = base::default_options()) const;
+  base::Result read_u32(
+      uint32_t* out, const base::Endian* endian,
+      const base::Options& opts = base::default_options()) const;
+  base::Result read_u64(
+      uint64_t* out, const base::Endian* endian,
+      const base::Options& opts = base::default_options()) const;
+  base::Result read_s8(
+      int8_t* out, const base::Options& opts = base::default_options()) const;
+  base::Result read_s16(
+      int16_t* out, const base::Endian* endian,
+      const base::Options& opts = base::default_options()) const;
+  base::Result read_s32(
+      int32_t* out, const base::Endian* endian,
+      const base::Options& opts = base::default_options()) const;
+  base::Result read_s64(
+      int64_t* out, const base::Endian* endian,
+      const base::Options& opts = base::default_options()) const;
+  base::Result read_uvarint(
+      uint64_t* out, const base::Options& opts = base::default_options()) const;
+  base::Result read_svarint(
+      int64_t* out, const base::Options& opts = base::default_options()) const;
+  base::Result read_svarint_zigzag(
+      int64_t* out, const base::Options& opts = base::default_options()) const;
 
   // }}}
   // Copy directly from Reader to Writer {{{
