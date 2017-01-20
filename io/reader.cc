@@ -94,7 +94,7 @@ void ReaderImpl::write_to(event::Task* task, std::size_t* n, std::size_t max,
 
 void Reader::assert_valid() const { CHECK(ptr_) << ": io::Reader is empty!"; }
 
-namespace {
+inline namespace implementation {
 struct StringReadHelper {
   event::Task* const task;
   std::string* const out;
@@ -121,7 +121,7 @@ struct StringReadHelper {
     return base::Result();
   }
 };
-}  // anonymous namespace
+}  // inline namespace implementation
 
 void Reader::read(event::Task* task, std::string* out, std::size_t min,
                   std::size_t max, const base::Options& opts) const {
@@ -645,6 +645,67 @@ void Reader::read_svarint_zigzag(event::Task* task, int64_t* out,
   h->subtask.on_finished(std::move(helper));
 }
 
+inline namespace implementation {
+struct ReadLineHelper {
+  event::Task subtask;
+  Reader reader;
+  event::Task* const task;
+  std::string* const out;
+  const std::size_t max;
+  const base::Options options;
+  char ch;
+  std::size_t n;
+
+  explicit ReadLineHelper(Reader r, event::Task* t, std::string* o,
+                          std::size_t mx, base::Options opts) noexcept
+      : reader(std::move(r)),
+        task(t),
+        out(o),
+        max(mx),
+        options(std::move(opts)) {}
+
+  void next() {
+    if (out->size() >= max) {
+      task->finish_ok();
+      delete this;
+      return;
+    }
+    subtask.reset();
+    task->add_subtask(&subtask);
+    reader.read(&subtask, &ch, &n, 1, 1, options);
+    subtask.on_finished(event::callback([this] {
+      read_complete();
+      return base::Result();
+    }));
+  }
+
+  void read_complete() {
+    if (event::propagate_failure(task, &subtask)) {
+      delete this;
+      return;
+    }
+    out->push_back(ch);
+    if (ch == '\n') {
+      task->finish_ok();
+      delete this;
+      return;
+    }
+    next();
+  }
+};
+}  // inline namespace implementation
+
+void Reader::readline(event::Task* task, std::string* out, std::size_t max,
+                      const base::Options& opts) const {
+  CHECK_NOTNULL(task);
+  CHECK_NOTNULL(out);
+  if (!task->start()) return;
+  out->clear();
+
+  auto* h = new ReadLineHelper(*this, task, out, max, opts);
+  h->next();
+}
+
 base::Result Reader::read(char* out, std::size_t* n, std::size_t min,
                           std::size_t max, const base::Options& opts) const {
   event::Task task;
@@ -747,6 +808,14 @@ base::Result Reader::read_svarint_zigzag(int64_t* out,
   return task.result();
 }
 
+base::Result Reader::readline(std::string* out, std::size_t max,
+                              const base::Options& opts) const {
+  event::Task task;
+  readline(&task, out, max, opts);
+  event::wait(get_manager(opts), &task);
+  return task.result();
+}
+
 base::Result Reader::write_to(std::size_t* n, std::size_t max, const Writer& w,
                               const base::Options& opts) const {
   event::Task task;
@@ -762,7 +831,7 @@ base::Result Reader::close(const base::Options& opts) const {
   return task.result();
 }
 
-namespace {
+inline namespace implementation {
 class FunctionReader : public ReaderImpl {
  public:
   FunctionReader(ReadFn rfn, CloseFn cfn)
@@ -1773,7 +1842,7 @@ class BufferedReader : public ReaderImpl {
   mutable std::mutex mu_;
   bool closed_;
 };
-}  // anonymous namespace
+}  // inline namespace implementation
 
 Reader reader(ReadFn rfn, CloseFn cfn) {
   return Reader(

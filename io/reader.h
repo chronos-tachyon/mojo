@@ -344,6 +344,27 @@ class Reader {
       int64_t* out, const base::Options& opts = base::default_options()) const;
 
   // }}}
+  // Read a line of text {{{
+
+  void readline(event::Task* task, std::string* out, std::size_t max,
+                const base::Options& opts = base::default_options()) const;
+
+  void readline(event::Task* task, std::string* out,
+                const base::Options& opts = base::default_options()) const {
+    readline(task, out, SIZE_MAX, opts);
+  }
+
+  // Synchronous version of the function above.
+  base::Result readline(
+      std::string* out, std::size_t max,
+      const base::Options& opts = base::default_options()) const;
+
+  base::Result readline(std::string* out, const base::Options& opts =
+                                              base::default_options()) const {
+    return readline(out, SIZE_MAX, opts);
+  }
+
+  // }}}
   // Copy directly from Reader to Writer {{{
 
   // Attempts to efficiently copy up to |max| bytes of this Reader into |w|.

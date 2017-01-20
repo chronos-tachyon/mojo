@@ -101,6 +101,7 @@ Result make_socketpair(SocketPair* out, int domain, int type, int protocol);
 Result set_blocking(FD fd, bool value);
 Result shutdown(FD fd, int how);
 Result seek(off_t* /*nullable*/ out, FD fd, off_t offset, int whence);
+Result truncate(FD fd);
 
 using DEntry = std::tuple<unsigned long, unsigned char, std::string>;
 

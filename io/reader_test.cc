@@ -972,7 +972,8 @@ static void TestBufferedReader(const base::Options& o, const char* what) {
   ASSERT_OK(base::write_exactly(fd, ptr, len, path.c_str()));
   ASSERT_OK(base::seek(nullptr, fd, 0, SEEK_SET));
 
-  io::Reader r = io::bufferedreader(io::fdreader(fd));
+  io::Reader fdr = io::fdreader(fd);
+  io::Reader r = io::bufferedreader(fdr);
 
   uint8_t u8 = 0;
   EXPECT_OK(r.read_u8(&u8, o));
@@ -1017,7 +1018,7 @@ static void TestBufferedReader(const base::Options& o, const char* what) {
   EXPECT_EOF(r.read_u8(&u8, o));
 
   ASSERT_OK(base::seek(nullptr, fd, 0, SEEK_SET));
-  r = io::bufferedreader(io::fdreader(fd));
+  r = io::bufferedreader(fdr);
 
   int8_t s8 = 0;
   EXPECT_OK(r.read_s8(&s8, o));
@@ -1062,10 +1063,7 @@ static void TestBufferedReader(const base::Options& o, const char* what) {
   EXPECT_EOF(r.read_u8(&u8, o));
 
   ASSERT_OK(base::seek(nullptr, fd, 0, SEEK_SET));
-  {
-    auto fdpair = fd->acquire_fd();
-    ASSERT_EQ(0, ::ftruncate(fdpair.first, 0));
-  }
+  ASSERT_OK(base::truncate(fd));
 
   constexpr unsigned char kVarintBytes[] = {
       0x00,              // 0, 0, 0
@@ -1086,7 +1084,7 @@ static void TestBufferedReader(const base::Options& o, const char* what) {
   ASSERT_OK(base::write_exactly(fd, ptr, len, path.c_str()));
   ASSERT_OK(base::seek(nullptr, fd, 0, SEEK_SET));
 
-  r = io::bufferedreader(io::fdreader(fd));
+  r = io::bufferedreader(fdr);
 
   EXPECT_OK(r.read_uvarint(&u64, o));
   EXPECT_EQ(0U, u64);
@@ -1112,7 +1110,7 @@ static void TestBufferedReader(const base::Options& o, const char* what) {
   EXPECT_EOF(r.read_uvarint(&u64, o));
 
   ASSERT_OK(base::seek(nullptr, fd, 0, SEEK_SET));
-  r = io::bufferedreader(io::fdreader(fd));
+  r = io::bufferedreader(fdr);
 
   EXPECT_OK(r.read_svarint(&s64, o));
   EXPECT_EQ(0, s64);
@@ -1138,7 +1136,7 @@ static void TestBufferedReader(const base::Options& o, const char* what) {
   EXPECT_EOF(r.read_svarint(&s64, o));
 
   ASSERT_OK(base::seek(nullptr, fd, 0, SEEK_SET));
-  r = io::bufferedreader(io::fdreader(fd));
+  r = io::bufferedreader(fdr);
 
   EXPECT_OK(r.read_svarint_zigzag(&s64, o));
   EXPECT_EQ(0, s64);
@@ -1162,6 +1160,29 @@ static void TestBufferedReader(const base::Options& o, const char* what) {
   EXPECT_EQ(0x7fffffffffffffffLL, s64);
 
   EXPECT_EOF(r.read_svarint_zigzag(&s64, o));
+
+  ASSERT_OK(base::seek(nullptr, fd, 0, SEEK_SET));
+  ASSERT_OK(base::truncate(fd));
+
+  constexpr char kLineBytes[] =
+    "Line 1\n"
+    "Line 2\r\n"
+    "Line 3";
+
+  ptr = kLineBytes;
+  len = sizeof(kLineBytes) - 1;
+  ASSERT_OK(base::write_exactly(fd, ptr, len, path.c_str()));
+  ASSERT_OK(base::seek(nullptr, fd, 0, SEEK_SET));
+
+  r = io::bufferedreader(fdr);
+
+  std::string str;
+  EXPECT_OK(r.readline(&str, o));
+  EXPECT_EQ("Line 1\n", str);
+  EXPECT_OK(r.readline(&str, o));
+  EXPECT_EQ("Line 2\r\n", str);
+  EXPECT_EOF(r.readline(&str, o));
+  EXPECT_EQ("Line 3", str);
 
   base::log_flush();
 }

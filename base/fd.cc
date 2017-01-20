@@ -141,6 +141,17 @@ Result seek(off_t* out, FD fd, off_t offset, int whence) {
   return Result();
 }
 
+Result truncate(FD fd) {
+  Result r;
+  auto fdpair = DCHECK_NOTNULL(fd)->acquire_fd();
+  int rc = ::ftruncate(fdpair.first, 0);
+  if (rc != 0) {
+    int err_no = errno;
+    r = Result::from_errno(err_no, "ftruncate(2)");
+  }
+  return r;
+}
+
 Result readdir_all(std::vector<DEntry>* out, FD fd, const char* what) {
   CHECK_NOTNULL(out);
   CHECK_NOTNULL(fd);
