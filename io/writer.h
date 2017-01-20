@@ -10,6 +10,7 @@
 #include <memory>
 #include <type_traits>
 
+#include "base/endian.h"
 #include "base/result.h"
 #include "event/task.h"
 #include "io/buffer.h"
@@ -117,7 +118,27 @@ class WriterImpl {
   virtual void read_from(event::Task* task, std::size_t* n, std::size_t max,
                          const Reader& r, const base::Options& opts);
 
+  // Flushes this Writer's buffers, if any.
+  // - May be a no-op: if this Writer doesn't use any buffers,
+  //   then the default no-op behavior is a valid implementation.
+  // - May be synchronous: implementations may block until the call is complete
+  // - May be asynchronous: implementations may use an event::Manager to
+  //   perform work asynchronously, e.g. flushing data to a remote host
+  // - Implementations should strive to be asynchronous
+  //
+  virtual void flush(event::Task* task, const base::Options& opts);
+
+  // Syncs all previous writes to durable storage, if applicable.
+  // - Implies flush.
+  // - May be a no-op: if this writer doesn't write to durable storage,
+  //   then the default flush-only behavior is a valid implementation.
+  // - May be synchronous: implementations may block until the call is complete
+  // - May be asynchronous: implementations may use an event::Manager to
+  //   perform work asynchronously, e.g. waiting for a remote host to sync
+  virtual void sync(event::Task* task, const base::Options& opts);
+
   // Closes this Writer, potentially freeing resources.
+  // - Implies flush and sync.
   // - May be synchronous: implementations may block until the call is complete
   // - May be asynchronous: implementations may use an event::Manager to
   //   perform work asynchronously, e.g. flushing data to a remote host
@@ -222,6 +243,68 @@ class Writer {
                      const base::Options& opts = base::default_options()) const;
 
   // }}}
+  // Write a single integer {{{
+
+  // Writes a single 1-, 2-, 4-, or 8-byte unsigned integer.
+  void write_u8(event::Task* task, uint8_t in,
+                const base::Options& opts = base::default_options()) const;
+  void write_u16(event::Task* task, uint16_t in, const base::Endian* endian,
+                 const base::Options& opts = base::default_options()) const;
+  void write_u32(event::Task* task, uint32_t in, const base::Endian* endian,
+                 const base::Options& opts = base::default_options()) const;
+  void write_u64(event::Task* task, uint64_t in, const base::Endian* endian,
+                 const base::Options& opts = base::default_options()) const;
+
+  // Writes a single 1-, 2-, 4-, or 8-byte signed 2's-complement integer.
+  void write_s8(event::Task* task, int8_t in,
+                const base::Options& opts = base::default_options()) const;
+  void write_s16(event::Task* task, int16_t in, const base::Endian* endian,
+                 const base::Options& opts = base::default_options()) const;
+  void write_s32(event::Task* task, int32_t in, const base::Endian* endian,
+                 const base::Options& opts = base::default_options()) const;
+  void write_s64(event::Task* task, int64_t in, const base::Endian* endian,
+                 const base::Options& opts = base::default_options()) const;
+
+  // Writes a variable-length integer encoded in Protocol Buffer format.
+  void write_uvarint(event::Task* task, uint64_t in,
+                     const base::Options& opts = base::default_options()) const;
+  void write_svarint(event::Task* task, int64_t in,
+                     const base::Options& opts = base::default_options()) const;
+  void write_svarint_zigzag(
+      event::Task* task, int64_t in,
+      const base::Options& opts = base::default_options()) const;
+
+  // Synchronous versions of the functions above.
+  base::Result write_u8(
+      uint8_t in, const base::Options& opts = base::default_options()) const;
+  base::Result write_u16(
+      uint16_t in, const base::Endian* endian,
+      const base::Options& opts = base::default_options()) const;
+  base::Result write_u32(
+      uint32_t in, const base::Endian* endian,
+      const base::Options& opts = base::default_options()) const;
+  base::Result write_u64(
+      uint64_t in, const base::Endian* endian,
+      const base::Options& opts = base::default_options()) const;
+  base::Result write_s8(
+      int8_t in, const base::Options& opts = base::default_options()) const;
+  base::Result write_s16(
+      int16_t in, const base::Endian* endian,
+      const base::Options& opts = base::default_options()) const;
+  base::Result write_s32(
+      int32_t in, const base::Endian* endian,
+      const base::Options& opts = base::default_options()) const;
+  base::Result write_s64(
+      int64_t in, const base::Endian* endian,
+      const base::Options& opts = base::default_options()) const;
+  base::Result write_uvarint(
+      uint64_t in, const base::Options& opts = base::default_options()) const;
+  base::Result write_svarint(
+      int64_t in, const base::Options& opts = base::default_options()) const;
+  base::Result write_svarint_zigzag(
+      int64_t in, const base::Options& opts = base::default_options()) const;
+
+  // }}}
   // Copy directly from Reader to Writer {{{
 
   // Attempts to efficiently copy up to |max| bytes of |r| into this Writer.
@@ -240,7 +323,21 @@ class Writer {
       const base::Options& opts = base::default_options()) const;
 
   // }}}
-  // Close {{{
+  // Flush, Sync, Close {{{
+
+  // Flushes this Writer's buffers, if any.
+  void flush(event::Task* task,
+             const base::Options& opts = base::default_options()) const {
+    assert_valid();
+    ptr_->flush(task, opts);
+  }
+
+  // Syncs all previous writes to permanent storage, if applicable.
+  void sync(event::Task* task,
+            const base::Options& opts = base::default_options()) const {
+    assert_valid();
+    ptr_->sync(task, opts);
+  }
 
   // Closes this Writer, potentially freeing resources.
   void close(event::Task* task,
@@ -249,7 +346,9 @@ class Writer {
     ptr_->close(task, opts);
   }
 
-  // Synchronous version of |close| above.
+  // Synchronous versions of the functions above.
+  base::Result flush(const base::Options& opts = base::default_options()) const;
+  base::Result sync(const base::Options& opts = base::default_options()) const;
   base::Result close(const base::Options& opts = base::default_options()) const;
 
   // }}}
@@ -304,7 +403,18 @@ Writer fullwriter();
 // Returns a Writer that writes bytes to a file descriptor.
 Writer fdwriter(base::FD fd);
 
+// Wraps a Writer in I/O buffering.
+Writer bufferedwriter(Writer w, PoolPtr pool, std::size_t max_buffers);
+Writer bufferedwriter(Writer w, PoolPtr pool);
+Writer bufferedwriter(Writer w, std::size_t buffer_size,
+                      std::size_t max_buffers);
+Writer bufferedwriter(Writer w);
+
+// Returns an archetypal error result for performing I/O on a closed io::Writer.
 base::Result writer_closed();
+
+// Returns an archetypal error result for performing I/O on an io::Writer that
+// has run out of available storage space.
 base::Result writer_full();
 
 }  // namespace io

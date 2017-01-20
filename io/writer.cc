@@ -16,6 +16,8 @@
 #include "base/cleanup.h"
 #include "base/logging.h"
 #include "base/mutex.h"
+#include "io/buffer.h"
+#include "io/chain.h"
 #include "io/reader.h"
 
 namespace io {
@@ -54,7 +56,174 @@ void WriterImpl::read_from(event::Task* task, std::size_t* n, std::size_t max,
   if (prologue(task, n, max, r)) task->finish(base::Result::not_implemented());
 }
 
+void WriterImpl::flush(event::Task* task, const base::Options& opts) {
+  if (prologue(task)) task->finish_ok();
+}
+
+void WriterImpl::sync(event::Task* task, const base::Options& opts) {
+  flush(task, opts);
+}
+
 void Writer::assert_valid() const { CHECK(ptr_) << ": io::Writer is empty!"; }
+
+inline namespace implementation {
+struct WriteFixedHelper : public event::Callback {
+  event::Task subtask;
+  event::Task* const task;
+  char buf[10];
+  std::size_t n;
+
+  explicit WriteFixedHelper(event::Task* t) noexcept : task(t), n(0) {}
+
+  base::Result run() override {
+    event::propagate_result(task, &subtask);
+    return base::Result();
+  }
+};
+}  // inline namespace implementation
+
+void Writer::write_u8(event::Task* task, uint8_t in,
+                      const base::Options& opts) const {
+  CHECK_NOTNULL(task);
+  if (!task->start()) return;
+
+  auto helper = base::backport::make_unique<WriteFixedHelper>(task);
+  auto* h = helper.get();
+  unsigned char* p = reinterpret_cast<unsigned char*>(&h->buf);
+  p[0] = in;
+  task->add_subtask(&h->subtask);
+  write(&h->subtask, &h->n, h->buf, 1, opts);
+  h->subtask.on_finished(std::move(helper));
+}
+
+void Writer::write_u16(event::Task* task, uint16_t in,
+                       const base::Endian* endian,
+                       const base::Options& opts) const {
+  CHECK_NOTNULL(task);
+  CHECK_NOTNULL(endian);
+  if (!task->start()) return;
+
+  auto helper = base::backport::make_unique<WriteFixedHelper>(task);
+  auto* h = helper.get();
+  endian->put_u16(h->buf, in);
+  task->add_subtask(&h->subtask);
+  write(&h->subtask, &h->n, h->buf, 2, opts);
+  h->subtask.on_finished(std::move(helper));
+}
+
+void Writer::write_u32(event::Task* task, uint32_t in,
+                       const base::Endian* endian,
+                       const base::Options& opts) const {
+  CHECK_NOTNULL(task);
+  CHECK_NOTNULL(endian);
+  if (!task->start()) return;
+
+  auto helper = base::backport::make_unique<WriteFixedHelper>(task);
+  auto* h = helper.get();
+  endian->put_u32(h->buf, in);
+  task->add_subtask(&h->subtask);
+  write(&h->subtask, &h->n, h->buf, 4, opts);
+  h->subtask.on_finished(std::move(helper));
+}
+
+void Writer::write_u64(event::Task* task, uint64_t in,
+                       const base::Endian* endian,
+                       const base::Options& opts) const {
+  CHECK_NOTNULL(task);
+  CHECK_NOTNULL(endian);
+  if (!task->start()) return;
+
+  auto helper = base::backport::make_unique<WriteFixedHelper>(task);
+  auto* h = helper.get();
+  endian->put_u64(h->buf, in);
+  task->add_subtask(&h->subtask);
+  write(&h->subtask, &h->n, h->buf, 8, opts);
+  h->subtask.on_finished(std::move(helper));
+}
+
+void Writer::write_s8(event::Task* task, int8_t in,
+                      const base::Options& opts) const {
+  uint8_t tmp;
+  if (in < 0)
+    tmp = ~uint8_t(-(in + 1));
+  else
+    tmp = in;
+  write_u8(task, tmp, opts);
+}
+
+void Writer::write_s16(event::Task* task, int16_t in,
+                       const base::Endian* endian,
+                       const base::Options& opts) const {
+  uint16_t tmp;
+  if (in < 0)
+    tmp = ~uint16_t(-(in + 1));
+  else
+    tmp = in;
+  write_u16(task, tmp, endian, opts);
+}
+
+void Writer::write_s32(event::Task* task, int32_t in,
+                       const base::Endian* endian,
+                       const base::Options& opts) const {
+  uint32_t tmp;
+  if (in < 0)
+    tmp = ~uint32_t(-(in + 1));
+  else
+    tmp = in;
+  write_u32(task, tmp, endian, opts);
+}
+
+void Writer::write_s64(event::Task* task, int64_t in,
+                       const base::Endian* endian,
+                       const base::Options& opts) const {
+  uint64_t tmp;
+  if (in < 0)
+    tmp = ~uint64_t(-(in + 1));
+  else
+    tmp = in;
+  write_u64(task, tmp, endian, opts);
+}
+
+void Writer::write_uvarint(event::Task* task, uint64_t in,
+                           const base::Options& opts) const {
+  CHECK_NOTNULL(task);
+  if (!task->start()) return;
+
+  auto helper = base::backport::make_unique<WriteFixedHelper>(task);
+  auto* h = helper.get();
+  unsigned char* p = reinterpret_cast<unsigned char*>(&h->buf);
+  std::size_t len = 0;
+  while (in >= 0x80) {
+    p[len] = 0x80 | (in & 0x7f);
+    in >>= 7;
+    ++len;
+  }
+  p[len] = (in & 0x7f);
+  ++len;
+  task->add_subtask(&h->subtask);
+  write(&h->subtask, &h->n, h->buf, len, opts);
+  h->subtask.on_finished(std::move(helper));
+}
+
+void Writer::write_svarint(event::Task* task, int64_t in,
+                           const base::Options& opts) const {
+  uint64_t tmp;
+  if (in < 0)
+    tmp = ~uint64_t(-(in + 1));
+  else
+    tmp = in;
+  write_uvarint(task, tmp, opts);
+}
+
+void Writer::write_svarint_zigzag(event::Task* task, int64_t in,
+                                  const base::Options& opts) const {
+  uint64_t tmp;
+  if (in < 0)
+    tmp = (uint64_t(-(in + 1)) << 1) + 1;
+  else
+    tmp = uint64_t(in) << 1;
+  write_uvarint(task, tmp, opts);
+}
 
 base::Result Writer::write(std::size_t* n, const char* ptr, std::size_t len,
                            const base::Options& opts) const {
@@ -72,10 +241,110 @@ base::Result Writer::write(std::size_t* n, const std::string& str,
   return task.result();
 }
 
+base::Result Writer::write_u8(uint8_t in, const base::Options& opts) const {
+  event::Task task;
+  write_u8(&task, in, opts);
+  event::wait(get_manager(opts), &task);
+  return task.result();
+}
+
+base::Result Writer::write_u16(uint16_t in, const base::Endian* endian,
+                               const base::Options& opts) const {
+  event::Task task;
+  write_u16(&task, in, endian, opts);
+  event::wait(get_manager(opts), &task);
+  return task.result();
+}
+
+base::Result Writer::write_u32(uint32_t in, const base::Endian* endian,
+                               const base::Options& opts) const {
+  event::Task task;
+  write_u32(&task, in, endian, opts);
+  event::wait(get_manager(opts), &task);
+  return task.result();
+}
+
+base::Result Writer::write_u64(uint64_t in, const base::Endian* endian,
+                               const base::Options& opts) const {
+  event::Task task;
+  write_u64(&task, in, endian, opts);
+  event::wait(get_manager(opts), &task);
+  return task.result();
+}
+
+base::Result Writer::write_s8(int8_t in, const base::Options& opts) const {
+  event::Task task;
+  write_s8(&task, in, opts);
+  event::wait(get_manager(opts), &task);
+  return task.result();
+}
+
+base::Result Writer::write_s16(int16_t in, const base::Endian* endian,
+                               const base::Options& opts) const {
+  event::Task task;
+  write_s16(&task, in, endian, opts);
+  event::wait(get_manager(opts), &task);
+  return task.result();
+}
+
+base::Result Writer::write_s32(int32_t in, const base::Endian* endian,
+                               const base::Options& opts) const {
+  event::Task task;
+  write_s32(&task, in, endian, opts);
+  event::wait(get_manager(opts), &task);
+  return task.result();
+}
+
+base::Result Writer::write_s64(int64_t in, const base::Endian* endian,
+                               const base::Options& opts) const {
+  event::Task task;
+  write_s64(&task, in, endian, opts);
+  event::wait(get_manager(opts), &task);
+  return task.result();
+}
+
+base::Result Writer::write_uvarint(uint64_t in,
+                                   const base::Options& opts) const {
+  event::Task task;
+  write_uvarint(&task, in, opts);
+  event::wait(get_manager(opts), &task);
+  return task.result();
+}
+
+base::Result Writer::write_svarint(int64_t in,
+                                   const base::Options& opts) const {
+  event::Task task;
+  write_svarint(&task, in, opts);
+  event::wait(get_manager(opts), &task);
+  return task.result();
+}
+
+base::Result Writer::write_svarint_zigzag(int64_t in,
+                                          const base::Options& opts) const {
+  event::Task task;
+  write_svarint_zigzag(&task, in, opts);
+  event::wait(get_manager(opts), &task);
+  return task.result();
+}
+
 base::Result Writer::read_from(std::size_t* n, std::size_t max, const Reader& r,
                                const base::Options& opts) const {
   event::Task task;
   read_from(&task, n, max, r, opts);
+  event::wait(get_manager(opts), &task);
+  return task.result();
+}
+
+base::Result Writer::flush(const base::Options& opts) const {
+  event::Task task;
+  flush(&task, opts);
+  event::wait(get_manager(opts), &task);
+  return task.result();
+}
+
+base::Result Writer::sync(const base::Options& opts) const {
+  event::Task task;
+  sync(&task, opts);
   event::wait(get_manager(opts), &task);
   return task.result();
 }
@@ -87,7 +356,7 @@ base::Result Writer::close(const base::Options& opts) const {
   return task.result();
 }
 
-namespace {
+inline namespace implementation {
 class FunctionWriter : public WriterImpl {
  public:
   FunctionWriter(WriteFn wfn, CloseFn cfn) noexcept : wfn_(std::move(wfn)),
@@ -155,8 +424,16 @@ class CloseIgnoringWriter : public WriterImpl {
     w_.read_from(task, n, max, r, opts);
   }
 
+  void flush(event::Task* task, const base::Options& opts) override {
+    w_.flush(task, opts);
+  }
+
+  void sync(event::Task* task, const base::Options& opts) override {
+    w_.sync(task, opts);
+  }
+
   void close(event::Task* task, const base::Options& opts) override {
-    if (prologue(task)) task->finish_ok();
+    w_.sync(task, opts);
   }
 
   base::FD internal_writerfd() const override {
@@ -386,6 +663,22 @@ class FDWriter : public WriterImpl {
     bool process(FDWriter* writer) override;
   };
 
+  struct SyncOp : public Op {
+    event::Task* const task;
+
+    explicit SyncOp(event::Task* t) noexcept : task(t) {}
+    void cancel() override { task->cancel(); }
+    bool process(FDWriter* writer) override;
+  };
+
+  struct CloseOp : public Op {
+    event::Task* const task;
+
+    explicit CloseOp(event::Task* t) noexcept : task(t) {}
+    void cancel() override { task->cancel(); }
+    bool process(FDWriter* writer) override;
+  };
+
   explicit FDWriter(base::FD fd) noexcept : fd_(std::move(fd)), depth_(0) {}
   ~FDWriter() noexcept override;
 
@@ -395,6 +688,7 @@ class FDWriter : public WriterImpl {
 
   void write(event::Task* task, std::size_t* n, const char* ptr,
              std::size_t len, const base::Options& opts) override;
+  void sync(event::Task* task, const base::Options& opts) override;
   void close(event::Task* task, const base::Options& opts) override;
   base::FD internal_writerfd() const override { return fd_; }
 
@@ -436,10 +730,20 @@ void FDWriter::write(event::Task* task, std::size_t* n, const char* ptr,
   process(lock);
 }
 
+void FDWriter::sync(event::Task* task, const base::Options& opts) {
+  if (!prologue(task)) return;
+  auto lock = base::acquire_lock(mu_);
+  VLOG(6) << "io::FDWriter::sync";
+  q_.emplace_back(new SyncOp(task));
+  process(lock);
+}
+
 void FDWriter::close(event::Task* task, const base::Options& opts) {
+  if (!prologue(task)) return;
+  auto lock = base::acquire_lock(mu_);
   VLOG(6) << "io::FDWriter::close";
-  base::Result r = fd_->close();
-  if (prologue(task)) task->finish(std::move(r));
+  q_.emplace_back(new CloseOp(task));
+  process(lock);
 }
 
 void FDWriter::process(base::Lock& lock) {
@@ -561,7 +865,264 @@ bool FDWriter::WriteOp::process(FDWriter* writer) {
   task->finish(std::move(r));
   return true;
 }
-}  // anonymous namespace
+
+bool FDWriter::SyncOp::process(FDWriter* writer) {
+  VLOG(4) << "io::FDWriter::SyncOp: begin";
+
+  // Check for cancellation
+  if (!task->is_running()) {
+    VLOG(4) << "io::FDWriter::SyncOp: cancel";
+    task->finish_cancel();
+    return true;
+  }
+
+  auto fdpair = writer->fd_->acquire_fd();
+  int rc = ::fdatasync(fdpair.first);
+  int err_no = errno;
+  fdpair.second.unlock();
+
+  base::Result r;
+  if (rc != 0) {
+    r = base::Result::from_errno(err_no, "fdatasync(2)");
+  }
+
+  VLOG(4) << "io::FDWriter::SyncOp: end: "
+          << "r=" << r;
+  task->finish(std::move(r));
+  return true;
+}
+
+bool FDWriter::CloseOp::process(FDWriter* writer) {
+  VLOG(4) << "io::FDWriter::CloseOp: begin";
+
+  auto fdpair = writer->fd_->acquire_fd();
+  ::fdatasync(fdpair.first);
+  fdpair.second.unlock();
+
+  auto r = writer->fd_->close();
+
+  VLOG(4) << "io::FDWriter::CloseOp: end: "
+          << "r=" << r;
+  task->finish(std::move(r));
+  return true;
+}
+
+class BufferedWriter : public WriterImpl {
+ public:
+  BufferedWriter(Writer w, PoolPtr p, std::size_t max_buffers) noexcept
+      : w_(std::move(w)),
+        chain_(std::move(p), max_buffers),
+        closed_(false) {
+    chain_.set_wrfn(
+        [this](const base::Options& opts) { drain_callback(opts); });
+  }
+
+  BufferedWriter(Writer w, PoolPtr p) noexcept : w_(std::move(w)),
+                                                 chain_(std::move(p)),
+                                                 closed_(false) {
+    chain_.set_wrfn(
+        [this](const base::Options& opts) { drain_callback(opts); });
+  }
+
+  BufferedWriter(Writer w, std::size_t buffer_size, std::size_t max_buffers)
+      : w_(std::move(w)), chain_(buffer_size, max_buffers), closed_(false) {
+    chain_.set_wrfn(
+        [this](const base::Options& opts) { drain_callback(opts); });
+  }
+
+  BufferedWriter(Writer w) : w_(std::move(w)), chain_(), closed_(false) {
+    chain_.set_wrfn(
+        [this](const base::Options& opts) { drain_callback(opts); });
+  }
+
+  std::size_t ideal_block_size() const noexcept override {
+    return chain_.pool()->buffer_size();
+  }
+
+  void write(event::Task* task, std::size_t* n, const char* ptr,
+             std::size_t len, const base::Options& opts) override {
+    chain_.write(task, n, ptr, len, opts);
+  }
+
+  void flush(event::Task* task, const base::Options& opts) override {
+    CHECK_NOTNULL(task);
+    if (!task->start()) return;
+    auto* h = new DrainHelper(this, task, true, false, false, opts);
+    h->next();
+  }
+
+  void sync(event::Task* task, const base::Options& opts) override {
+    CHECK_NOTNULL(task);
+    if (!task->start()) return;
+    auto* h = new DrainHelper(this, task, true, true, false, opts);
+    h->next();
+  }
+
+  void close(event::Task* task, const base::Options& opts) override {
+    CHECK_NOTNULL(task);
+    if (!task->start()) return;
+
+    auto lock = base::acquire_lock(mu_);
+    auto w = writer_closed();
+    if (closed_) {
+      task->finish(std::move(w));
+      return;
+    }
+    chain_.fail_writes(w);
+    chain_.fail_reads(w);
+    chain_.flush();
+    chain_.process();
+    closed_ = true;
+    lock.unlock();
+
+    auto* h = new DrainHelper(this, task, true, true, true, opts);
+    h->next();
+  }
+
+ private:
+  struct DrainHelper {
+    event::Task subtask;
+    BufferedWriter* const self;
+    event::Task* const /*nullable*/ task;
+    const bool repeat;
+    const bool sync;
+    const bool close;
+    const base::Options options;
+    OwnedBuffer buffer;
+    std::size_t n;
+    base::Result write_result;
+    base::Result sync_result;
+
+    explicit DrainHelper(BufferedWriter* s, event::Task* /*nullable*/ t, bool r,
+                         bool y, bool c, base::Options opts) noexcept
+        : self(s),
+          task(t),
+          repeat(r),
+          sync(y),
+          close(c),
+          options(opts),
+          buffer(self->chain_.pool()->take()),
+          n(0) {}
+
+    void next() {
+      std::size_t len = self->chain_.optimal_drain();
+      std::size_t xlen = 0;
+      self->chain_.drain(&xlen, buffer.data(), len);
+      if (task) task->add_subtask(&subtask);
+      self->w_.write(&subtask, &n, buffer.data(), xlen, options);
+      subtask.on_finished(event::callback([this] {
+        write_complete();
+        return base::Result();
+      }));
+    }
+
+    void do_sync() {
+      if (task) task->add_subtask(&subtask);
+      self->w_.sync(&subtask, options);
+      subtask.on_finished(event::callback([this] {
+        sync_complete();
+        return base::Result();
+      }));
+    }
+
+    void do_close() {
+      if (task) task->add_subtask(&subtask);
+      self->w_.close(&subtask, options);
+      subtask.on_finished(event::callback([this] {
+        close_complete();
+        return base::Result();
+      }));
+    }
+
+    void write_complete() {
+      auto destroy = base::cleanup([this] { delete this; });
+
+      base::Result r;
+      if (subtask.result_will_throw()) {
+        r = base::Result::unknown();
+      } else {
+        r = subtask.result();
+      }
+
+      bool again = repeat && r && self->chain_.optimal_drain() > 0;
+      if (again) {
+        subtask.reset();
+        next();
+        destroy.cancel();
+        return;
+      }
+
+      if (!r) self->chain_.fail_writes(r);
+      self->chain_.pool()->give(std::move(buffer));
+      self->chain_.process();
+
+      if (sync) {
+        write_result = std::move(r);
+        subtask.reset();
+        do_sync();
+        destroy.cancel();
+        return;
+      }
+
+      if (close) {
+        write_result = std::move(r);
+        subtask.reset();
+        do_close();
+        destroy.cancel();
+        return;
+      }
+
+      if (task) task->finish(std::move(r));
+    }
+
+    void sync_complete() {
+      auto destroy = base::cleanup([this] { delete this; });
+
+      base::Result r;
+      if (subtask.result_will_throw()) {
+        r = base::Result::unknown();
+      } else {
+        r = subtask.result();
+      }
+
+      if (close) {
+        sync_result = std::move(r);
+        subtask.reset();
+        do_close();
+        destroy.cancel();
+        return;
+      }
+
+      r = write_result.and_then(r);
+      if (task) task->finish(std::move(r));
+    }
+
+    void close_complete() {
+      auto destroy = base::cleanup([this] { delete this; });
+
+      base::Result r;
+      if (subtask.result_will_throw()) {
+        r = base::Result::unknown();
+      } else {
+        r = subtask.result();
+      }
+
+      r = r.and_then(write_result).and_then(sync_result);
+      if (task) task->finish(std::move(r));
+    }
+  };
+
+  void drain_callback(const base::Options& opts) {
+    auto* h = new DrainHelper(this, nullptr, false, false, false, opts);
+    h->next();
+  }
+
+  const Writer w_;
+  Chain chain_;
+  mutable std::mutex mu_;
+  bool closed_;
+};
+}  // inline namespace implementation
 
 Writer writer(WriteFn wfn, CloseFn cfn) {
   return Writer(
@@ -594,6 +1155,26 @@ Writer fullwriter() { return Writer(std::make_shared<FullWriter>()); }
 Writer fdwriter(base::FD fd) {
   return Writer(std::make_shared<FDWriter>(std::move(fd)));
 }
+
+template <typename... Args>
+static Writer make_bufferedwriter(Args&&... args) {
+  return Writer(std::make_shared<BufferedWriter>(std::forward<Args>(args)...));
+}
+
+Writer bufferedwriter(Writer w, PoolPtr pool, std::size_t max_buffers) {
+  return make_bufferedwriter(std::move(w), std::move(pool), max_buffers);
+}
+
+Writer bufferedwriter(Writer w, PoolPtr pool) {
+  return make_bufferedwriter(std::move(w), std::move(pool));
+}
+
+Writer bufferedwriter(Writer w, std::size_t buffer_size,
+                      std::size_t max_buffers) {
+  return make_bufferedwriter(std::move(w), buffer_size, max_buffers);
+}
+
+Writer bufferedwriter(Writer w) { return make_bufferedwriter(std::move(w)); }
 
 base::Result writer_closed() {
   return base::Result::from_errno(EBADF, "io::Writer is closed");

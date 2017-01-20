@@ -19,6 +19,56 @@
 #include "io/reader.h"
 #include "io/writer.h"
 
+static constexpr char kHex[] = "0123456789abcdef";
+
+static std::string show(const std::vector<char>& vec, std::size_t idx) {
+  std::string out;
+  out.push_back('[');
+  std::size_t i = 0;
+  if (idx >= 5) {
+    out.append("... ");
+    i = idx - 3;
+  }
+  std::size_t j = vec.size();
+  bool abbrev_end = false;
+  if (vec.size() - idx >= 5) {
+    abbrev_end = true;
+    j = idx + 3;
+  }
+  while (i < j) {
+    unsigned char ch = vec[i];
+    out.push_back(kHex[(ch >> 4) & 0xfU]);
+    out.push_back(kHex[ch & 0xfU]);
+    out.push_back(' ');
+    ++i;
+  }
+  if (abbrev_end) {
+    out.append("...");
+  }
+  out.push_back(']');
+  return out;
+}
+
+static testing::AssertionResult equalvec(const char* aexpr, const char* bexpr,
+                                         const std::vector<char>& a,
+                                         const std::vector<char>& b) {
+  if (a.size() != b.size()) {
+    return testing::AssertionFailure()
+           << "lengths differ\n"
+           << "expected: " << aexpr << " (" << a.size() << " bytes)\n"
+           << "  actual: " << bexpr << " (" << b.size() << " bytes)";
+  }
+  for (std::size_t i = 0, n = a.size(); i < n; ++i) {
+    if (a[i] != b[i]) {
+      return testing::AssertionFailure()
+             << "vectors differ\n"
+             << "expected: " << aexpr << " " << show(a, i) << "\n"
+             << "  actual: " << bexpr << " " << show(b, i);
+    }
+  }
+  return testing::AssertionSuccess();
+}
+
 // StringWriter {{{
 
 TEST(StringWriter, Write) {
@@ -363,6 +413,134 @@ TEST(FDWriter, ThreadedWrite) {
   event::ManagerOptions mo;
   mo.set_minimal_threaded_mode();
   FDWriterTest(std::move(mo));
+}
+
+// }}}
+// BufferedWriter {{{
+
+void TestBufferedWriter(const event::ManagerOptions& mo, const char* what) {
+  event::Manager m;
+  ASSERT_OK(event::new_manager(&m, mo));
+
+  base::Options o;
+  o.get<io::Options>().manager = m;
+
+  std::string path;
+  base::FD fd;
+  ASSERT_OK(base::make_tempfile(&path, &fd,
+                                "mojo_io_writer_TestBufferedWriter_XXXXXXXX"));
+  auto cleanup = base::cleanup([&path] { ::unlink(path.c_str()); });
+
+  LOG(INFO) << "[TestBufferedWriter:" << what << ":begin]";
+
+  io::Writer w = io::bufferedwriter(io::fdwriter(fd));
+
+  w.write_u8(0x00U, o);
+  w.write_u8(0x7fU, o);
+  w.write_u8(0x80U, o);
+  w.write_u8(0xffU, o);
+  w.write_u16(0x0000U, base::kBigEndian, o);
+  w.write_u16(0x7fffU, base::kBigEndian, o);
+  w.write_u16(0x8000U, base::kBigEndian, o);
+  w.write_u16(0xffffU, base::kBigEndian, o);
+  w.write_u32(0x00000000U, base::kBigEndian, o);
+  w.write_u32(0x7fffffffU, base::kBigEndian, o);
+  w.write_u32(0x80000000U, base::kBigEndian, o);
+  w.write_u32(0xffffffffU, base::kBigEndian, o);
+  w.write_u64(0x0000000000000000ULL, base::kBigEndian, o);
+  w.write_u64(0x7fffffffffffffffULL, base::kBigEndian, o);
+  w.write_u64(0x8000000000000000ULL, base::kBigEndian, o);
+  w.write_u64(0xffffffffffffffffULL, base::kBigEndian, o);
+
+  w.write_s8(0x01, o);
+  w.write_s8(0x7f, o);
+  w.write_s8(-0x7f, o);
+  w.write_s8(-0x01, o);
+  w.write_s16(0x0001, base::kBigEndian, o);
+  w.write_s16(0x7fff, base::kBigEndian, o);
+  w.write_s16(-0x7fff, base::kBigEndian, o);
+  w.write_s16(-0x0001, base::kBigEndian, o);
+  w.write_s32(0x00000001, base::kBigEndian, o);
+  w.write_s32(0x7fffffff, base::kBigEndian, o);
+  w.write_s32(-0x7fffffff, base::kBigEndian, o);
+  w.write_s32(-0x00000001, base::kBigEndian, o);
+  w.write_s64(0x0000000000000001LL, base::kBigEndian, o);
+  w.write_s64(0x7fffffffffffffffLL, base::kBigEndian, o);
+  w.write_s64(-0x7fffffffffffffffLL, base::kBigEndian, o);
+  w.write_s64(-0x0000000000000001LL, base::kBigEndian, o);
+
+  w.write_uvarint(0, o);
+  w.write_uvarint(1, o);
+  w.write_uvarint(127, o);
+  w.write_uvarint(128, o);
+  w.write_uvarint(300, o);
+  w.write_uvarint(16383, o);
+  w.write_uvarint(65535, o);
+  w.write_uvarint(0xffffffffffffffffULL, o);
+
+  w.write_svarint(0, o);
+  w.write_svarint(1, o);
+  w.write_svarint(127, o);
+  w.write_svarint(128, o);
+  w.write_svarint(300, o);
+  w.write_svarint(-1, o);
+
+  w.write_svarint_zigzag(0, o);
+  w.write_svarint_zigzag(1, o);
+  w.write_svarint_zigzag(2, o);
+  w.write_svarint_zigzag(150, o);
+  w.write_svarint_zigzag(-1, o);
+  w.write_svarint_zigzag(-2, o);
+  w.write_svarint_zigzag(-150, o);
+
+  w.flush(o);
+
+  std::vector<char> data;
+  EXPECT_OK(base::seek(nullptr, fd, 0, SEEK_SET));
+  EXPECT_OK(base::read_all(&data, fd, path.c_str()));
+
+  constexpr unsigned char kExpected[] = {
+      0x00, 0x7f, 0x80, 0xff, 0x00, 0x00, 0x7f, 0xff, 0x80, 0x00, 0xff, 0xff,
+      0x00, 0x00, 0x00, 0x00, 0x7f, 0xff, 0xff, 0xff, 0x80, 0x00, 0x00, 0x00,
+      0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x80, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0x01, 0x7f, 0x81, 0xff, 0x00, 0x01, 0x7f, 0xff, 0x80, 0x01, 0xff, 0xff,
+      0x00, 0x00, 0x00, 0x01, 0x7f, 0xff, 0xff, 0xff, 0x80, 0x00, 0x00, 0x01,
+      0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+      0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x80, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0x00, 0x01, 0x7f, 0x80, 0x01, 0xac, 0x02, 0xff, 0x7f, 0xff, 0xff, 0x03,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01, 0x00, 0x01,
+      0x7f, 0x80, 0x01, 0xac, 0x02, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0x01, 0x00, 0x02, 0x04, 0xac, 0x02, 0x01, 0x03, 0xab, 0x02,
+  };
+  const char* p = reinterpret_cast<const char*>(&kExpected);
+  std::vector<char> expected(p, p + sizeof(kExpected));
+
+  EXPECT_PRED_FORMAT2(equalvec, expected, data);
+
+  LOG(INFO) << "[TestBufferedWriter:" << what << ":end]";
+
+  EXPECT_OK(fd->close());
+  m.shutdown();
+  cleanup.run();
+
+  base::log_flush();
+}
+
+TEST(BufferedWriter, Async) {
+  event::ManagerOptions mo;
+  mo.set_async_mode();
+  TestBufferedWriter(mo, "async");
+}
+
+TEST(BufferedWriter, Threaded) {
+  event::ManagerOptions mo;
+  mo.set_threaded_mode();
+  mo.set_num_pollers(2);
+  mo.dispatcher().set_num_workers(2);
+  TestBufferedWriter(mo, "threaded");
 }
 
 // }}}
