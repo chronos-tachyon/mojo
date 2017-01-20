@@ -304,6 +304,69 @@ TEST(StringPiece, Find) {
   static_assert(a.rfind("xxx") == SP::npos, "");
 }
 
+TEST(String, TrimWhitespace) {
+  struct TestRow {
+    std::string input;
+    std::string ltrimmed;
+    std::string rtrimmed;
+    std::string trimmed;
+  };
+  std::vector<TestRow> testdata{
+      {"foo", "foo", "foo", "foo"},
+      {"foo\t", "foo\t", "foo", "foo"},
+      {"\tfoo", "foo", "\tfoo", "foo"},
+      {"\tfoo\t", "foo\t", "\tfoo", "foo"},
+      {" \t\n\v\f\r", "", "", ""},
+  };
+  for (const auto& row : testdata) {
+    SCOPED_TRACE(row.input);
+
+    std::string tmp = row.input;
+    base::ltrim_whitespace(&tmp);
+    EXPECT_EQ(row.ltrimmed, tmp);
+
+    tmp = row.input;
+    base::rtrim_whitespace(&tmp);
+    EXPECT_EQ(row.rtrimmed, tmp);
+
+    tmp = row.input;
+    base::trim_whitespace(&tmp);
+    EXPECT_EQ(row.trimmed, tmp);
+  }
+}
+
+TEST(String, TrimEOL) {
+  struct TestRow {
+    std::string input;
+    std::string ltrimmed;
+    std::string rtrimmed;
+    std::string trimmed;
+  };
+  std::vector<TestRow> testdata{
+      {"Line\r\n", "Line\r\n", "Line", "Line"},
+      {"foo", "foo", "foo", "foo"},
+      {"foo\n", "foo\n", "foo", "foo"},
+      {"\nfoo", "foo", "\nfoo", "foo"},
+      {"\nfoo\n", "foo\n", "\nfoo", "foo"},
+      {"\n\r", "", "", ""},
+  };
+  for (const auto& row : testdata) {
+    SCOPED_TRACE(row.input);
+
+    std::string tmp = row.input;
+    base::ltrim_whitespace(&tmp);
+    EXPECT_EQ(row.ltrimmed, tmp);
+
+    tmp = row.input;
+    base::rtrim_whitespace(&tmp);
+    EXPECT_EQ(row.rtrimmed, tmp);
+
+    tmp = row.input;
+    base::trim_whitespace(&tmp);
+    EXPECT_EQ(row.trimmed, tmp);
+  }
+}
+
 TEST(Splitter, Fixed) {
   auto splitter = base::split::fixed_length(3).limit(2);
   struct TestRow {

@@ -26,10 +26,29 @@ struct is_exactly {
   constexpr bool operator()(char ch) const noexcept { return ch == c; }
 };
 
+struct is_oneof {
+  const char* set;
+
+  constexpr is_oneof(const char* s) noexcept : set(s) {}
+  constexpr bool operator()(char ch) const noexcept { return check(ch, set); }
+
+ private:
+  static constexpr bool check(char ch, const char* set) noexcept {
+    return *set && ((ch == *set) || check(ch, set + 1));
+  }
+};
+
 struct is_whitespace {
   constexpr is_whitespace() noexcept = default;
   constexpr bool operator()(char ch) const noexcept {
     return ch == ' ' || ch == '\t' || (ch >= '\n' && ch <= '\r');
+  }
+};
+
+struct is_eol {
+  constexpr is_eol() noexcept = default;
+  constexpr bool operator()(char ch) const noexcept {
+    return ch == '\n' || ch == '\r';
   }
 };
 
@@ -385,6 +404,50 @@ constexpr StringPiece strip_suffix(StringPiece sp,
   return sp.strip_suffix(suffix);
 }
 
+template <typename Predicate>
+void ltrim(Predicate pred, std::string* str) {
+  auto begin = str->begin(), end = str->end(), it = begin;
+  while (it != end && pred(*it)) ++it;
+  if (it != begin) str->erase(begin, it);
+}
+inline void ltrim(char ch, std::string* str) { ltrim(is_exactly(ch), str); }
+inline void ltrim(const char* set, std::string* str) {
+  ltrim(is_oneof(set), str);
+}
+inline void ltrim_whitespace(std::string* str) { ltrim(is_whitespace(), str); }
+inline void ltrim_eol(std::string* str) { ltrim(is_eol(), str); }
+
+template <typename Predicate>
+void rtrim(Predicate pred, std::string* str) {
+  auto begin = str->begin(), end = str->end(), it = end;
+  while (it != begin) {
+    --it;
+    if (!pred(*it)) {
+      ++it;
+      break;
+    }
+  }
+  if (it != end) str->erase(it, end);
+}
+inline void rtrim(char ch, std::string* str) { rtrim(is_exactly(ch), str); }
+inline void rtrim(const char* set, std::string* str) {
+  rtrim(is_oneof(set), str);
+}
+inline void rtrim_whitespace(std::string* str) { rtrim(is_whitespace(), str); }
+inline void rtrim_eol(std::string* str) { rtrim(is_eol(), str); }
+
+template <typename Predicate>
+void trim(Predicate pred, std::string* str) {
+  ltrim(pred, str);
+  rtrim(pred, str);
+}
+inline void trim(char ch, std::string* str) { trim(is_exactly(ch), str); }
+inline void trim(const char* set, std::string* str) {
+  trim(is_oneof(set), str);
+}
+inline void trim_whitespace(std::string* str) { trim(is_whitespace(), str); }
+inline void trim_eol(std::string* str) { trim(is_eol(), str); }
+
 class SplitterImpl {
  protected:
   SplitterImpl() noexcept = default;
@@ -532,7 +595,9 @@ class Join {
  private:
   friend class Joiner;
 
-  Join(Vector v, Pointer p, bool s) noexcept : vec_(std::move(v)), ptr_(std::move(p)), skip_(s) {}
+  Join(Vector v, Pointer p, bool s) noexcept : vec_(std::move(v)),
+                                               ptr_(std::move(p)),
+                                               skip_(s) {}
 
   Vector vec_;
   Pointer ptr_;
@@ -609,10 +674,12 @@ class Joiner {
     return Join(vec, ptr_, skip_);
   }
 
-  void join_append(std::string* out, const std::vector<StringPiece>& vec) const {
+  void join_append(std::string* out,
+                   const std::vector<StringPiece>& vec) const {
     join(vec).append_to(out);
   }
-  void join_append(std::string* out, const std::vector<std::string>& vec) const {
+  void join_append(std::string* out,
+                   const std::vector<std::string>& vec) const {
     join(vec).append_to(out);
   }
   template <typename... Args>

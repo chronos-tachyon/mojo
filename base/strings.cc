@@ -10,7 +10,7 @@
 
 namespace base {
 
-namespace {
+inline namespace implementation {
 
 class FixedSplitter : public SplitterImpl {
  public:
@@ -175,7 +175,7 @@ static std::vector<std::string> V(const std::vector<StringPiece>& in) {
   return out;
 }
 
-}  // anonymous namespace
+}  // inline namespace implementation
 
 constexpr std::size_t StringPiece::npos;
 
