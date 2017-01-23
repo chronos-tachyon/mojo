@@ -322,6 +322,8 @@ class StringPiece {
                                                 cap(pos, size_ - sp.size_));
   }
 
+  std::size_t hash() const noexcept;
+
   void append_to(std::string* out) const;
   std::size_t length_hint() const noexcept { return size_; }
   std::string as_string() const { return std::string(data_, size_); }
@@ -722,5 +724,12 @@ Joiner on(std::string str);
 
 }  // namespace join
 }  // namespace base
+
+namespace std {
+template <>
+struct hash<base::StringPiece> {
+  std::size_t operator()(base::StringPiece sp) const noexcept { return sp.hash(); }
+};
+}  // namespace std
 
 #endif  // BASE_STRINGS_H

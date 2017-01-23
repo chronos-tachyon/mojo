@@ -8,10 +8,16 @@
 #include "base/logging.h"
 #include "external/com_googlesource_code_re2/re2/re2.h"
 
+static constexpr std::size_t BITS = sizeof(std::size_t) * 8;
+
+__attribute__((const)) static inline std::size_t rotate(
+    std::size_t x, unsigned int shift) noexcept {
+  return ((x >> shift) | (x << (BITS - shift)));
+}
+
 namespace base {
 
 inline namespace implementation {
-
 class FixedSplitter : public SplitterImpl {
  public:
   explicit FixedSplitter(std::size_t len) noexcept : len_(len) {}
@@ -178,6 +184,19 @@ static std::vector<std::string> V(const std::vector<StringPiece>& in) {
 }  // inline namespace implementation
 
 constexpr std::size_t StringPiece::npos;
+
+std::size_t StringPiece::hash() const noexcept {
+  if (empty()) return 0;
+  const unsigned char* p = reinterpret_cast<const unsigned char*>(data());
+  const unsigned char* q = p + size();
+  const std::size_t mul = 7907U + size() * 2U;
+  std::size_t h = size() * 3U;
+  while (p != q) {
+    h = rotate(h, 27) * mul + *p;
+    ++p;
+  }
+  return h;
+}
 
 void StringPiece::append_to(std::string* out) const {
   out->append(data_, size_);
