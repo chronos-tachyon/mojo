@@ -166,9 +166,20 @@ class LocalCacheBase : public Cache {
   std::size_t max_items() const noexcept { return maxi_; }
   std::size_t max_bytes() const noexcept { return maxb_; }
 
+  void mark_evicted(Item* item) {
+    std::size_t n = item->byte_size();
+    DCHECK_GE(numb_, n);
+    --numi_;
+    numb_ -= n;
+  }
+
+  void mark_forgotten(Item* item) {
+    map_.erase(item->key);
+  }
+
   virtual void clear() = 0;
   virtual void evict_one(Item* item) = 0;
-  virtual bool evict_any(std::size_t* num_bytes, std::string* key) = 0;
+  virtual void evict_any() = 0;
   virtual void place(ItemPtr item) = 0;
   virtual void replace(Item* item) = 0;
   virtual void touch(Item* item) = 0;
@@ -277,9 +288,6 @@ void LocalCacheBase::remove(event::Task* task, base::StringPiece key,
   DCHECK_GE(numi_, 1U);
   DCHECK_GE(numb_, item->byte_size());
   evict_one(item);
-  map_.erase(it);
-  numi_--;
-  numb_ -= item->byte_size();
   task->finish_ok();
 }
 
@@ -299,12 +307,8 @@ void LocalCacheBase::stats(event::Task* task, CacheStats* out,
 void LocalCacheBase::evict() {
   DCHECK_GT(numi_, 0U);
   DCHECK_GT(numb_, 0U);
-  std::size_t n = 0;
-  std::string key;
-  if (evict_any(&n, &key)) map_.erase(key);
-  DCHECK_GE(numb_, n);
-  --numi_;
-  numb_ -= n;
+  evict_any();
+  DCHECK_LT(numi_, max_items());
 }
 
 // }}}
@@ -321,7 +325,7 @@ class Clock : public LocalCacheBase {
  protected:
   void clear() override;
   void evict_one(Item* item) override;
-  bool evict_any(std::size_t* num_bytes, std::string* key) override;
+  void evict_any() override;
   void place(ItemPtr item) override;
   void replace(Item* item) override;
   void touch(Item* item) override;
@@ -344,6 +348,8 @@ void Clock::evict_one(Item* item) {
   for (ItemPtr* p = hand; p != end; ++p) {
     ItemPtr& slot = *p;
     if (slot.get() == item) {
+      mark_evicted(item);
+      mark_forgotten(item);
       slot.reset();
       if (p != hand) std::move_backward(hand, p, p + 1);
       return;
@@ -352,6 +358,8 @@ void Clock::evict_one(Item* item) {
   for (ItemPtr* p = begin; p != hand; ++p) {
     ItemPtr& slot = *p;
     if (slot.get() == item) {
+      mark_evicted(item);
+      mark_forgotten(item);
       slot.reset();
       std::move(p + 1, hand, p);
       --hand_;
@@ -361,14 +369,14 @@ void Clock::evict_one(Item* item) {
   LOG(DFATAL) << "BUG! Item in map_ but not in cache";
 }
 
-bool Clock::evict_any(std::size_t* num_bytes, std::string* key) {
+void Clock::evict_any() {
   while (true) {
     ItemPtr& slot = vec_[hand_];
     if (slot && !slot->used) {
-      *num_bytes = slot->byte_size();
-      *key = slot->key;
+      mark_evicted(slot.get());
+      mark_forgotten(slot.get());
       slot.reset();
-      return true;
+      return;
     }
     if (slot) slot->used = false;
     hand_ = (hand_ + 1) % max_items();
@@ -414,7 +422,7 @@ class LRU : public LocalCacheBase {
  protected:
   void clear() override;
   void evict_one(Item* item) override;
-  bool evict_any(std::size_t* num_bytes, std::string* key) override;
+  void evict_any() override;
   void place(ItemPtr item) override;
   void replace(Item* item) override;
   void touch(Item* item) override;
@@ -429,20 +437,21 @@ void LRU::evict_one(Item* item) {
   for (auto it = q_.begin(), end = q_.end(); it != end; ++it) {
     ItemPtr& slot = *it;
     if (slot.get() == item) {
+      mark_evicted(item);
+      mark_forgotten(item);
       slot.reset();
       q_.erase(it);
       return;
     }
   }
-  LOG(DFATAL) << "BUG! Item in map_ but not in q_";
+  LOG(DFATAL) << "BUG! Item in map_ but not in cache";
 }
 
-bool LRU::evict_any(std::size_t* num_bytes, std::string* key) {
-  ItemPtr item = std::move(q_.back());
+void LRU::evict_any() {
+  ItemPtr ptr = std::move(q_.back());
   q_.pop_back();
-  *num_bytes = item->byte_size();
-  *key = item->key;
-  return true;
+  mark_evicted(ptr.get());
+  mark_forgotten(ptr.get());
 }
 
 void LRU::place(ItemPtr item) { q_.push_front(std::move(item)); }
@@ -459,7 +468,7 @@ void LRU::touch(Item* item) {
       return;
     }
   }
-  LOG(DFATAL) << "BUG! Item in map_ but not in q_";
+  LOG(DFATAL) << "BUG! Item in map_ but not in cache";
 }
 
 void LRU::visualize(event::Task* task, std::string* out,
@@ -499,7 +508,7 @@ class CART : public LocalCacheBase {
  protected:
   void clear() override;
   void evict_one(Item* item) override;
-  bool evict_any(std::size_t* num_bytes, std::string* key) override;
+  void evict_any() override;
   void place(ItemPtr item) override;
   void replace(Item* item) override;
   void touch(Item* item) override;
@@ -525,6 +534,11 @@ class CART : public LocalCacheBase {
   void t1_advance() noexcept {
     ++t1hand_;
     t1_wrap();
+  }
+
+  void t1_regress() noexcept {
+    if (t1hand_ == 0) t1hand_ += split_;
+    --t1hand_;
   }
 
   // }}}
@@ -575,10 +589,11 @@ class CART : public LocalCacheBase {
   }
 
   void assert_invariants() const noexcept;
-  void move_t1_head_to_t2_tail() noexcept;
-  void move_t2_head_to_t1_tail() noexcept;
+  void move_t1_index_to_t1_tail(std::size_t i) noexcept;
   void move_t2_index_to_t1_tail(std::size_t i) noexcept;
   void move_dead_to_t1_tail(ItemPtr incoming) noexcept;
+  void move_t2_head_to_t1_tail() noexcept;
+  void move_t1_head_to_t2_tail() noexcept;
 
   std::vector<ItemPtr> vec_;  // T1: [0..split_); T2: [split_..end)
   std::deque<ItemPtr> b1_;    // B1
@@ -617,40 +632,53 @@ void CART::evict_one(Item* item) {
   for (std::size_t i = 0, n = vec_.size(); i < n; ++i) {
     ItemPtr& slot = vec_[i];
     if (slot.get() == item) {
-      if (slot->longterm)
+      bool longterm = slot->longterm;
+      mark_evicted(item);
+      mark_forgotten(item);
+      slot.reset();
+      if (longterm)
         --nl_;
       else
         --ns_;
-      if (i >= split_) move_t2_index_to_t1_tail(i);
       ++nn_;
-      slot.reset();
-      assert_invariants();
-      return;
+      if (i >= split_)
+        move_t2_index_to_t1_tail(i);
+      else
+        move_t1_index_to_t1_tail(i);
+      t1_regress();  // Back up t1_head by 1, so that t1_head is null
+      goto finish;
     }
   }
 
   for (auto it = b1_.begin(), end = b1_.end(); it != end; ++it) {
     ItemPtr& slot = *it;
     if (slot.get() == item) {
+      mark_forgotten(item);
       b1_.erase(it);
-      assert_invariants();
-      return;
+      goto free_a_slot;
     }
   }
 
   for (auto it = b2_.begin(), end = b2_.end(); it != end; ++it) {
     ItemPtr& slot = *it;
     if (slot.get() == item) {
+      mark_forgotten(item);
       b2_.erase(it);
-      assert_invariants();
-      return;
+      goto free_a_slot;
     }
   }
 
   LOG(DFATAL) << "BUG! Item in map_ but not in cache";
+
+free_a_slot:
+  evict_any();
+
+finish:
+  assert_invariants();
+  DCHECK(t1_head() == nullptr);
 }
 
-bool CART::evict_any(std::size_t* num_bytes, std::string* key) {
+void CART::evict_any() {
   assert_invariants();
 
   // If the cache is not full, skip ahead and pick an item to evict.
@@ -693,50 +721,44 @@ skip_aging:
   // Bansal Fig. 3 lines 36-40
   if (t1_size() >= max(1, p_)) {
     ItemPtr& slot = t1_head();
-    *num_bytes = slot->byte_size();
+    mark_evicted(slot.get());
     slot->kill();
     b1_.push_front(std::move(slot));
     --ns_;
     ++nn_;
   } else {
     ItemPtr& slot = t2_head();
-    *num_bytes = slot->byte_size();
+    mark_evicted(slot.get());
     slot->kill();
     b2_.push_front(std::move(slot));
     move_t2_head_to_t1_tail();
     --nl_;
     ++nn_;
-    // Back up t1_head by 1, so that t1_head is null
-    if (t1hand_ == 0) t1hand_ += split_;
-    --t1hand_;
+    t1_regress();  // Back up t1_head by 1, so that t1_head is null
   }
 
-  ItemPtr ptr;
-  if (t2_size() + b2_.size() > max_items()) {
-    ptr = std::move(b2_.back());
-    b2_.pop_back();
-  } else {
-    // Bansal Fig. 3 lines 6-10
-    if (nn_ == 1 && b1_.size() + b2_.size() > max_items()) {
-      if (b1_.size() > q_ || b2_.empty()) {
-        ptr = std::move(b1_.back());
-        b1_.pop_back();
-      } else {
-        ptr = std::move(b2_.back());
-        b2_.pop_back();
-      }
+  // Bansal Fig. 3 lines 6-10
+  if (nn_ == 1 && b1_.size() + b2_.size() > max_items()) {
+    std::deque<ItemPtr>* queue = nullptr;
+    if (b1_.size() > q_ || b2_.empty()) {
+      queue = &b1_;
+    } else {
+      queue = &b2_;
     }
+    auto ptr = std::move(queue->back());
+    queue->pop_back();
+    mark_forgotten(ptr.get());
   }
-  bool remove_key = false;
-  if (ptr) {
-    *key = ptr->key;
-    remove_key = true;
+
+  if (t2_size() + b2_.size() > max_items()) {
+    auto ptr = std::move(b2_.back());
+    b2_.pop_back();
+    mark_forgotten(ptr.get());
   }
 
   // Postconditions:
   assert_invariants();
   DCHECK(t1_head() == nullptr);
-  return remove_key;
 }
 
 void CART::place(ItemPtr item) {
@@ -902,6 +924,159 @@ void CART::assert_invariants() const noexcept {
 #endif
 }
 
+void CART::move_t1_index_to_t1_tail(std::size_t i) noexcept {
+  // Let F denote t1hand_,
+  //     I denote i.
+  //
+  //    BEFORE          AFTER
+  //
+  //    0[1 2 3]4|...   1 2 3 0 4|...
+  //    ^       ^             ^ ^
+  //    I       F             * F
+  //
+  //    0 1[2 3]4|...   0 2 3 1 4|...
+  //      ^     ^             ^ ^
+  //      I     F             * F
+  //
+  //    0 1 2[3]4|...   0 1 3 2 4|...
+  //        ^   ^             ^ ^
+  //        I   F             * F
+  //
+  //    0[1]2 3 4|...   0 2 1 3 4|...
+  //      ^ ^             ^ ^
+  //      F I             * F
+  //
+  //    0[1 2]3 4|...   0 3 1 2 4|...
+  //      ^   ^           ^ ^
+  //      F   I           * F
+  //
+  //    0[1 2 3]4|...   0 4 1 2 3|...
+  //      ^     ^         ^ ^
+  //      F     I         * F
+  //
+  //   [0]1 2 3 4|...   1 0 2 3 4|...
+  //    ^ ^             ^ ^
+  //    F I             * F
+  //
+  //   [0 1]2 3 4|...   2 0 1 3 4|...
+  //    ^   ^           ^ ^
+  //    F   I           * F
+  //
+  //   [0 1 2]3 4|...   3 0 1 2 4|...
+  //    ^     ^         ^ ^
+  //    F     I         * F
+  //
+
+  DCHECK_GT(split_, 0U);
+  DCHECK_LT(i, split_);
+  if (i < t1hand_) {
+    if (i == t1hand_ - 1) return;
+    auto pp = vec_.data() + i;
+    auto p = pp + 1;
+    auto q = vec_.data() + t1hand_;
+    auto qq = q - 1;
+    ItemPtr tmp = std::move(*pp);
+    std::move(p, q, pp);
+    *qq = std::move(tmp);
+  } else if (t1hand_ == i) {
+    t1_advance();
+  } else {
+    if (t1hand_ == 0 && i == split_ - 1) return;
+    auto p = vec_.data() + t1hand_;
+    auto q = vec_.data() + i;
+    auto qq = q + 1;
+    auto tmp = std::move(*q);
+    std::move_backward(p, q, qq);
+    *p = std::move(tmp);
+    t1_advance();
+  }
+}
+
+void CART::move_t2_index_to_t1_tail(std::size_t i) noexcept {
+  // Let F denote t1hand_,
+  //     G denote split_,
+  //     H denote split_ + t2hand_,
+  //     I denote i.
+  //
+  // Without loss of generality, assume F = 0.
+  //
+  //    BEFORE          AFTER
+  //
+  //    0 1|2 3 4 5     0 1 2|3 4 5     split_: 2 -> 3
+  //    ^  |^           ^   ^|^         t2hand_: 0 (unchanged)
+  //    F  |GHI         F   *|GH
+  //
+  //    0 1|2 3 4 5     0 1 2|3 4 5     split_: 2 -> 3
+  //    ^  |^     ^     ^   ^|^   ^     t2hand_: 3 -> 2
+  //    F  |GI    H     F   *|G   H
+  //
+  //    0 1|2 3 4 5     0 1 5|2 3 4     split_: 2 -> 3
+  //    ^  |^     ^     ^   ^|^         t2hand_: 0 (unchanged)
+  //    F  |GH    I     F   *|GH
+  //
+  //    0 1|2 3 4 5     0 1 5|2 3 4     split_: 2 -> 3
+  //    ^  |^     ^     ^   ^|^         t2hand_: 3 -> 0 (wrapped mod 3)
+  //    F  |G     HI    F   *|GH
+  //
+  // Observations:
+  // - We need to wrap t2hand_ mod split_ after incrementing split_.
+  // - We need to decrement t2hand_ iff H > I.
+  //
+
+  DCHECK_LT(split_, max_items());
+  DCHECK_GE(i, split_);
+  DCHECK_LT(i, max_items());
+
+  ItemPtr *p, *q;
+  if (t1hand_ == 0) {
+    p = vec_.data() + split_;
+  } else {
+    p = vec_.data() + t1hand_;
+    ++t1hand_;
+  }
+  q = vec_.data() + i;
+  if (p != q) {
+    ItemPtr tmp = std::move(*q);
+    std::move_backward(p, q, q + 1);
+    *p = std::move(tmp);
+  }
+  if (t2hand_ > i - split_) --t2hand_;
+  ++split_;
+  t2_wrap();
+}
+
+void CART::move_dead_to_t1_tail(ItemPtr incoming) noexcept {
+  DCHECK_GT(nn_, 0U);
+
+  std::size_t i = t1hand_;
+  while (i > 0) {
+    --i;
+    if (vec_[i] == nullptr) {
+      vec_[i] = std::move(incoming);
+      move_t1_index_to_t1_tail(i);
+      return;
+    }
+  }
+
+  i = split_;
+  while (i > t1hand_) {
+    --i;
+    if (vec_[i] == nullptr) {
+      vec_[i] = std::move(incoming);
+      move_t1_index_to_t1_tail(i);
+      return;
+    }
+  }
+
+  LOG(DFATAL) << "BUG! Found no nullptr values even though nn_ > 0";
+}
+
+void CART::move_t2_head_to_t1_tail() noexcept {
+  std::size_t i = split_ + t2hand_;
+  t2_advance();
+  move_t2_index_to_t1_tail(i);
+}
+
 void CART::move_t1_head_to_t2_tail() noexcept {
   // Let F denote t1hand_,
   //     G denote split_,
@@ -959,193 +1134,6 @@ void CART::move_t1_head_to_t2_tail() noexcept {
   if (split_ < max_items()) ++t2hand_;
   --split_;
   t1_wrap();
-}
-
-void CART::move_t2_head_to_t1_tail() noexcept {
-  // Let F denote t1hand_,
-  //     G denote split_,
-  //     H denote split_ + t2hand_.
-  //
-  //    BEFORE          DURING            AFTER
-  //
-  //    0 1 2|3 4 5     0 1 2!3 4 5       0 1 2 3|4 5
-  //    ^    |^               ^           ^      |^
-  //    F    |GH              pq          F      |GH
-  //
-  //    0 1 2|3 4 5     0 1 2[3]4 5       0 1 2 4|3 5
-  //    ^    |^ ^             ^ ^         ^      |^ ^
-  //    F    |G H             p q         F      |G H
-  //
-  //    0 1 2|3 4 5     0 1 2[3 4]5       0 1 2 5|3 4
-  //    ^    |^   ^           ^   ^       ^      |^
-  //    F    |G   H           p   q       F      |GH
-  //
-  //    0 1 2|3 4 5     0[1 2]3 4 5       0 3 1 2|4 5
-  //      ^  |^           ^   ^               ^  |^
-  //      F  |GH          p   q               F  |GH
-  //
-  //    0 1 2|3 4 5     0[1 2 3]4 5       0 4 1 2|3 5
-  //      ^  |^ ^         ^     ^             ^  |^ ^
-  //      F  |G H         p     q             F  |G H
-  //
-  //    0 1 2|3 4 5     0[1 2 3 4]5       0 5 1 2|3 4
-  //      ^  |^   ^       ^       ^           ^  |^
-  //      F  |G   H       p       q           F  |GH
-  //
-  //    0 1 2|3 4 5     0 1[2]3 4 5       0 1 3 2|4 5
-  //        ^|^             ^ ^                 ^|^
-  //        F|GH            p q                 F|GH
-  //
-  //    0 1 2|3 4 5     0 1[2 3]4 5       0 1 4 2|3 5
-  //        ^|^ ^           ^   ^               ^|^ ^
-  //        F|G H           p   q               F|G H
-  //
-  //    0 1 2|3 4 5     0 1[2 3 4]5       0 1 5 2|3 4
-  //        ^|^   ^         ^     ^             ^|^
-  //        F|G   H         p     q             F|GH
-  //
-
-  ItemPtr *p, *q;
-  if (t1hand_ == 0) {
-    p = vec_.data() + split_;
-    q = p + t2hand_;
-  } else {
-    p = vec_.data() + t1hand_;
-    q = vec_.data() + split_ + t2hand_;
-    ++t1hand_;
-  }
-  if (p != q) {
-    ItemPtr tmp = std::move(*q);
-    std::move_backward(p, q, q + 1);
-    *p = std::move(tmp);
-  }
-  ++split_;
-  t2_wrap();
-}
-
-void CART::move_t2_index_to_t1_tail(std::size_t i) noexcept {
-  // Let F denote t1hand_,
-  //     G denote split_,
-  //     H denote split_ + t2hand_,
-  //     I denote i.
-  //
-  // Without loss of generality, assume F = 0.
-  //
-  //    BEFORE          AFTER
-  //
-  //    0 1|2 3 4 5     0 1 2|3 4 5     split_: 2 -> 3
-  //    ^  |^           ^   ^|^         t2hand_: 0 (unchanged)
-  //    F  |GHI         F   *|GH
-  //
-  //    0 1|2 3 4 5     0 1 2|3 4 5     split_: 2 -> 3
-  //    ^  |^     ^     ^   ^|^   ^     t2hand_: 3 -> 2
-  //    F  |GI    H     F   *|G   H
-  //
-  //    0 1|2 3 4 5     0 1 5|2 3 4     split_: 2 -> 3
-  //    ^  |^     ^     ^   ^|^         t2hand_: 0 (unchanged)
-  //    F  |GH    I     F   *|GH
-  //
-  //    0 1|2 3 4 5     0 1 5|2 3 4     split_: 2 -> 3
-  //    ^  |^     ^     ^   ^|^         t2hand_: 3 -> 0 (wrapped mod 3)
-  //    F  |G     HI    F   *|GH
-  //
-  // Observations:
-  // - We need to wrap t2hand_ mod split_ after incrementing split_.
-  // - We need to decrement t2hand_ iff H > I.
-  //
-
-  ItemPtr *p, *q;
-  if (t1hand_ == 0) {
-    p = vec_.data() + split_;
-  } else {
-    p = vec_.data() + t1hand_;
-    ++t1hand_;
-  }
-  q = vec_.data() + i;
-  if (p != q) {
-    ItemPtr tmp = std::move(*q);
-    std::move_backward(p, q, q + 1);
-    *p = std::move(tmp);
-  }
-  if (t2hand_ > i - split_) --t2hand_;
-  ++split_;
-  t2_wrap();
-}
-
-void CART::move_dead_to_t1_tail(ItemPtr incoming) noexcept {
-  // Let F denote t1hand_,
-  //     N denote a null slot,
-  //     * denote the incoming slot.
-  //
-  //    BEFORE          AFTER
-  //
-  //    N[0 1 2]3|...   0 1 2 * 3|...
-  //            ^               ^
-  //            F               F
-  //
-  //    0 N[1 2]3|...   0 1 2 * 3|...
-  //            ^               ^
-  //            F               F
-  //
-  //    0 1 2 N!3|...   0 1 2 * 3|...
-  //            ^               ^
-  //            F               F
-  //
-  //    0[1]N 2 3|...   0 * 1 2 3|...
-  //      ^                 ^
-  //      F                 F
-  //
-  //    0[1 2]N 3|...   0 * 1 2 3|...
-  //      ^                 ^
-  //      F                 F
-  //
-  //    0[1 2 3]N|...   0 * 1 2 3|...
-  //      ^                 ^
-  //      F                 F
-  //
-  //    N 0 1 2 3|...   * 0 1 2 3|...
-  //    ^                 ^
-  //    F                 F
-  //
-  //    0 N 1 2 3|...   * 0 1 2 3|...
-  //    ^                 ^
-  //    F                 F
-  //
-  //    0 1 2 3 N|...   0 1 2 3 *|...
-  //    ^               ^
-  //    F               F
-  //
-
-  DCHECK_GT(nn_, 0U);
-
-  std::size_t i = t1hand_;
-  while (i > 0) {
-    --i;
-    auto pp = vec_.data() + i;
-    if (*pp == nullptr) {
-      auto p = vec_.data() + i + 1;
-      auto q = vec_.data() + t1hand_;
-      auto qq = q - 1;
-      if (p != q) std::move(p, q, pp);
-      *qq = std::move(incoming);
-      return;
-    }
-  }
-
-  i = split_;
-  while (i > t1hand_) {
-    --i;
-    auto p = vec_.data() + t1hand_;
-    auto q = vec_.data() + i;
-    if (*q == nullptr) {
-      std::move_backward(p, q, q + 1);
-      *q = std::move(incoming);
-      t1_advance();
-      return;
-    }
-  }
-
-  LOG(DFATAL) << "BUG! Found no nullptr values even though nn_ > 0";
 }
 
 // }}}
