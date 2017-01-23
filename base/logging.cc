@@ -27,7 +27,7 @@ namespace base {
 
 static pid_t my_gettid() { return syscall(SYS_gettid); }
 
-namespace {
+inline namespace implementation {
 struct Key {
   const char* file;
   unsigned int line;
@@ -113,11 +113,6 @@ static void process(base::Lock& main_lock, const LogEntry& entry) {
       ignore_exceptions([target] { target->flush(); });
     }
   }
-  if (entry.level >= LOG_LEVEL_DFATAL) {
-    if (entry.level >= LOG_LEVEL_FATAL || debug()) {
-      std::terminate();
-    }
-  }
 }
 
 static void thread_body() noexcept {
@@ -154,7 +149,15 @@ static void init() {
   }
 }
 
-}  // anonymous namespace
+static void maybe_terminate(const LogEntry& entry) {
+  if (entry.level >= LOG_LEVEL_DFATAL) {
+    if (entry.level >= LOG_LEVEL_FATAL || debug()) {
+      std::terminate();
+    }
+  }
+}
+
+}  // inline namespace implementation
 
 LogEntry::LogEntry(const char* file, unsigned int line, level_t level,
                    std::string message) noexcept : file(file),
@@ -251,11 +254,15 @@ void log(const LogEntry& entry) {
   if (g_thread_state == kSingleThreaded) {
     auto main_lock = base::acquire_lock(g_mu);
     process(main_lock, entry);
+    maybe_terminate(entry);
     return;
   }
   g_queue->push_back(entry);
   g_queue_put_cv.notify_one();
-  if (entry.level >= LOG_LEVEL_DFATAL) log_wait(queue_lock);
+  if (entry.level >= LOG_LEVEL_DFATAL) {
+    log_wait(queue_lock);
+    maybe_terminate(entry);
+  }
 }
 
 void log_single_threaded() {
