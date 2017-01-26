@@ -5,7 +5,8 @@
 
 #include "base/safemath.h"
 
-static_assert(SCHAR_MIN < -SCHAR_MAX, "this test assumes 2's-complement arithmetic");
+static_assert(SCHAR_MIN < -SCHAR_MAX,
+              "this test assumes 2's-complement arithmetic");
 static_assert(SCHAR_MAX == 127, "this test assumes 8-bit bytes");
 static_assert(UCHAR_MAX == 255U, "this test assumes 8-bit bytes");
 

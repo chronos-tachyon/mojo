@@ -173,9 +173,7 @@ class LocalCacheBase : public Cache {
     numb_ -= n;
   }
 
-  void mark_forgotten(Item* item) {
-    map_.erase(item->key);
-  }
+  void mark_forgotten(Item* item) { map_.erase(item->key); }
 
   virtual void clear() = 0;
   virtual void evict_one(Item* item) = 0;

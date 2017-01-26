@@ -1165,9 +1165,9 @@ static void TestBufferedReader(const base::Options& o, const char* what) {
   ASSERT_OK(base::truncate(fd));
 
   constexpr char kLineBytes[] =
-    "Line 1\n"
-    "Line 2\r\n"
-    "Line 3";
+      "Line 1\n"
+      "Line 2\r\n"
+      "Line 3";
 
   ptr = kLineBytes;
   len = sizeof(kLineBytes) - 1;

@@ -8,7 +8,7 @@
 using base::Duration;
 
 static Duration make(bool neg, base::safe<uint64_t> s,
-                            base::safe<uint32_t> ns) {
+                     base::safe<uint32_t> ns) {
   return Duration::from_raw(neg, s, ns);
 }
 

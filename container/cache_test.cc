@@ -19,11 +19,13 @@ struct TLCHelper {
   std::size_t hits;
   std::size_t misses;
 
-  TLCHelper(container::CachePtr c, base::Options o) noexcept : cache(std::move(c)), options(std::move(o)), hits(0), misses(0) {}
+  TLCHelper(container::CachePtr c, base::Options o) noexcept
+      : cache(std::move(c)),
+        options(std::move(o)),
+        hits(0),
+        misses(0) {}
 
-  void clear() {
-    EXPECT_OK(cache->clear(options));
-  }
+  void clear() { EXPECT_OK(cache->clear(options)); }
 
   std::string get(base::StringPiece key) {
     std::string out;

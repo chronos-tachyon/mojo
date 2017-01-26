@@ -312,10 +312,8 @@ TEST(String, TrimWhitespace) {
     std::string trimmed;
   };
   std::vector<TestRow> testdata{
-      {"foo", "foo", "foo", "foo"},
-      {"foo\t", "foo\t", "foo", "foo"},
-      {"\tfoo", "foo", "\tfoo", "foo"},
-      {"\tfoo\t", "foo\t", "\tfoo", "foo"},
+      {"foo", "foo", "foo", "foo"},     {"foo\t", "foo\t", "foo", "foo"},
+      {"\tfoo", "foo", "\tfoo", "foo"}, {"\tfoo\t", "foo\t", "\tfoo", "foo"},
       {" \t\n\v\f\r", "", "", ""},
   };
   for (const auto& row : testdata) {
