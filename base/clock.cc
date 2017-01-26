@@ -35,7 +35,7 @@ class SystemWallClock : public ClockImpl {
       throw std::system_error(err_no, std::system_category(),
                               "clock_gettime(2)");
     }
-    return Time::from_epoch(Duration::raw(false, ts.tv_sec, ts.tv_nsec));
+    return Time::from_epoch(Duration::from_raw(false, ts.tv_sec, ts.tv_nsec));
   }
 };
 
@@ -58,9 +58,9 @@ static Duration compute_wall_minus_mono() {
       uint64_t(ts2.tv_sec) * internal::NS_PER_S + uint64_t(ts2.tv_nsec);
   ns /= 2;
 
-  Duration mt =
-      Duration::raw(false, ts0.tv_sec, ts0.tv_nsec) + base::nanoseconds(ns);
-  Duration wt = Duration::raw(false, ts1.tv_sec, ts1.tv_nsec);
+  Duration mt = Duration::from_raw(false, ts0.tv_sec, ts0.tv_nsec) +
+                base::nanoseconds(ns);
+  Duration wt = Duration::from_raw(false, ts1.tv_sec, ts1.tv_nsec);
   return wt - mt;
 }
 
@@ -82,7 +82,7 @@ class SystemMonotonicClock : public MonotonicClockImpl {
                               "clock_gettime(2)");
     }
     return MonotonicTime::from_epoch(
-        Duration::raw(false, ts.tv_sec, ts.tv_nsec));
+        Duration::from_raw(false, ts.tv_sec, ts.tv_nsec));
   }
   MonotonicTime convert(Time t) const override {
     return MonotonicTime::from_epoch(t.since_epoch() - wall_minus_mono());

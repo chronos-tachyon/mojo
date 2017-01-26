@@ -12,7 +12,7 @@ namespace base {
 class FakeClock : public ClockImpl {
  private:
   static Time default_now() noexcept {
-    return Time::from_epoch(Duration::raw(false, 1136239445U, 123456789U));
+    return Time::from_epoch(Duration::from_raw(false, 1136239445U, 123456789U));
   }
 
  public:
@@ -43,7 +43,7 @@ class FakeMonotonicClock : public MonotonicClockImpl {
   static MonotonicTime default_now() noexcept { return MonotonicTime(); }
 
   static Duration default_delta() noexcept {
-    return Duration::raw(false, 1136239445U, 123456789U);
+    return Duration::from_raw(false, 1136239445U, 123456789U);
   }
 
  public:

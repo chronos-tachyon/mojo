@@ -39,44 +39,26 @@ std::string MonotonicTime::as_string() const {
 
 Result time_from_timeval(Time* out, const struct timeval* tv) {
   CHECK_NOTNULL(out);
-  CHECK_NOTNULL(tv);
-  if (tv->tv_sec < 0 || tv->tv_usec < 0) return Result::not_implemented();
-  auto d = Duration::raw(false, tv->tv_sec, tv->tv_usec * 1000);
-  *out = Time::from_epoch(d);
-  return Result();
+  Duration d;
+  auto r = duration_from_timeval(&d, tv);
+  if (r) *out = Time::from_epoch(d);
+  return r;
 }
 
 Result time_from_timespec(Time* out, const struct timespec* ts) {
   CHECK_NOTNULL(out);
-  CHECK_NOTNULL(ts);
-  if (ts->tv_sec < 0 || ts->tv_nsec < 0) return Result::not_implemented();
-  auto d = Duration::raw(false, ts->tv_sec, ts->tv_nsec);
-  *out = Time::from_epoch(d);
-  return Result();
+  Duration d;
+  auto r = duration_from_timespec(&d, ts);
+  if (r) *out = Time::from_epoch(d);
+  return r;
 }
 
 Result timeval_from_time(struct timeval* out, Time time) {
-  CHECK_NOTNULL(out);
-  ::bzero(out, sizeof(*out));
-  if (time.before_epoch()) return Result::not_implemented();
-  uint64_t s;
-  uint32_t ns;
-  std::tie(std::ignore, s, ns) = time.since_epoch().raw();
-  out->tv_sec = s;
-  out->tv_usec = ns / 1000;
-  return Result();
+  return timeval_from_duration(out, time.since_epoch());
 }
 
 Result timespec_from_time(struct timespec* out, Time time) {
-  CHECK_NOTNULL(out);
-  ::bzero(out, sizeof(*out));
-  if (time.before_epoch()) return Result::not_implemented();
-  uint64_t s;
-  uint32_t ns;
-  std::tie(std::ignore, s, ns) = time.since_epoch().raw();
-  out->tv_sec = s;
-  out->tv_nsec = ns;
-  return Result();
+  return timespec_from_duration(out, time.since_epoch());
 }
 
 }  // namespace base

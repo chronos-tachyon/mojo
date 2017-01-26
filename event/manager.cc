@@ -702,10 +702,10 @@ base::Result ManagerImpl::arm(Record* myrec, base::Duration delay,
 
   struct itimerspec its;
   ::bzero(&its, sizeof(its));
-  its.it_value.tv_sec = std::get<1>(delay.raw());
-  its.it_value.tv_nsec = std::get<2>(delay.raw());
-  its.it_interval.tv_sec = std::get<1>(period.raw());
-  its.it_interval.tv_nsec = std::get<2>(period.raw());
+  auto r0 = base::timespec_from_duration(&its.it_value, delay);
+  auto r1 = base::timespec_from_duration(&its.it_interval, period);
+  auto r = r0.and_then(r1);
+  if (!r) return r;
 
   auto pair = src.fd->acquire_fd();
   int rc = ::timerfd_settime(pair.first, flags, &its, nullptr);

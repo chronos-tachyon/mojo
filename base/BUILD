@@ -13,10 +13,12 @@ cc_library(
     "duration.cc",
     "endian.cc",
     "fd.cc",
+    "int128.cc",
     "logging.cc",
     "mutex.cc",
     "options.cc",
     "result.cc",
+    "safemath.cc",
     "stopwatch.cc",
     "strings.cc",
     "time.cc",
@@ -33,10 +35,12 @@ cc_library(
     "duration.h",
     "endian.h",
     "fd.h",
+    "int128.h",
     "logging.h",
     "mutex.h",
     "options.h",
     "result.h",
+    "safemath.h",
     "stopwatch.h",
     "strings.h",
     "time.h",
@@ -107,6 +111,17 @@ cc_test(
 )
 
 cc_test(
+  name = "int128_test",
+  srcs = ["int128_test.cc"],
+  deps = [
+    ":base",
+    "//external:gtest",
+  ],
+  size = "small",
+  timeout = "short",
+)
+
+cc_test(
   name = "logging_test",
   srcs = ["logging_test.cc"],
   deps = [
@@ -133,6 +148,17 @@ cc_test(
 cc_test(
   name = "result_test",
   srcs = ["result_test.cc"],
+  deps = [
+    ":base",
+    "//external:gtest",
+  ],
+  size = "small",
+  timeout = "short",
+)
+
+cc_test(
+  name = "safemath_test",
+  srcs = ["safemath_test.cc"],
   deps = [
     ":base",
     "//external:gtest",
