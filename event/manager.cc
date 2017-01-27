@@ -1087,12 +1087,12 @@ base::Result Handle::get(Set* out) const {
   return base::Result();
 }
 
-base::Result Handle::modify(Set set) {
+base::Result Handle::modify(Set set) const {
   assert_valid();
   return ptr_->modify(rec_.get(), set);
 }
 
-base::Result Handle::set_at(base::MonotonicTime at) {
+base::Result Handle::set_at(base::MonotonicTime at) const {
   assert_valid();
   base::Duration delay = at.since_epoch();
   if (delay.is_zero() || delay.is_neg())
@@ -1101,7 +1101,7 @@ base::Result Handle::set_at(base::MonotonicTime at) {
   return ptr_->arm(rec_.get(), delay, base::Duration(), true);
 }
 
-base::Result Handle::set_delay(base::Duration delay) {
+base::Result Handle::set_delay(base::Duration delay) const {
   assert_valid();
   if (delay.is_zero() || delay.is_neg())
     return base::Result::invalid_argument(
@@ -1109,7 +1109,7 @@ base::Result Handle::set_delay(base::Duration delay) {
   return ptr_->arm(rec_.get(), delay, base::Duration(), false);
 }
 
-base::Result Handle::set_periodic(base::Duration period) {
+base::Result Handle::set_periodic(base::Duration period) const {
   assert_valid();
   if (period.is_zero() || period.is_neg())
     return base::Result::invalid_argument(
@@ -1118,7 +1118,7 @@ base::Result Handle::set_periodic(base::Duration period) {
 }
 
 base::Result Handle::set_periodic_at(base::Duration period,
-                                     base::MonotonicTime at) {
+                                     base::MonotonicTime at) const {
   assert_valid();
   base::Duration delay = at.since_epoch();
   if (period.is_zero() || period.is_neg())
@@ -1131,7 +1131,7 @@ base::Result Handle::set_periodic_at(base::Duration period,
 }
 
 base::Result Handle::set_periodic_delay(base::Duration period,
-                                        base::Duration delay) {
+                                        base::Duration delay) const {
   assert_valid();
   if (period.is_zero() || period.is_neg())
     return base::Result::invalid_argument(
@@ -1142,7 +1142,7 @@ base::Result Handle::set_periodic_delay(base::Duration period,
   return ptr_->arm(rec_.get(), delay, period, false);
 }
 
-base::Result Handle::cancel() {
+base::Result Handle::cancel() const {
   assert_valid();
   base::Duration zero;
   return ptr_->arm(rec_.get(), zero, zero, false);
@@ -1153,7 +1153,7 @@ base::Result Handle::fire(int value) const {
   return ptr_->fire(rec_.get(), value);
 }
 
-base::Result Handle::disable() {
+base::Result Handle::disable() const {
   if (ptr_ && rec_) return ptr_->disable(rec_.get());
   return base::Result();
 }

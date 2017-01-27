@@ -190,42 +190,42 @@ class Handle {
   base::Result get(Set* out) const;
 
   // Replaces the set of FD events which the Handler is interested in.
-  base::Result modify(Set set);
+  base::Result modify(Set set) const;
 
   // Arms the timer event as a one-shot timer for the given absolute time.
   // The time is specified in terms of the |base::system_monotonic_clock()|.
-  base::Result set_at(base::MonotonicTime at);
-  base::Result set_at(base::Time at) {
+  base::Result set_at(base::MonotonicTime at) const;
+  base::Result set_at(base::Time at) const {
     return set_at(base::system_monotonic_clock().convert(at));
   }
 
   // Arms the timer event as a one-shot timer for a time relative to now.
-  base::Result set_delay(base::Duration delay);
+  base::Result set_delay(base::Duration delay) const;
 
   // Arms the timer event as a periodic timer with the given period.
-  base::Result set_periodic(base::Duration period);
+  base::Result set_periodic(base::Duration period) const;
 
   // Arms the timer event as a periodic timer with the given period.
   // The first event will arrive at the given absolute time.
-  base::Result set_periodic_at(base::Duration period, base::MonotonicTime at);
-  base::Result set_periodic_at(base::Duration period, base::Time at) {
+  base::Result set_periodic_at(base::Duration period, base::MonotonicTime at) const;
+  base::Result set_periodic_at(base::Duration period, base::Time at) const {
     return set_periodic_at(period, base::system_monotonic_clock().convert(at));
   }
 
   // Arms the timer event as a periodic timer with the given period.
   // The first event will arrive after the specified delay.
-  base::Result set_periodic_delay(base::Duration period, base::Duration delay);
+  base::Result set_periodic_delay(base::Duration period, base::Duration delay) const;
 
   // Disarms the timer event. The Handle remains valid, but it produces no
   // further events until it is armed again.
-  base::Result cancel();
+  base::Result cancel() const;
 
   // Triggers a generic event.
   // |value| will be available as |data.int_value| in the Handler.
   base::Result fire(int value = 0) const;
 
   // Unbinds the Handler from future file descriptor events.
-  base::Result disable();
+  base::Result disable() const;
 
   // Waits for all Handler calls to complete.
   // PRECONDITION: |disable()| was called
