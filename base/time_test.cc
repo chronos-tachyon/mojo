@@ -6,13 +6,21 @@
 #include "base/time.h"
 
 TEST(Time, AsString) {
+  base::Duration delta = base::seconds(9000) + base::nanoseconds(1);
   base::Time epoch;
-  base::Time t = epoch + base::seconds(9000) + base::nanoseconds(1);
-  EXPECT_EQ("Time(Duration(false, 9000, 1))", t.as_string());
+  base::Time t = epoch + delta;
+  base::Time u = epoch - delta;
+  EXPECT_EQ("T+0", epoch.as_string());
+  EXPECT_EQ("T+2h30m0.000000001s", t.as_string());
+  EXPECT_EQ("T-2h30m0.000000001s", u.as_string());
 }
 
 TEST(MonotonicTime, AsString) {
+  base::Duration delta = base::seconds(9000) + base::nanoseconds(1);
   base::MonotonicTime epoch;
-  base::MonotonicTime t = epoch + base::seconds(9000) + base::nanoseconds(1);
-  EXPECT_EQ("MonotonicTime(Duration(false, 9000, 1))", t.as_string());
+  base::MonotonicTime t = epoch + delta;
+  base::MonotonicTime u = epoch - delta;
+  EXPECT_EQ("M+0", epoch.as_string());
+  EXPECT_EQ("M+2h30m0.000000001s", t.as_string());
+  EXPECT_EQ("M-2h30m0.000000001s", u.as_string());
 }

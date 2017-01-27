@@ -10,6 +10,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <iosfwd>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -332,6 +333,8 @@ class Duration {
 };
 
 inline void swap(Duration& a, Duration& b) noexcept { a.swap(b); }
+
+std::ostream& operator<<(std::ostream& o, Duration d);
 
 // Constructors for Duration {{{
 

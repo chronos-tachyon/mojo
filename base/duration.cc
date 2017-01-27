@@ -4,7 +4,7 @@
 #include "base/duration.h"
 
 #include <cmath>
-#include <sstream>
+#include <ostream>
 
 #include "base/int128.h"
 #include "base/logging.h"
@@ -53,6 +53,7 @@ static Duration from_ldbl(LD x) {
     neg = true;
     x = -x;
   }
+  x = ::round(x);
   auto quo = ::floor(x / NS_PER_S);
   auto rem = ::floor(x - quo * NS_PER_S);
   return Duration::from_raw(neg, quo, rem);
@@ -102,18 +103,70 @@ std::pair<double, Duration> divmod(Duration a, Duration b) {
 }
 
 void Duration::append_to(std::string* out) const {
-  std::ostringstream os;
-  os << std::boolalpha << "Duration(" << rep_.neg << ", " << rep_.s.value()
-     << ", " << rep_.ns.value() << ")";
-  out->append(os.str());
+  CHECK_NOTNULL(out);
+  uint64_t s = rep_.s.value();
+  uint32_t ns = rep_.ns.value();
+  if (is_neg()) out->push_back('-');
+  if (s > 0) {
+    if (s >= S_PER_HR) {
+      auto hr = s / S_PER_HR;
+      s = s % S_PER_HR;
+      ull_append_to(out, hr);
+      out->push_back('h');
+    }
+    if (s >= S_PER_MIN) {
+      auto min = s / S_PER_MIN;
+      s = s % S_PER_MIN;
+      ui_append_to(out, min);
+      out->push_back('m');
+    }
+    if (s || ns) {
+      ui_append_to(out, s);
+      if (ns > 0) {
+        char reversed[9];
+        for (std::size_t i = 0; i < 9; ++i) {
+          reversed[i] = "0123456789"[ns % 10];
+          ns /= 10;
+        }
+
+        std::size_t j = 0;
+        while (j < 9 && reversed[j] == '0') ++j;
+
+        std::size_t i = 9;
+        out->push_back('.');
+        while (i > j) {
+          --i;
+          out->push_back(reversed[i]);
+        }
+      }
+      out->push_back('s');
+    }
+  } else if (ns >= NS_PER_MS && (ns % NS_PER_MS) == 0) {
+    ui_append_to(out, ns / NS_PER_MS);
+    out->append("ms");
+  } else if (ns >= NS_PER_US && (ns % NS_PER_US) == 0) {
+    ui_append_to(out, ns / NS_PER_US);
+    out->append("µs");
+  } else if (ns > 0) {
+    ui_append_to(out, ns);
+    out->append("ns");
+  } else {
+    out->push_back('0');
+  }
 }
 
-std::size_t Duration::length_hint() const noexcept { return 64; }
+std::size_t Duration::length_hint() const noexcept {
+  return ::ceil(std::log10(rep_.s.value())) + 12;
+}
 
 std::string Duration::as_string() const {
   std::string out;
   append_to(&out);
   return out;
+}
+
+std::ostream& operator<<(std::ostream& o, Duration d) {
+  return (o << d.as_string());
 }
 
 Result duration_from_timeval(Duration* out, const struct timeval* tv) {

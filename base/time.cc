@@ -6,7 +6,7 @@
 #include <time.h>
 
 #include <cstring>
-#include <sstream>
+#include <ostream>
 #include <stdexcept>
 
 #include "base/logging.h"
@@ -14,10 +14,13 @@
 namespace base {
 
 void Time::append_to(std::string* out) const {
-  std::ostringstream os;
-  os << "Time(" << d_.as_string() << ")";  // TODO: friendlier output
-  out->append(os.str());
+  CHECK_NOTNULL(out);
+  out->push_back('T');
+  if (!d_.is_neg()) out->push_back('+');
+  d_.append_to(out);
 }
+
+std::size_t Time::length_hint() const noexcept { return d_.length_hint() + 1; }
 
 std::string Time::as_string() const {
   std::string out;
@@ -25,16 +28,29 @@ std::string Time::as_string() const {
   return out;
 }
 
+std::ostream& operator<<(std::ostream& o, Time t) {
+  return (o << t.as_string());
+}
+
 void MonotonicTime::append_to(std::string* out) const {
-  std::ostringstream os;
-  os << "MonotonicTime(" << d_.as_string() << ")";
-  out->append(os.str());
+  CHECK_NOTNULL(out);
+  out->push_back('M');
+  if (!d_.is_neg()) out->push_back('+');
+  d_.append_to(out);
+}
+
+std::size_t MonotonicTime::length_hint() const noexcept {
+  return d_.length_hint() + 1;
 }
 
 std::string MonotonicTime::as_string() const {
   std::string out;
   append_to(&out);
   return out;
+}
+
+std::ostream& operator<<(std::ostream& o, MonotonicTime t) {
+  return (o << t.as_string());
 }
 
 Result time_from_timeval(Time* out, const struct timeval* tv) {

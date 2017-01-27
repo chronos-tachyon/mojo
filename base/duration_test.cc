@@ -88,6 +88,15 @@ TEST(Duration, ScalarMultiplicationDivision) {
   EXPECT_EQ(make(false, 1U, 0U), b / 5);
   EXPECT_EQ(make(false, 2U, 500000000U), b / 2);
   EXPECT_EQ(make(false, 2U, 0U), b / 2.5);
+
+  auto c = base::minutes(1) + base::seconds(20);
+  auto d = c * 3;
+  EXPECT_EQ(make(false, 80U, 0U), c);
+  EXPECT_EQ(make(false, 240U, 0U), d);
+  EXPECT_EQ(base::minutes(4), d);
+  EXPECT_EQ(base::minutes(4) / 3, c);
+  EXPECT_EQ(base::minutes(4) / 3.0, c);
+  EXPECT_EQ(base::minutes(4.0 / 3.0), c);
 }
 
 TEST(Duration, RatioDivision) {
@@ -103,8 +112,12 @@ TEST(Duration, RatioDivision) {
 }
 
 TEST(Duration, AsString) {
-  EXPECT_EQ("Duration(false, 2, 750000000)",
-            base::milliseconds(2750).as_string());
-  EXPECT_EQ("Duration(true, 1, 250000000)",
-            base::milliseconds(-1250).as_string());
+  EXPECT_EQ("1h30m", base::hours(1.5).as_string());
+  EXPECT_EQ("15m", base::hours(0.25).as_string());
+  EXPECT_EQ("1m20s", base::minutes(4.0 / 3.0).as_string());
+  EXPECT_EQ("2.75s", base::milliseconds(2750).as_string());
+  EXPECT_EQ("-1.25s", base::milliseconds(-1250).as_string());
+  EXPECT_EQ("750ms", base::milliseconds(750).as_string());
+  EXPECT_EQ("500µs", base::milliseconds(0.5).as_string());
+  EXPECT_EQ("500ns", base::milliseconds(0.0005).as_string());
 }

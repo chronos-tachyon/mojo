@@ -8,6 +8,7 @@
 #include <sys/time.h>
 #include <time.h>
 
+#include <iosfwd>
 #include <memory>
 #include <string>
 
@@ -63,6 +64,7 @@ class Time {
   // }}}
 
   void append_to(std::string* out) const;
+  std::size_t length_hint() const noexcept;
   std::string as_string() const;
 
  private:
@@ -70,6 +72,8 @@ class Time {
 };
 
 inline void swap(Time& a, Time& b) noexcept { a.swap(b); }
+
+std::ostream& operator<<(std::ostream& o, Time t);
 
 // Comparison operators {{{
 
@@ -151,6 +155,7 @@ class MonotonicTime {
   // }}}
 
   void append_to(std::string* out) const;
+  std::size_t length_hint() const noexcept;
   std::string as_string() const;
 
  private:
@@ -158,6 +163,8 @@ class MonotonicTime {
 };
 
 inline void swap(MonotonicTime& a, MonotonicTime& b) noexcept { a.swap(b); }
+
+std::ostream& operator<<(std::ostream& o, MonotonicTime t);
 
 // Comparison operators {{{
 
