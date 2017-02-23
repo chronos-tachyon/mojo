@@ -61,7 +61,6 @@ cc_test(
     ":base",
     "//external:gtest",
   ],
-  visibility = ["//visibility:public"],
   size = "small",
   timeout = "short",
 )

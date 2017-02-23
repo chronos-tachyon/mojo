@@ -1,4 +1,4 @@
-# http://bazel.io/
+# https://bazel.build/
 # vim: set ft=python sts=2 sw=2 et:
 
 workspace(name = "com_github_chronostachyon_mojo")
