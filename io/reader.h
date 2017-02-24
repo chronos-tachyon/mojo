@@ -85,6 +85,9 @@ class ReaderImpl {
   // performance, read buffer sizes should be in multiples of this size.
   virtual std::size_t ideal_block_size() const noexcept = 0;
 
+  // Returns true if this Reader has buffering.
+  virtual bool is_buffered() const noexcept { return false; }
+
   // Reads up to |max| bytes into the buffer at |out|.
   // - NEVER reads more than |max| bytes
   // - ALWAYS sets |*n| to the number of bytes successfully read
@@ -204,6 +207,15 @@ class Reader {
   std::size_t ideal_block_size() const {
     assert_valid();
     return ptr_->ideal_block_size();
+  }
+
+  // Returns true if this Reader has buffering.
+  //
+  // Readers without buffering should be wrapped in a buffered reader before
+  // attempting any byte-oriented I/O, such as read_u64 or readline.
+  bool is_buffered() const {
+    assert_valid();
+    return ptr_->is_buffered();
   }
 
   // Fully qualified read {{{

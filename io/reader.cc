@@ -887,6 +887,8 @@ class CloseIgnoringReader : public ReaderImpl {
     return r_.ideal_block_size();
   }
 
+  bool is_buffered() const noexcept override { return r_.is_buffered(); }
+
   void read(event::Task* task, char* out, std::size_t* n, std::size_t min,
             std::size_t max, const base::Options& opts) override {
     r_.read(task, out, n, min, max, opts);
@@ -915,6 +917,8 @@ class LimitedReader : public ReaderImpl {
   std::size_t ideal_block_size() const noexcept override {
     return r_.ideal_block_size();
   }
+
+  bool is_buffered() const noexcept override { return r_.is_buffered(); }
 
   void read(event::Task* task, char* out, std::size_t* n, std::size_t min,
             std::size_t max, const base::Options& opts) override {
@@ -1002,6 +1006,8 @@ class StringOrBufferReader : public ReaderImpl {
   std::size_t ideal_block_size() const noexcept override {
     return kDefaultIdealBlockSize;
   }
+
+  bool is_buffered() const noexcept override { return true; }
 
   void read(event::Task* task, char* out, std::size_t* n, std::size_t min,
             std::size_t max, const base::Options& opts) override {
@@ -1098,6 +1104,8 @@ class NullReader : public ReaderImpl {
 
   std::size_t ideal_block_size() const noexcept override { return 64; }
 
+  bool is_buffered() const noexcept override { return true; }
+
   void read(event::Task* task, char* out, std::size_t* n, std::size_t min,
             std::size_t max, const base::Options& opts) override {
     if (!prologue(task, out, n, min, max)) return;
@@ -1126,6 +1134,8 @@ class ZeroReader : public ReaderImpl {
   std::size_t ideal_block_size() const noexcept override {
     return kDefaultIdealBlockSize;
   }
+
+  bool is_buffered() const noexcept override { return true; }
 
   void read(event::Task* task, char* out, std::size_t* n, std::size_t min,
             std::size_t max, const base::Options& opts) override {
@@ -1633,6 +1643,13 @@ class MultiReader : public ReaderImpl {
     return kDefaultIdealBlockSize;  // TODO: calculate LCM(vec[0], vec[1], ...)
   }
 
+  bool is_buffered() const noexcept override {
+    for (const auto& r : vec_) {
+      if (!r.is_buffered()) return false;
+    }
+    return true;
+  }
+
   void read(event::Task* task, char* out, std::size_t* n, std::size_t min,
             std::size_t max, const base::Options& opts) override {
     if (!prologue(task, out, n, min, max)) return;
@@ -1772,6 +1789,8 @@ class BufferedReader : public ReaderImpl {
   std::size_t ideal_block_size() const noexcept override {
     return chain_.pool()->buffer_size();
   }
+
+  bool is_buffered() const noexcept override { return true; }
 
   void read(event::Task* task, char* out, std::size_t* n, std::size_t min,
             std::size_t max, const base::Options& opts) override {
