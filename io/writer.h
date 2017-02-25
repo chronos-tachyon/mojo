@@ -83,6 +83,9 @@ class WriterImpl {
   // performance, write buffer sizes should be in multiples of this size.
   virtual std::size_t ideal_block_size() const noexcept = 0;
 
+  // Returns true if this Writer has buffering.
+  virtual bool is_buffered() const noexcept { return false; }
+
   // Writes |len| bytes out of the buffer at |ptr|.
   // - ALWAYS sets |*n| to the number of bytes successfully written
   //   ~ In the case of an error, |*n| is the number of bytes *known* to have
@@ -217,6 +220,15 @@ class Writer {
   std::size_t ideal_block_size() const {
     assert_valid();
     return ptr_->ideal_block_size();
+  }
+
+  // Returns true if this Writer has buffering.
+  //
+  // Writers without buffering should be wrapped in a buffered writer before
+  // attempting any byte- or line-oriented I/O.
+  bool is_buffered() const {
+    assert_valid();
+    return ptr_->is_buffered();
   }
 
   // Standard write {{{

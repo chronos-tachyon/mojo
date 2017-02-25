@@ -414,6 +414,8 @@ class CloseIgnoringWriter : public WriterImpl {
     return w_.ideal_block_size();
   }
 
+  bool is_buffered() const noexcept override { return w_.is_buffered(); }
+
   void write(event::Task* task, std::size_t* n, const char* ptr,
              std::size_t len, const base::Options& opts) override {
     w_.write(task, n, ptr, len, opts);
@@ -451,6 +453,8 @@ class StringWriter : public WriterImpl {
   std::size_t ideal_block_size() const noexcept override {
     return kDefaultIdealBlockSize;
   }
+
+  bool is_buffered() const noexcept override { return true; }
 
   void write(event::Task* task, std::size_t* n, const char* ptr,
              std::size_t len, const base::Options& opts) override {
@@ -501,6 +505,8 @@ class BufferWriter : public WriterImpl {
   std::size_t ideal_block_size() const noexcept override {
     return kDefaultIdealBlockSize;
   }
+
+  bool is_buffered() const noexcept override { return true; }
 
   void write(event::Task* task, std::size_t* n, const char* ptr,
              std::size_t len, const base::Options& opts) override {
@@ -602,6 +608,8 @@ class DiscardWriter : public WriterImpl {
     return kDefaultIdealBlockSize;
   }
 
+  bool is_buffered() const noexcept override { return true; }
+
   void write(event::Task* task, std::size_t* n, const char* ptr,
              std::size_t len, const base::Options& opts) override {
     if (!prologue(task, n, ptr, len)) return;
@@ -623,6 +631,8 @@ class FullWriter : public WriterImpl {
   FullWriter() noexcept = default;
 
   std::size_t ideal_block_size() const noexcept override { return 64; }
+
+  bool is_buffered() const noexcept override { return true; }
 
   void write(event::Task* task, std::size_t* n, const char* ptr,
              std::size_t len, const base::Options& opts) override {
@@ -938,6 +948,8 @@ class BufferedWriter : public WriterImpl {
   std::size_t ideal_block_size() const noexcept override {
     return chain_.pool()->buffer_size();
   }
+
+  bool is_buffered() const noexcept override { return true; }
 
   void write(event::Task* task, std::size_t* n, const char* ptr,
              std::size_t len, const base::Options& opts) override {
