@@ -28,9 +28,6 @@ class URL {
  public:
   URL() : has_(0) {}
 
-  base::Result parse(base::StringPiece raw, bool via_request = false);
-  void normalize();
-
   explicit operator bool() const { return !empty(); }
   bool empty() const { return has_ == 0; }
 
@@ -68,9 +65,11 @@ class URL {
   base::StringPiece raw_path() const { return raw_path_; }
 
   void clear_query();
+  void set_query(const Query& query);
   base::Result set_raw_query(base::StringPiece query);
-  bool has_query() const { return has(bit_query); }
-  base::StringPiece raw_query() const { return raw_query_; }
+  bool has_query() const noexcept { return has(bit_query); }
+  const Query& query() const noexcept { return query_; }
+  base::StringPiece raw_query() const noexcept { return raw_query_; }
 
   void clear_fragment();
   void set_fragment(base::StringPiece fragment);
@@ -85,7 +84,11 @@ class URL {
 
   friend bool operator==(const URL& a, const URL& b);
   friend bool operator!=(const URL& a, const URL& b) { return !(a == b); }
+
+  void normalize();
   bool equivalent_to(const URL& other) const;
+
+  base::Result parse(base::StringPiece raw, bool via_request = false);
 
  private:
   uint8_t has_;
