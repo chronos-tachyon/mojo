@@ -92,7 +92,17 @@ void ReaderImpl::write_to(event::Task* task, std::size_t* n, std::size_t max,
   if (prologue(task, n, max, w)) task->finish(base::Result::not_implemented());
 }
 
+base::Result ReaderImpl::unread(const char* ptr, std::size_t len) {
+  return base::Result::not_implemented();
+}
+
 void Reader::assert_valid() const { CHECK(ptr_) << ": io::Reader is empty!"; }
+
+base::Result Reader::unread(const char* ptr, std::size_t len) const {
+  if (len) CHECK_NOTNULL(ptr);
+  assert_valid();
+  return ptr_->unread(ptr, len);
+}
 
 inline namespace implementation {
 struct StringReadHelper {
@@ -164,8 +174,6 @@ void Reader::read_u8(event::Task* task, uint8_t* out,
                                                   n(0) {}
 
     base::Result run() override {
-      // TODO: consider adding ReaderImpl::unread() [default not_implemented] to
-      // avoid data loss in the error result case
       *out = *reinterpret_cast<const unsigned char*>(&lone);
       event::propagate_result(task, &subtask);
       return base::Result();
@@ -202,8 +210,6 @@ void Reader::read_u16(event::Task* task, uint16_t* out,
           n(0) {}
 
     base::Result run() override {
-      // TODO: consider adding ReaderImpl::unread() [default not_implemented] to
-      // avoid data loss in the error result case
       if (event::propagate_failure(task, &subtask)) return base::Result();
       *out = endian->get_u16(buf);
       task->finish_ok();
@@ -242,8 +248,6 @@ void Reader::read_u32(event::Task* task, uint32_t* out,
           n(0) {}
 
     base::Result run() override {
-      // TODO: consider adding ReaderImpl::unread() [default not_implemented] to
-      // avoid data loss in the error result case
       if (event::propagate_failure(task, &subtask)) return base::Result();
       *out = endian->get_u32(buf);
       task->finish_ok();
@@ -282,8 +286,6 @@ void Reader::read_u64(event::Task* task, uint64_t* out,
           n(0) {}
 
     base::Result run() override {
-      // TODO: consider adding ReaderImpl::unread() [default not_implemented] to
-      // avoid data loss in the error result case
       if (event::propagate_failure(task, &subtask)) return base::Result();
       *out = endian->get_u64(buf);
       task->finish_ok();
@@ -319,8 +321,6 @@ void Reader::read_s8(event::Task* task, int8_t* out,
                                                  n(0) {}
 
     base::Result run() override {
-      // TODO: consider adding ReaderImpl::unread() [default not_implemented] to
-      // avoid data loss in the error result case
       uint8_t tmp = *reinterpret_cast<const unsigned char*>(&lone);
       static constexpr uint8_t K = uint8_t(1U) << 7;
       if (tmp < K)
@@ -362,8 +362,6 @@ void Reader::read_s16(event::Task* task, int16_t* out,
           n(0) {}
 
     base::Result run() override {
-      // TODO: consider adding ReaderImpl::unread() [default not_implemented] to
-      // avoid data loss in the error result case
       if (event::propagate_failure(task, &subtask)) return base::Result();
       uint16_t tmp = endian->get_u16(buf);
       static constexpr uint16_t K = uint16_t(1U) << 15;
@@ -412,8 +410,6 @@ void Reader::read_s32(event::Task* task, int32_t* out,
           n(0) {}
 
     base::Result run() override {
-      // TODO: consider adding ReaderImpl::unread() [default not_implemented] to
-      // avoid data loss in the error result case
       if (event::propagate_failure(task, &subtask)) return base::Result();
       uint32_t tmp = endian->get_u32(buf);
       static constexpr uint32_t K = uint32_t(1U) << 31;
@@ -462,8 +458,6 @@ void Reader::read_s64(event::Task* task, int64_t* out,
           n(0) {}
 
     base::Result run() override {
-      // TODO: consider adding ReaderImpl::unread() [default not_implemented] to
-      // avoid data loss in the error result case
       if (event::propagate_failure(task, &subtask)) return base::Result();
       uint64_t tmp = endian->get_u64(buf);
       static constexpr uint64_t K = uint64_t(1U) << 63;
@@ -646,7 +640,7 @@ void Reader::read_svarint_zigzag(event::Task* task, int64_t* out,
 }
 
 inline namespace implementation {
-struct ReadLineHelper {
+struct SlowReadLineHelper {
   event::Task subtask;
   Reader reader;
   event::Task* const task;
@@ -656,8 +650,8 @@ struct ReadLineHelper {
   char ch;
   std::size_t n;
 
-  explicit ReadLineHelper(Reader r, event::Task* t, std::string* o,
-                          std::size_t mx, base::Options opts) noexcept
+  explicit SlowReadLineHelper(Reader r, event::Task* t, std::string* o,
+                              std::size_t mx, base::Options opts) noexcept
       : reader(std::move(r)),
         task(t),
         out(o),
@@ -673,20 +667,80 @@ struct ReadLineHelper {
     subtask.reset();
     task->add_subtask(&subtask);
     reader.read(&subtask, &ch, &n, 1, 1, options);
-    subtask.on_finished(event::callback([this] {
-      read_complete();
-      return base::Result();
-    }));
+    subtask.on_finished(get_manager(options).dispatcher(),
+                        event::callback([this] {
+                          read_complete();
+                          return base::Result();
+                        }));
   }
 
   void read_complete() {
+    if (n) {
+      out->push_back(ch);
+      if (ch == '\n') {
+        task->finish_ok();
+        delete this;
+        return;
+      }
+    }
     if (event::propagate_failure(task, &subtask)) {
       delete this;
       return;
     }
-    out->push_back(ch);
-    if (ch == '\n') {
+    next();
+  }
+};
+
+struct FastReadLineHelper {
+  event::Task subtask;
+  Reader reader;
+  event::Task* const task;
+  std::string* const out;
+  const std::size_t max;
+  const base::Options options;
+  char buf[4096];
+  std::size_t n;
+
+  explicit FastReadLineHelper(Reader r, event::Task* t, std::string* o,
+                              std::size_t mx, base::Options opts) noexcept
+      : reader(std::move(r)),
+        task(t),
+        out(o),
+        max(mx),
+        options(std::move(opts)) {}
+
+  void next() {
+    if (out->size() >= max) {
       task->finish_ok();
+      delete this;
+      return;
+    }
+    subtask.reset();
+    task->add_subtask(&subtask);
+    std::size_t to_read = std::min(max - out->size(), sizeof(buf));
+    reader.read(&subtask, buf, &n, 1, to_read, options);
+    subtask.on_finished(get_manager(options).dispatcher(),
+                        event::callback([this] {
+                          read_complete();
+                          return base::Result();
+                        }));
+  }
+
+  void read_complete() {
+    if (n) {
+      base::StringPiece sp(buf, n);
+      auto index = sp.find('\n');
+      if (index != base::StringPiece::npos) {
+        ++index;
+        out->append(buf, index);
+        reader.unread(buf + index, n - index);
+        task->finish_ok();
+        delete this;
+        return;
+      }
+      sp.append_to(out);
+    }
+    if (event::propagate_failure(task, &subtask)) {
       delete this;
       return;
     }
@@ -702,8 +756,13 @@ void Reader::readline(event::Task* task, std::string* out, std::size_t max,
   if (!task->start()) return;
   out->clear();
 
-  auto* h = new ReadLineHelper(*this, task, out, max, opts);
-  h->next();
+  if (can_unread()) {
+    auto* h = new FastReadLineHelper(*this, task, out, max, opts);
+    h->next();
+  } else {
+    auto* h = new SlowReadLineHelper(*this, task, out, max, opts);
+    h->next();
+  }
 }
 
 base::Result Reader::read(char* out, std::size_t* n, std::size_t min,
@@ -888,6 +947,12 @@ class CloseIgnoringReader : public ReaderImpl {
   }
 
   bool is_buffered() const noexcept override { return r_.is_buffered(); }
+
+  bool can_unread() const noexcept override { return r_.can_unread(); }
+
+  base::Result unread(const char* ptr, std::size_t len) override {
+    return r_.unread(ptr, len);
+  }
 
   void read(event::Task* task, char* out, std::size_t* n, std::size_t min,
             std::size_t max, const base::Options& opts) override {
@@ -1791,6 +1856,12 @@ class BufferedReader : public ReaderImpl {
   }
 
   bool is_buffered() const noexcept override { return true; }
+  bool can_unread() const noexcept override { return true; }
+
+  base::Result unread(const char* ptr, std::size_t len) override {
+    chain_.undrain(ptr, len);
+    return base::Result();
+  }
 
   void read(event::Task* task, char* out, std::size_t* n, std::size_t min,
             std::size_t max, const base::Options& opts) override {
@@ -1883,6 +1954,11 @@ Reader limited_reader(Reader r, std::size_t max) {
 
 Reader stringreader(std::string str) {
   return Reader(std::make_shared<StringOrBufferReader>(std::move(str)));
+}
+
+Reader stringreader(base::StringPiece sp) {
+  std::string str = sp;
+  return stringreader(std::move(str));
 }
 
 Reader bufferreader(ConstBuffer buf) {

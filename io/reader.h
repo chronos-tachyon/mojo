@@ -88,6 +88,19 @@ class ReaderImpl {
   // Returns true if this Reader has buffering.
   virtual bool is_buffered() const noexcept { return false; }
 
+  // Returns true if this Reader supports unreading.
+  virtual bool can_unread() const noexcept { return false; }
+
+  // OPTIONAL. "Un"-reads the |len| bytes at |ptr|. If this call succeeds, the
+  // data that was passed to this function will be inserted into the I/O
+  // stream.
+  //
+  // Only buffered readers are likely to support this operation.
+  //
+  // THREAD SAFETY: Implementations of this function MUST be thread-safe.
+  //
+  virtual base::Result unread(const char* ptr, std::size_t len);
+
   // Reads up to |max| bytes into the buffer at |out|.
   // - NEVER reads more than |max| bytes
   // - ALWAYS sets |*n| to the number of bytes successfully read
@@ -217,6 +230,18 @@ class Reader {
     assert_valid();
     return ptr_->is_buffered();
   }
+
+  // Returns true if this Reader supports unreading.
+  bool can_unread() const {
+    assert_valid();
+    return ptr_->can_unread();
+  }
+
+  // "Un"-reads the |len| bytes at |ptr|. If this call succeeds, the data that
+  // was passed to this function will be inserted into the I/O stream.
+  //
+  // NOTE: This function is OPTIONAL, i.e. it may return NOT_IMPLEMENTED.
+  base::Result unread(const char* ptr, std::size_t len) const;
 
   // Fully qualified read {{{
 
@@ -445,6 +470,7 @@ Reader limited_reader(Reader r, std::size_t max);
 
 // Returns a Reader that produces bytes from a std::string.
 Reader stringreader(std::string str);
+Reader stringreader(base::StringPiece sp);
 
 // Returns a Reader that produces bytes from a ConstBuffer.
 Reader bufferreader(ConstBuffer buf);

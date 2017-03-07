@@ -58,11 +58,14 @@ class Chain {
   std::size_t optimal_fill() const noexcept;
   std::size_t optimal_drain() const noexcept;
 
-  // Fill the queue with bytes.
+  // Fill the tail of the queue with bytes.
   void fill(std::size_t* n, const char* ptr, std::size_t len);
 
-  // Drain bytes from the queue.
+  // Drain bytes from the head of the queue.
   void drain(std::size_t* n, char* ptr, std::size_t len);
+
+  // Fill the head of the queue with bytes.
+  void undrain(const char* ptr, std::size_t len);
 
   // Once reads drain the queue, start returning an error on future reads.
   void fail_reads(base::Result r) noexcept;
@@ -128,6 +131,7 @@ class Chain {
                     std::size_t pos) const noexcept;
   void fill_locked(std::size_t* n, const char* ptr, std::size_t len) noexcept;
   void drain_locked(std::size_t* n, char* out, std::size_t len) noexcept;
+  void undrain_locked(const char* ptr, std::size_t len) noexcept;
   void process_locked(base::Lock& lock) noexcept;
 
   bool reads_locked(base::Lock& lock) noexcept;

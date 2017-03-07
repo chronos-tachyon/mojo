@@ -21,6 +21,58 @@
 #include "io/util.h"
 #include "io/writer.h"
 
+namespace {
+class TempFile {
+  public:
+    TempFile() {
+      CHECK_OK(base::make_tempfile(&path_, &fd_, "mojo-io-reader-test.XXXXXX"));
+    }
+
+    ~TempFile() noexcept {
+      ::unlink(path_.c_str());
+    }
+
+    const std::string& path() const noexcept { return path_; }
+    const base::FD fd() const noexcept { return fd_; }
+
+    void rewind() {
+      CHECK_OK(base::seek(nullptr, fd_, 0, SEEK_SET));
+    }
+
+    void truncate() {
+      CHECK_OK(base::truncate(fd_));
+    }
+
+    void write(const char* ptr, std::size_t len) {
+      CHECK_OK(base::write_exactly(fd_, ptr, len, path_.c_str()));
+    }
+
+    void write(base::StringPiece sp) {
+      write(sp.data(), sp.size());
+    }
+
+    void set(const char* ptr, std::size_t len) {
+      rewind();
+      truncate();
+      write(ptr, len);
+      rewind();
+    }
+
+    void set(base::StringPiece sp) {
+      set(sp.data(), sp.size());
+    }
+
+    TempFile(const TempFile&) = delete;
+    TempFile(TempFile&&) = delete;
+    TempFile& operator=(const TempFile&) = delete;
+    TempFile& operator=(TempFile&&) = delete;
+
+  private:
+    std::string path_;
+    base::FD fd_;
+};
+}  // anonymous namespace
+
 // StringReader {{{
 
 TEST(StringReader, ZeroThree) {
@@ -619,18 +671,14 @@ static void TestFDReader_Read(const base::Options& o) {
 }
 
 static void TestFDReader_WriteTo(const base::Options& o) {
-  std::string path;
-  base::FD fd;
+  TempFile tempfile;
 
-  ASSERT_OK(base::make_tempfile(&path, &fd, "mojo-io-reader-test.XXXXXX"));
-  auto cleanup0 = base::cleanup([path] { ::unlink(path.c_str()); });
-
-  std::string tmp;
   for (std::size_t i = 0; i < 16; ++i) {
+    std::string tmp;
     tmp.assign(4096, 'A' + i);
-    ASSERT_OK(base::write_exactly(fd, tmp.data(), tmp.size(), "temp file"));
+    tempfile.write(tmp);
   }
-  ASSERT_OK(base::seek(nullptr, fd, 0, SEEK_SET));
+  tempfile.rewind();
 
   LOG(INFO) << "temp file is ready";
 
@@ -671,7 +719,7 @@ static void TestFDReader_WriteTo(const base::Options& o) {
 
   LOG(INFO) << "thread launched";
 
-  io::Reader r = io::fdreader(fd);
+  io::Reader r = io::fdreader(tempfile.fd());
   io::Writer w = io::fdwriter(s.left);
 
   event::Task task;
@@ -942,13 +990,12 @@ TEST(MultiReader, Threaded) {
 // }}}
 // BufferedReader {{{
 
-static void TestBufferedReader(const base::Options& o, const char* what) {
-  std::string path;
-  base::FD fd;
-  ASSERT_OK(
-      base::make_tempfile(&path, &fd, "io_reader_TestBufferedReader_XXXXXXXX"));
-  auto cleanup = base::cleanup([&path] { ::unlink(path.c_str()); });
+static io::Reader wrap(bool do_buffer, io::Reader r) {
+  if (do_buffer) r = io::bufferedreader(std::move(r));
+  return r;
+};
 
+static void TestBufferedReader_Fixed(const base::Options& o, bool do_buffer, const char* what) {
   constexpr unsigned char kBytes[] = {
       0x00,                                            // 8-bit datum #0
       0x7f,                                            // 8-bit datum #1
@@ -967,13 +1014,12 @@ static void TestBufferedReader(const base::Options& o, const char* what) {
       0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,  // 64-bit datum #2
       0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,  // 64-bit datum #3
   };
-  const char* ptr = reinterpret_cast<const char*>(kBytes);
-  std::size_t len = sizeof(kBytes);
-  ASSERT_OK(base::write_exactly(fd, ptr, len, path.c_str()));
-  ASSERT_OK(base::seek(nullptr, fd, 0, SEEK_SET));
 
-  io::Reader fdr = io::fdreader(fd);
-  io::Reader r = io::bufferedreader(fdr);
+  LOG(INFO) << "[TestBufferedReader_Fixed:" << what << ":unsigned]";
+
+  TempFile tempfile;
+  tempfile.set(reinterpret_cast<const char*>(kBytes), sizeof(kBytes));
+  io::Reader r = wrap(do_buffer, io::fdreader(tempfile.fd()));
 
   uint8_t u8 = 0;
   EXPECT_OK(r.read_u8(&u8, o));
@@ -1017,8 +1063,10 @@ static void TestBufferedReader(const base::Options& o, const char* what) {
 
   EXPECT_EOF(r.read_u8(&u8, o));
 
-  ASSERT_OK(base::seek(nullptr, fd, 0, SEEK_SET));
-  r = io::bufferedreader(fdr);
+  LOG(INFO) << "[TestBufferedReader_Fixed:" << what << ":signed]";
+
+  tempfile.rewind();
+  r = wrap(do_buffer, io::fdreader(tempfile.fd()));
 
   int8_t s8 = 0;
   EXPECT_OK(r.read_s8(&s8, o));
@@ -1061,11 +1109,10 @@ static void TestBufferedReader(const base::Options& o, const char* what) {
   EXPECT_EQ(-0x0000000000000001LL, s64);
 
   EXPECT_EOF(r.read_u8(&u8, o));
+}
 
-  ASSERT_OK(base::seek(nullptr, fd, 0, SEEK_SET));
-  ASSERT_OK(base::truncate(fd));
-
-  constexpr unsigned char kVarintBytes[] = {
+static void TestBufferedReader_Varint(const base::Options& o, bool do_buffer, const char* what) {
+  constexpr unsigned char kBytes[] = {
       0x00,              // 0, 0, 0
       0x01,              // 1, 1, -1
       0x02,              // 2, 2, 1
@@ -1079,12 +1126,14 @@ static void TestBufferedReader(const base::Options& o, const char* what) {
       0xff, 0xff, 0xff, 0xff, 0x01,  // UINT64MAX - 1, -2, INT64MAX
   };
 
-  ptr = reinterpret_cast<const char*>(kVarintBytes);
-  len = sizeof(kVarintBytes);
-  ASSERT_OK(base::write_exactly(fd, ptr, len, path.c_str()));
-  ASSERT_OK(base::seek(nullptr, fd, 0, SEEK_SET));
+  LOG(INFO) << "[TestBufferedReader_Varint:" << what << ":unsigned]";
 
-  r = io::bufferedreader(fdr);
+  TempFile tempfile;
+  tempfile.set(reinterpret_cast<const char*>(kBytes), sizeof(kBytes));
+  io::Reader r = wrap(do_buffer, io::fdreader(tempfile.fd()));
+
+  uint64_t u64;
+  int64_t s64;
 
   EXPECT_OK(r.read_uvarint(&u64, o));
   EXPECT_EQ(0U, u64);
@@ -1109,8 +1158,10 @@ static void TestBufferedReader(const base::Options& o, const char* what) {
 
   EXPECT_EOF(r.read_uvarint(&u64, o));
 
-  ASSERT_OK(base::seek(nullptr, fd, 0, SEEK_SET));
-  r = io::bufferedreader(fdr);
+  LOG(INFO) << "[TestBufferedReader_Varint:" << what << ":signed]";
+
+  tempfile.rewind();
+  r = wrap(do_buffer, io::fdreader(tempfile.fd()));
 
   EXPECT_OK(r.read_svarint(&s64, o));
   EXPECT_EQ(0, s64);
@@ -1135,8 +1186,10 @@ static void TestBufferedReader(const base::Options& o, const char* what) {
 
   EXPECT_EOF(r.read_svarint(&s64, o));
 
-  ASSERT_OK(base::seek(nullptr, fd, 0, SEEK_SET));
-  r = io::bufferedreader(fdr);
+  LOG(INFO) << "[TestBufferedReader_Varint:" << what << ":zigzag]";
+
+  tempfile.rewind();
+  r = wrap(do_buffer, io::fdreader(tempfile.fd()));
 
   EXPECT_OK(r.read_svarint_zigzag(&s64, o));
   EXPECT_EQ(0, s64);
@@ -1160,30 +1213,40 @@ static void TestBufferedReader(const base::Options& o, const char* what) {
   EXPECT_EQ(0x7fffffffffffffffLL, s64);
 
   EXPECT_EOF(r.read_svarint_zigzag(&s64, o));
+}
 
-  ASSERT_OK(base::seek(nullptr, fd, 0, SEEK_SET));
-  ASSERT_OK(base::truncate(fd));
-
-  constexpr char kLineBytes[] =
+static void TestBufferedReader_ReadLine(const base::Options& o, bool do_buffer, const char* what) {
+  constexpr char kBytes[] =
       "Line 1\n"
       "Line 2\r\n"
-      "Line 3";
+      "Line 3 is a very long line\r\n"
+      "Line 4";
 
-  ptr = kLineBytes;
-  len = sizeof(kLineBytes) - 1;
-  ASSERT_OK(base::write_exactly(fd, ptr, len, path.c_str()));
-  ASSERT_OK(base::seek(nullptr, fd, 0, SEEK_SET));
+  LOG(INFO) << "[TestBufferedReader_ReadLine:" << what << "]";
 
-  r = io::bufferedreader(fdr);
+  TempFile tempfile;
+  tempfile.set(kBytes, sizeof(kBytes) - 1);
+  io::Reader r = wrap(do_buffer, io::fdreader(tempfile.fd()));
 
   std::string str;
-  EXPECT_OK(r.readline(&str, o));
+  EXPECT_OK(r.readline(&str, 10, o));
   EXPECT_EQ("Line 1\n", str);
-  EXPECT_OK(r.readline(&str, o));
+  EXPECT_OK(r.readline(&str, 10, o));
   EXPECT_EQ("Line 2\r\n", str);
-  EXPECT_EOF(r.readline(&str, o));
-  EXPECT_EQ("Line 3", str);
+  EXPECT_OK(r.readline(&str, 10, o));
+  EXPECT_EQ("Line 3 is ", str);
+  EXPECT_OK(r.readline(&str, 10, o));
+  EXPECT_EQ("a very lon", str);
+  EXPECT_OK(r.readline(&str, 10, o));
+  EXPECT_EQ("g line\r\n", str);
+  EXPECT_EOF(r.readline(&str, 10, o));
+  EXPECT_EQ("Line 4", str);
+}
 
+static void TestBufferedReader(const base::Options& o, bool do_buffer, const char* what) {
+  TestBufferedReader_Fixed(o, do_buffer, what);
+  TestBufferedReader_Varint(o, do_buffer, what);
+  TestBufferedReader_ReadLine(o, do_buffer, what);
   base::log_flush();
 }
 
@@ -1195,7 +1258,7 @@ TEST(BufferedReader, Inline) {
 
   base::Options o;
   o.get<io::Options>().manager = m;
-  TestBufferedReader(o, "inline");
+  TestBufferedReader(o, true, "buffered/inline");
   m.shutdown();
 }
 
@@ -1207,7 +1270,7 @@ TEST(BufferedReader, Async) {
 
   base::Options o;
   o.get<io::Options>().manager = m;
-  TestBufferedReader(o, "async");
+  TestBufferedReader(o, true, "buffered/async");
   m.shutdown();
 }
 
@@ -1221,7 +1284,45 @@ TEST(BufferedReader, Threaded) {
 
   base::Options o;
   o.get<io::Options>().manager = m;
-  TestBufferedReader(o, "threaded");
+  TestBufferedReader(o, true, "buffered/threaded");
+  m.shutdown();
+}
+
+TEST(UnbufferedReader, Inline) {
+  event::ManagerOptions mo;
+  mo.set_inline_mode();
+  event::Manager m;
+  ASSERT_OK(event::new_manager(&m, mo));
+
+  base::Options o;
+  o.get<io::Options>().manager = m;
+  TestBufferedReader(o, false, "unbuffered/inline");
+  m.shutdown();
+}
+
+TEST(UnbufferedReader, Async) {
+  event::ManagerOptions mo;
+  mo.set_async_mode();
+  event::Manager m;
+  ASSERT_OK(event::new_manager(&m, mo));
+
+  base::Options o;
+  o.get<io::Options>().manager = m;
+  TestBufferedReader(o, false, "unbuffered/async");
+  m.shutdown();
+}
+
+TEST(UnbufferedReader, Threaded) {
+  event::ManagerOptions mo;
+  mo.set_threaded_mode();
+  mo.set_num_pollers(2);
+  mo.dispatcher().set_num_workers(2);
+  event::Manager m;
+  ASSERT_OK(event::new_manager(&m, mo));
+
+  base::Options o;
+  o.get<io::Options>().manager = m;
+  TestBufferedReader(o, false, "unbuffered/threaded");
   m.shutdown();
 }
 

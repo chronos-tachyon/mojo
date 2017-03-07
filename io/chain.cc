@@ -98,6 +98,13 @@ void Chain::drain(std::size_t* n, char* out, std::size_t len) {
   drain_locked(n, out, len);
 }
 
+void Chain::undrain(const char* ptr, std::size_t len) {
+  if (len > 0) CHECK_NOTNULL(ptr);
+
+  auto lock = base::acquire_lock(mu_);
+  undrain_locked(ptr, len);
+}
+
 void Chain::fail_reads(base::Result r) noexcept {
   CHECK(!r);
   auto lock = base::acquire_lock(mu_);
@@ -210,6 +217,30 @@ void Chain::drain_locked(std::size_t* n, char* ptr, std::size_t len) noexcept {
     }
   }
   DCHECK_LE(*n, len);
+}
+
+void Chain::undrain_locked(const char* ptr, std::size_t len) noexcept {
+  DCHECK_LE(rdpos_, wrpos_);
+  std::size_t sz = pool_->buffer_size();
+  while (len > rdpos_) {
+    vec_.insert(vec_.begin(), pool_->take());
+    rdpos_ += sz;
+    wrpos_ += sz;
+  }
+  rdpos_ -= len;
+  std::size_t n = 0;
+  std::size_t blocknum, offset;
+  while (n < len) {
+    xlate_locked(&blocknum, &offset, rdpos_ + n);
+    auto& buf = vec_[blocknum];
+    sz = buf.size();
+    DCHECK_EQ(sz, pool_->buffer_size());
+    DCHECK_GT(sz, offset);
+    std::size_t wrnum = std::min(len - n, sz - offset);
+    ::memcpy(buf.data() + offset, ptr + n, wrnum);
+    n += wrnum;
+  }
+  DCHECK_EQ(n, len);
 }
 
 void Chain::process_locked(base::Lock& lock) noexcept {
