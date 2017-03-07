@@ -127,6 +127,12 @@ bool Task::result_will_throw() const noexcept {
   return false;
 }
 
+bool Task::is_failure() const noexcept {
+  auto lock = base::acquire_lock(mu_);
+  assert_finished(state_);
+  return eptr_ || !result_;
+}
+
 void Task::add_subtask(Task* subtask) {
   auto lock = base::acquire_lock(mu_);
   bool run = false;

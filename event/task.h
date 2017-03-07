@@ -188,6 +188,9 @@ class Task {
   // PRECONDITION: state is |done|
   bool result_will_throw() const noexcept;
 
+  // Return true if |result()| would throw or would return a failure.
+  bool is_failure() const noexcept;
+
   // }}}
   // Methods for Producers {{{
 
