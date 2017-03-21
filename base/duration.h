@@ -101,6 +101,18 @@ class Duration {
   // Not a stable API — use at your own risk!
   constexpr internal::DurationRep raw() const noexcept { return rep_; }
 
+  // Returns the smallest possible finite Duration.
+  constexpr static Duration min() noexcept {
+    return Duration(internal::DurationRep(
+        true, std::numeric_limits<uint64_t>::max(), NS_PER_S - 1));
+  }
+
+  // Returns the largest possible finite Duration.
+  constexpr static Duration max() noexcept {
+    return Duration(internal::DurationRep(
+        false, std::numeric_limits<uint64_t>::max(), NS_PER_S - 1));
+  }
+
   // Returns true iff this Duration is non-zero.
   constexpr explicit operator bool() const noexcept {
     return rep_.s || rep_.ns;
@@ -270,7 +282,8 @@ class Duration {
   }
 
   constexpr static bool less(Rep a, Rep b) noexcept {
-    return (a.neg && !b.neg) || (a.neg && less_p(b, a)) || less_p(a, b);
+    return (a.neg && b.neg) ? less_p(b, a)
+                            : ((!a.neg && !b.neg) ? less_p(a, b) : a.neg);
   }
 
   constexpr static Rep negate(Rep a) { return Rep(!a.neg, a.s, a.ns); }
