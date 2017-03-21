@@ -210,6 +210,10 @@ class StringPiece {
     return data_[i];
   }
 
+  const unsigned char* bytes() const noexcept {
+    return reinterpret_cast<const unsigned char*>(data_);
+  }
+
   constexpr int compare(StringPiece other) const noexcept {
     return final_compare(*this, other, partial_compare(*this, other));
   }
@@ -299,6 +303,10 @@ class StringPiece {
   }
   void trim(char ch) { trim(is_exactly(ch)); }
   void trim_whitespace() { trim(is_whitespace()); }
+
+  constexpr bool contains(char ch) const noexcept {
+    return find(ch) != npos;
+  }
 
   constexpr bool contains(StringPiece sp) const noexcept {
     return find(sp) != npos;
@@ -728,7 +736,9 @@ Joiner on(std::string str);
 namespace std {
 template <>
 struct hash<base::StringPiece> {
-  std::size_t operator()(base::StringPiece sp) const noexcept { return sp.hash(); }
+  std::size_t operator()(base::StringPiece sp) const noexcept {
+    return sp.hash();
+  }
 };
 }  // namespace std
 
