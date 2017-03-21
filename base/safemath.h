@@ -38,6 +38,9 @@ class safe {
 
   constexpr T value() const noexcept { return value_; }
 
+  template <typename U>
+  constexpr U value() const noexcept { return safe<U>(*this).value(); }
+
   friend constexpr bool operator==(safe a, safe b) noexcept {
     return a.value_ == b.value_;
   }
@@ -228,7 +231,7 @@ class safe {
 
   constexpr static safe sub_impl(safe a, safe b) {
     return ((b.value_ > 0 && a.value_ < MIN + b.value_) ||
-            (b.value_ < 0 && a.value_ < MAX + b.value_))
+            (b.value_ < 0 && a.value_ > MAX + b.value_))
                ? (throw std::overflow_error("result out of range"), 0)
                : (a.value_ - b.value_);
   }
