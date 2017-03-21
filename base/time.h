@@ -30,10 +30,11 @@ namespace base {
 //   ~ It may go backward due to the time daemon adjusting the clock.
 //
 class Time {
- private:
+ public:
+  // Time is constructible from a Duration.
+  // Not a stable API — use at your own risk!
   explicit constexpr Time(Duration d) noexcept : d_(d) {}
 
- public:
   // Time is default constructible, copyable, and moveable.
   constexpr Time() noexcept : Time(Duration()) {}
   constexpr Time(const Time&) noexcept = default;
@@ -43,6 +44,12 @@ class Time {
 
   // Constructs a Time in terms of the Duration since the epoch.
   static constexpr Time from_epoch(Duration d) noexcept { return Time(d); }
+
+  // Returns the earliest possible finite Time.
+  static constexpr Time min() noexcept { return Time(Duration::min()); }
+
+  // Returns the latest possible finite Time.
+  static constexpr Time max() noexcept { return Time(Duration::max()); }
 
   // Returns the Time as a Duration since the epoch.
   constexpr Duration since_epoch() const noexcept { return d_; }
