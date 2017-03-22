@@ -1,13 +1,14 @@
-// base/clockfake.h - base::Clock fake for unit testing
+// base/time/clockfake.h - Fake ClockImpl for unit testing
 // Copyright © 2016 by Donald King <chronos@chronos-tachyon.net>
 // Available under the MIT License. See LICENSE for details.
 
-#ifndef BASE_CLOCKFAKE_H
-#define BASE_CLOCKFAKE_H
+#ifndef BASE_TIME_CLOCKFAKE_H
+#define BASE_TIME_CLOCKFAKE_H
 
-#include "base/clock.h"
+#include "base/time/clock.h"
 
 namespace base {
+namespace time {
 
 class FakeClock : public ClockImpl {
  private:
@@ -84,6 +85,7 @@ class FakeMonotonicClock : public MonotonicClockImpl {
   Duration delta_;
 };
 
+}  // namespace time
 }  // namespace base
 
-#endif  // BASE_CLOCKFAKE_H
+#endif  // BASE_TIME_CLOCKFAKE_H

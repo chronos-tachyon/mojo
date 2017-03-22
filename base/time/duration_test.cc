@@ -1,11 +1,14 @@
 // Copyright © 2016 by Donald King <chronos@chronos-tachyon.net>
 // Available under the MIT License. See LICENSE for details.
 
+#include "base/time/duration.h"
 #include "gtest/gtest.h"
 
-#include "base/duration.h"
-
-using base::Duration;
+using base::time::Duration;
+using base::time::hours;
+using base::time::minutes;
+using base::time::seconds;
+using base::time::milliseconds;
 
 static Duration make(bool neg, base::safe<uint64_t> s,
                      base::safe<uint32_t> ns) {
@@ -13,7 +16,7 @@ static Duration make(bool neg, base::safe<uint64_t> s,
 }
 
 TEST(Duration, Basics) {
-  auto d1 = base::minutes(5);
+  auto d1 = minutes(5);
   EXPECT_EQ(make(false, 300U, 0U), d1);
   EXPECT_EQ(5, d1.minutes());
   EXPECT_EQ(300, d1.seconds());
@@ -21,7 +24,7 @@ TEST(Duration, Basics) {
   EXPECT_EQ(300000000, d1.microseconds());
   EXPECT_EQ(300000000000, d1.nanoseconds());
 
-  auto d2 = base::seconds(1);
+  auto d2 = seconds(1);
   EXPECT_EQ(make(false, 1U, 0U), d2);
   EXPECT_EQ(0, d2.minutes());
   EXPECT_EQ(1, d2.seconds());
@@ -31,8 +34,8 @@ TEST(Duration, Basics) {
   d2 *= 300U;
   EXPECT_EQ(d1, d2);
 
-  d2 = base::seconds(1);
-  auto d3 = base::milliseconds(250);
+  d2 = seconds(1);
+  auto d3 = milliseconds(250);
   auto d4 = d3;
   EXPECT_EQ(make(false, 0U, 250000000U), d3);
   d3 *= 4;
@@ -43,38 +46,38 @@ TEST(Duration, Basics) {
 }
 
 TEST(Duration, Negation) {
-  auto a = base::Duration::from_raw(false, 0U, 0U);
+  auto a = Duration::from_raw(false, 0U, 0U);
   auto b = -a;
   EXPECT_EQ(make(false, 0U, 0U), b);
 
-  a = base::Duration::from_raw(false, 0U, 1U);
+  a = Duration::from_raw(false, 0U, 1U);
   b = -a;
   EXPECT_EQ(make(true, 0U, 1U), b);
 
-  a = base::Duration::from_raw(false, 1U, 0U);
+  a = Duration::from_raw(false, 1U, 0U);
   b = -a;
   EXPECT_EQ(make(true, 1U, 0U), b);
 
-  a = base::Duration::from_raw(true, 0U, 1U);
+  a = Duration::from_raw(true, 0U, 1U);
   b = -a;
   EXPECT_EQ(make(false, 0U, 1U), b);
 
-  a = base::Duration::from_raw(true, 1U, 0U);
+  a = Duration::from_raw(true, 1U, 0U);
   b = -a;
   EXPECT_EQ(make(false, 1U, 0U), b);
 }
 
 TEST(Duration, AdditionSubtraction) {
-  auto a = base::minutes(5);
-  auto b = base::minutes(3);
+  auto a = minutes(5);
+  auto b = minutes(3);
   auto c = a + b;
-  EXPECT_EQ(base::minutes(8), c);
+  EXPECT_EQ(minutes(8), c);
   c = a - b;
-  EXPECT_EQ(base::minutes(2), c);
+  EXPECT_EQ(minutes(2), c);
 }
 
 TEST(Duration, ScalarMultiplicationDivision) {
-  auto a = base::seconds(1);
+  auto a = seconds(1);
   EXPECT_EQ(make(false, 0U, 0U), 0 * a);
   EXPECT_EQ(make(false, 1U, 0U), 1 * a);
   EXPECT_EQ(make(true, 1U, 0U), -1 * a);
@@ -89,22 +92,22 @@ TEST(Duration, ScalarMultiplicationDivision) {
   EXPECT_EQ(make(false, 2U, 500000000U), b / 2);
   EXPECT_EQ(make(false, 2U, 0U), b / 2.5);
 
-  auto c = base::minutes(1) + base::seconds(20);
+  auto c = minutes(1) + seconds(20);
   auto d = c * 3;
   EXPECT_EQ(make(false, 80U, 0U), c);
   EXPECT_EQ(make(false, 240U, 0U), d);
-  EXPECT_EQ(base::minutes(4), d);
-  EXPECT_EQ(base::minutes(4) / 3, c);
-  EXPECT_EQ(base::minutes(4) / 3.0, c);
-  EXPECT_EQ(base::minutes(4.0 / 3.0), c);
+  EXPECT_EQ(minutes(4), d);
+  EXPECT_EQ(minutes(4) / 3, c);
+  EXPECT_EQ(minutes(4) / 3.0, c);
+  EXPECT_EQ(minutes(4.0 / 3.0), c);
 }
 
 TEST(Duration, RatioDivision) {
-  auto a = base::seconds(5);
-  auto b = base::seconds(2);
+  auto a = seconds(5);
+  auto b = seconds(2);
   EXPECT_EQ(2.5, a / b);
   EXPECT_EQ(0.4, b / a);
-  auto c = base::seconds(1);
+  auto c = seconds(1);
   EXPECT_EQ(2.0, divmod(a, b).first);
   EXPECT_EQ(0.0, divmod(b, a).first);
   EXPECT_EQ(c, a % b);
@@ -112,12 +115,12 @@ TEST(Duration, RatioDivision) {
 }
 
 TEST(Duration, AsString) {
-  EXPECT_EQ("1h30m", base::hours(1.5).as_string());
-  EXPECT_EQ("15m", base::hours(0.25).as_string());
-  EXPECT_EQ("1m20s", base::minutes(4.0 / 3.0).as_string());
-  EXPECT_EQ("2.75s", base::milliseconds(2750).as_string());
-  EXPECT_EQ("-1.25s", base::milliseconds(-1250).as_string());
-  EXPECT_EQ("750ms", base::milliseconds(750).as_string());
-  EXPECT_EQ("500µs", base::milliseconds(0.5).as_string());
-  EXPECT_EQ("500ns", base::milliseconds(0.0005).as_string());
+  EXPECT_EQ("1h30m", hours(1.5).as_string());
+  EXPECT_EQ("15m", hours(0.25).as_string());
+  EXPECT_EQ("1m20s", minutes(4.0 / 3.0).as_string());
+  EXPECT_EQ("2.75s", milliseconds(2750).as_string());
+  EXPECT_EQ("-1.25s", milliseconds(-1250).as_string());
+  EXPECT_EQ("750ms", milliseconds(750).as_string());
+  EXPECT_EQ("500µs", milliseconds(0.5).as_string());
+  EXPECT_EQ("500ns", milliseconds(0.0005).as_string());
 }

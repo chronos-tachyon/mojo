@@ -1,9 +1,9 @@
-// base/time.h - Value type representing an instant of time
+// base/time/time.h - Value type representing an instant of time
 // Copyright © 2016 by Donald King <chronos@chronos-tachyon.net>
 // Available under the MIT License. See LICENSE for details.
 
-#ifndef BASE_TIME_H
-#define BASE_TIME_H
+#ifndef BASE_TIME_TIME_H
+#define BASE_TIME_TIME_H
 
 #include <sys/time.h>
 #include <time.h>
@@ -12,10 +12,11 @@
 #include <memory>
 #include <string>
 
-#include "base/duration.h"
 #include "base/result.h"
+#include "base/time/duration.h"
 
 namespace base {
+namespace time {
 
 // Time represents an instant of time on a wall clock.
 //
@@ -225,6 +226,7 @@ Result time_from_timespec(Time* out, const struct timespec* ts);
 Result timeval_from_time(struct timeval* out, Time time);
 Result timespec_from_time(struct timespec* out, Time time);
 
+}  // namespace time
 }  // namespace base
 
-#endif  // BASE_TIME_H
+#endif  // BASE_TIME_TIME_H

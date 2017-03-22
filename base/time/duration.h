@@ -1,9 +1,9 @@
-// base/duration.h - Value type representing a span of time
+// base/time/duration.h - Value type representing a span of time
 // Copyright © 2016 by Donald King <chronos@chronos-tachyon.net>
 // Available under the MIT License. See LICENSE for details.
 
-#ifndef BASE_DURATION_H
-#define BASE_DURATION_H
+#ifndef BASE_TIME_DURATION_H
+#define BASE_TIME_DURATION_H
 
 #include <sys/time.h>
 #include <time.h>
@@ -21,6 +21,7 @@
 #include "base/safemath.h"
 
 namespace base {
+namespace time {
 
 namespace internal {
 
@@ -396,6 +397,7 @@ Result duration_from_timespec(Duration* out, const struct timespec* ts);
 Result timeval_from_duration(struct timeval* out, Duration dur);
 Result timespec_from_duration(struct timespec* out, Duration dur);
 
+}  // namespace time
 }  // namespace base
 
-#endif  // BASE_DURATION_H
+#endif  // BASE_TIME_DURATION_H

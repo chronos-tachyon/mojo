@@ -1,20 +1,19 @@
 // Copyright © 2016 by Donald King <chronos@chronos-tachyon.net>
 // Available under the MIT License. See LICENSE for details.
 
+#include "base/time/clock.h"
 #include "gtest/gtest.h"
 
-#include "base/clock.h"
-
 TEST(Clock, Basics) {
-  base::Clock clock = base::system_wallclock();
+  base::time::Clock clock = base::time::system_wallclock();
   EXPECT_TRUE(clock);
   EXPECT_NO_THROW(clock.now());
 }
 
 TEST(MonotonicClock, Basics) {
-  base::MonotonicClock clock = base::system_monotonic_clock();
+  base::time::MonotonicClock clock = base::time::system_monotonic_clock();
   EXPECT_TRUE(clock);
   EXPECT_NO_THROW(clock.now());
-  EXPECT_NO_THROW(clock.convert(base::MonotonicTime()));
-  EXPECT_NO_THROW(clock.convert(base::Time()));
+  EXPECT_NO_THROW(clock.convert(base::time::MonotonicTime()));
+  EXPECT_NO_THROW(clock.convert(base::time::Time()));
 }

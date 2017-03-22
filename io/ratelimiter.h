@@ -7,8 +7,8 @@
 
 #include <memory>
 
-#include "base/duration.h"
 #include "base/options.h"
+#include "base/time/duration.h"
 #include "event/task.h"
 #include "io/reader.h"
 #include "io/writer.h"
@@ -36,7 +36,7 @@ class RateLimiterImpl {
 
 using RateLimiter = std::shared_ptr<RateLimiterImpl>;
 
-RateLimiter new_ratelimiter(base::Duration window, std::size_t count,
+RateLimiter new_ratelimiter(base::time::Duration window, std::size_t count,
                             std::size_t burst = 0);
 
 Reader ratelimitedreader(Reader r, RateLimiter l);

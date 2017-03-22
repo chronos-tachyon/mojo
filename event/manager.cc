@@ -327,7 +327,7 @@ struct DeadlineHelper {
         task(DCHECK_NOTNULL(t)),
         seen(false) {}
 
-  base::Result initialize(const Manager& m, base::MonotonicTime at) {
+  base::Result initialize(const Manager& m, base::time::MonotonicTime at) {
     base::Result r = m.timer(&timer, std::make_shared<ExpireHandler>(this));
     if (r) {
       r = timer.set_at(at);
@@ -337,7 +337,7 @@ struct DeadlineHelper {
     return r;
   }
 
-  base::Result initialize(const Manager& m, base::Duration delay) {
+  base::Result initialize(const Manager& m, base::time::Duration delay) {
     base::Result r = m.timer(&timer, std::make_shared<ExpireHandler>(this));
     if (r) {
       r = timer.set_delay(delay);
@@ -680,8 +680,8 @@ base::Result ManagerImpl::modify(Record* myrec, Set set) {
   return r;
 }
 
-base::Result ManagerImpl::arm(Record* myrec, base::Duration delay,
-                              base::Duration period, bool delay_abs) {
+base::Result ManagerImpl::arm(Record* myrec, base::time::Duration delay,
+                              base::time::Duration period, bool delay_abs) {
   DCHECK_NOTNULL(myrec);
 
   auto lock0 = base::acquire_lock(mu_);
@@ -702,8 +702,8 @@ base::Result ManagerImpl::arm(Record* myrec, base::Duration delay,
 
   struct itimerspec its;
   ::bzero(&its, sizeof(its));
-  auto r0 = base::timespec_from_duration(&its.it_value, delay);
-  auto r1 = base::timespec_from_duration(&its.it_interval, period);
+  auto r0 = base::time::timespec_from_duration(&its.it_value, delay);
+  auto r1 = base::time::timespec_from_duration(&its.it_interval, period);
   auto r = r0.and_then(r1);
   if (!r) return r;
 
@@ -1092,24 +1092,24 @@ base::Result Handle::modify(Set set) const {
   return ptr_->modify(rec_.get(), set);
 }
 
-base::Result Handle::set_at(base::MonotonicTime at) const {
+base::Result Handle::set_at(base::time::MonotonicTime at) const {
   assert_valid();
-  base::Duration delay = at.since_epoch();
+  base::time::Duration delay = at.since_epoch();
   if (delay.is_zero() || delay.is_neg())
     return base::Result::invalid_argument(
         "initial event must be strictly after the epoch");
-  return ptr_->arm(rec_.get(), delay, base::Duration(), true);
+  return ptr_->arm(rec_.get(), delay, base::time::Duration(), true);
 }
 
-base::Result Handle::set_delay(base::Duration delay) const {
+base::Result Handle::set_delay(base::time::Duration delay) const {
   assert_valid();
   if (delay.is_zero() || delay.is_neg())
     return base::Result::invalid_argument(
         "delay must be strictly after the present");
-  return ptr_->arm(rec_.get(), delay, base::Duration(), false);
+  return ptr_->arm(rec_.get(), delay, base::time::Duration(), false);
 }
 
-base::Result Handle::set_periodic(base::Duration period) const {
+base::Result Handle::set_periodic(base::time::Duration period) const {
   assert_valid();
   if (period.is_zero() || period.is_neg())
     return base::Result::invalid_argument(
@@ -1117,10 +1117,10 @@ base::Result Handle::set_periodic(base::Duration period) const {
   return ptr_->arm(rec_.get(), period, period, false);
 }
 
-base::Result Handle::set_periodic_at(base::Duration period,
-                                     base::MonotonicTime at) const {
+base::Result Handle::set_periodic_at(base::time::Duration period,
+                                     base::time::MonotonicTime at) const {
   assert_valid();
-  base::Duration delay = at.since_epoch();
+  base::time::Duration delay = at.since_epoch();
   if (period.is_zero() || period.is_neg())
     return base::Result::invalid_argument(
         "zero or negative period doesn't make sense");
@@ -1130,8 +1130,8 @@ base::Result Handle::set_periodic_at(base::Duration period,
   return ptr_->arm(rec_.get(), delay, period, true);
 }
 
-base::Result Handle::set_periodic_delay(base::Duration period,
-                                        base::Duration delay) const {
+base::Result Handle::set_periodic_delay(base::time::Duration period,
+                                        base::time::Duration delay) const {
   assert_valid();
   if (period.is_zero() || period.is_neg())
     return base::Result::invalid_argument(
@@ -1144,7 +1144,7 @@ base::Result Handle::set_periodic_delay(base::Duration period,
 
 base::Result Handle::cancel() const {
   assert_valid();
-  base::Duration zero;
+  base::time::Duration zero;
   return ptr_->arm(rec_.get(), zero, zero, false);
 }
 
@@ -1222,13 +1222,13 @@ base::Result Manager::generic(Handle* out, HandlerPtr handler) const {
   return r;
 }
 
-base::Result Manager::set_deadline(Task* task, base::MonotonicTime at) {
+base::Result Manager::set_deadline(Task* task, base::time::MonotonicTime at) {
   CHECK_NOTNULL(task);
   auto* helper = new DeadlineHelper(dispatcher(), task);
   return helper->initialize(*this, at);
 }
 
-base::Result Manager::set_timeout(Task* task, base::Duration delay) {
+base::Result Manager::set_timeout(Task* task, base::time::Duration delay) {
   CHECK_NOTNULL(task);
   auto* helper = new DeadlineHelper(dispatcher(), task);
   return helper->initialize(*this, delay);

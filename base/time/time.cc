@@ -1,7 +1,7 @@
 // Copyright © 2016 by Donald King <chronos@chronos-tachyon.net>
 // Available under the MIT License. See LICENSE for details.
 
-#include "base/time.h"
+#include "base/time/time.h"
 
 #include <time.h>
 
@@ -12,6 +12,7 @@
 #include "base/logging.h"
 
 namespace base {
+namespace time {
 
 void Time::append_to(std::string* out) const {
   CHECK_NOTNULL(out);
@@ -77,4 +78,5 @@ Result timespec_from_time(struct timespec* out, Time time) {
   return timespec_from_duration(out, time.since_epoch());
 }
 
+}  // namespace time
 }  // namespace base

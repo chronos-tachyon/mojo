@@ -1,23 +1,24 @@
-// base/stopwatch.h - Class for measuring spans of time
+// base/time/stopwatch.h - Class for measuring spans of time
 // Copyright © 2016 by Donald King <chronos@chronos-tachyon.net>
 // Available under the MIT License. See LICENSE for details.
 
-#ifndef BASE_STOPWATCH_H
-#define BASE_STOPWATCH_H
+#ifndef BASE_TIME_STOPWATCH_H
+#define BASE_TIME_STOPWATCH_H
 
 #include <utility>
 
-#include "base/clock.h"
-#include "base/duration.h"
-#include "base/time.h"
+#include "base/time/clock.h"
+#include "base/time/duration.h"
+#include "base/time/time.h"
 
 namespace base {
+namespace time {
 
 // Stopwatch is a class for measuring Durations on a MonotonicClock.
 //
 // Example usage:
 //
-//    base::Stopwatch stopwatch;
+//    base::time::Stopwatch stopwatch;
 //    stopwatch.start();
 //    ...;
 //    stopwatch.stop();
@@ -30,7 +31,7 @@ class Stopwatch {
   //
   // Example usage:
   //
-  //    base::Stopwatch stopwatch;
+  //    base::time::Stopwatch stopwatch;
   //    if (expensive) {
   //      auto measurement = stopwatch.measure();
   //      ...;  // perform expensive operation
@@ -151,6 +152,7 @@ inline void swap(Stopwatch::Measurement& a,
   a.swap(b);
 }
 
+}  // namespace time
 }  // namespace base
 
-#endif  // BASE_STOPWATCH_H
+#endif  // BASE_TIME_STOPWATCH_H

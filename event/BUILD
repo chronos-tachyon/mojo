@@ -23,7 +23,10 @@ cc_library(
     "set.h",
     "task.h",
   ],
-  deps = ["//base"],
+  deps = [
+    "//base",
+    "//base/time",
+  ],
   linkopts = ["-pthread"],
   visibility = ["//visibility:public"],
 )

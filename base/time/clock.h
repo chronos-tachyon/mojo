@@ -1,15 +1,16 @@
-// base/clock.h - Interface for obtaining base::Time values
+// base/time/clock.h - Interface for obtaining Time values
 // Copyright © 2016 by Donald King <chronos@chronos-tachyon.net>
 // Available under the MIT License. See LICENSE for details.
 
-#ifndef BASE_CLOCK_H
-#define BASE_CLOCK_H
+#ifndef BASE_TIME_CLOCK_H
+#define BASE_TIME_CLOCK_H
 
 #include <memory>
 
-#include "base/time.h"
+#include "base/time/time.h"
 
 namespace base {
+namespace time {
 
 // ClockImpl is the abstract base class for Clocks.
 // It is exposed mostly for use by unit tests.
@@ -167,6 +168,17 @@ MonotonicClock system_monotonic_clock();
 inline Time now() { return system_wallclock().now(); }
 inline MonotonicTime monotonic_now() { return system_monotonic_clock().now(); }
 
+// Convenience methods for converting between Time and MonotonicTime.
+//
+// THREAD SAFETY: These functions are thread-safe.
+//
+inline MonotonicTime to_monotonic(Time t) {
+  return system_monotonic_clock().convert(t);
+}
+inline Time from_monotonic(MonotonicTime t) {
+  return system_monotonic_clock().convert(t);
+}
+
 // Replaces the specified clock.
 // These functions should only be used in unit tests.
 //
@@ -175,6 +187,7 @@ inline MonotonicTime monotonic_now() { return system_monotonic_clock().now(); }
 void set_system_wallclock(Clock clock);
 void set_system_monotonic_clock(MonotonicClock clock);
 
+}  // namespace time
 }  // namespace base
 
-#endif  // BASE_CLOCK_H
+#endif  // BASE_TIME_CLOCK_H

@@ -6,11 +6,9 @@ cc_library(
   srcs = [
     "backport.cc",
     "cleanup.cc",
-    "clock.cc",
     "concat.cc",
     "cpu.cc",
     "debug.cc",
-    "duration.cc",
     "endian.cc",
     "env.cc",
     "fd.cc",
@@ -20,20 +18,16 @@ cc_library(
     "options.cc",
     "result.cc",
     "safemath.cc",
-    "stopwatch.cc",
     "strings.cc",
-    "time.cc",
     "token.cc",
     "user.cc",
   ],
   hdrs = [
     "backport.h",
     "cleanup.h",
-    "clock.h",
     "concat.h",
     "cpu.h",
     "debug.h",
-    "duration.h",
     "endian.h",
     "env.h",
     "fd.h",
@@ -43,9 +37,7 @@ cc_library(
     "options.h",
     "result.h",
     "safemath.h",
-    "stopwatch.h",
     "strings.h",
-    "time.h",
     "token.h",
     "user.h",
   ],
@@ -68,30 +60,8 @@ cc_test(
 )
 
 cc_test(
-  name = "clock_test",
-  srcs = ["clock_test.cc"],
-  deps = [
-    ":base",
-    "//external:gtest",
-  ],
-  size = "small",
-  timeout = "short",
-)
-
-cc_test(
   name = "concat_test",
   srcs = ["concat_test.cc"],
-  deps = [
-    ":base",
-    "//external:gtest",
-  ],
-  size = "small",
-  timeout = "short",
-)
-
-cc_test(
-  name = "duration_test",
-  srcs = ["duration_test.cc"],
   deps = [
     ":base",
     "//external:gtest",
@@ -169,30 +139,8 @@ cc_test(
 )
 
 cc_test(
-  name = "stopwatch_test",
-  srcs = ["stopwatch_test.cc"],
-  deps = [
-    ":base",
-    "//external:gtest",
-  ],
-  size = "small",
-  timeout = "short",
-)
-
-cc_test(
   name = "strings_test",
   srcs = ["strings_test.cc"],
-  deps = [
-    ":base",
-    "//external:gtest",
-  ],
-  size = "small",
-  timeout = "short",
-)
-
-cc_test(
-  name = "time_test",
-  srcs = ["time_test.cc"],
   deps = [
     ":base",
     "//external:gtest",
@@ -210,15 +158,6 @@ cc_test(
   ],
   size = "small",
   timeout = "short",
-)
-
-cc_library(
-  name = "clockfake",
-  srcs = ["clockfake.cc"],
-  hdrs = ["clockfake.h"],
-  deps = [":base"],
-  visibility = ["//visibility:public"],
-  testonly = True,
 )
 
 cc_library(

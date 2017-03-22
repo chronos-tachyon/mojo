@@ -7,7 +7,7 @@
 
 #include <ostream>
 
-#include "base/time.h"
+#include "base/time/time.h"
 #include "file/perm.h"
 
 namespace file {
@@ -89,10 +89,10 @@ struct Stat {
   std::size_t size;
   std::size_t size_blocks;  // 512-byte blocks
   std::size_t optimal_block_size;
-  base::Time create_time;
-  base::Time change_time;
-  base::Time modify_time;
-  base::Time access_time;
+  base::time::Time create_time;
+  base::time::Time change_time;
+  base::time::Time modify_time;
+  base::time::Time access_time;
 
   Stat() noexcept : type(FileType::unknown),
                     link_count(0),
@@ -199,26 +199,26 @@ class SetStat {
     has_ |= bit_perm;
   }
 
-  std::pair<bool, base::Time> mtime() const {
+  std::pair<bool, base::time::Time> mtime() const {
     return std::make_pair(has(bit_mtime), mtime_);
   }
   void reset_mtime() noexcept {
     has_ &= ~bit_mtime;
-    mtime_ = base::Time();
+    mtime_ = base::time::Time();
   }
-  void set_mtime(base::Time mtime) noexcept {
+  void set_mtime(base::time::Time mtime) noexcept {
     mtime_ = std::move(mtime);
     has_ |= bit_mtime;
   }
 
-  std::pair<bool, base::Time> atime() const {
+  std::pair<bool, base::time::Time> atime() const {
     return std::make_pair(has(bit_atime), atime_);
   }
   void reset_atime() noexcept {
     has_ &= ~bit_atime;
-    atime_ = base::Time();
+    atime_ = base::time::Time();
   }
-  void set_atime(base::Time atime) noexcept {
+  void set_atime(base::time::Time atime) noexcept {
     atime_ = std::move(atime);
     has_ |= bit_atime;
   }
@@ -227,8 +227,8 @@ class SetStat {
   std::string owner_;
   std::string group_;
   Perm perm_;
-  base::Time mtime_;
-  base::Time atime_;
+  base::time::Time mtime_;
+  base::time::Time atime_;
   uint8_t has_;
 };
 

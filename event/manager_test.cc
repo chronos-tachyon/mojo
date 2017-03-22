@@ -1,8 +1,6 @@
 // Copyright © 2016 by Donald King <chronos@chronos-tachyon.net>
 // Available under the MIT License. See LICENSE for details.
 
-#include "gtest/gtest.h"
-
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <time.h>
@@ -16,13 +14,18 @@
 #include <thread>
 
 #include "base/cleanup.h"
-#include "base/clock.h"
 #include "base/fd.h"
 #include "base/logging.h"
 #include "base/mutex.h"
 #include "base/result_testing.h"
+#include "base/time/clock.h"
 #include "event/manager.h"
 #include "event/task.h"
+#include "gtest/gtest.h"
+
+using base::time::monotonic_now;
+using base::time::milliseconds;
+using base::time::microseconds;
 
 static constexpr char kHelloWorld[] = "Hello, world!\n";
 static constexpr std::size_t kHelloLen = sizeof(kHelloWorld) - 1;
@@ -179,7 +182,7 @@ static void TestManagerImplementation_Timers(event::Manager m) {
   ASSERT_OK(m.timer(&t, event::handler(timer_closure)));
 
   LOG(INFO) << "setting timer to period 1ms";
-  ASSERT_OK(t.set_periodic(base::milliseconds(1)));
+  ASSERT_OK(t.set_periodic(milliseconds(1)));
 
   LOG(INFO) << "task: waiting for finish";
   event::wait(m, &task);
@@ -204,7 +207,8 @@ static void TestManagerImplementation_Timers(event::Manager m) {
   lock.unlock();
 
   LOG(INFO) << "setting timer to oneshot now+5ms";
-  ASSERT_OK(t.set_at(base::monotonic_now() + base::milliseconds(5)));
+  ASSERT_OK(
+      t.set_at(monotonic_now() + milliseconds(5)));
 
   LOG(INFO) << "task: waiting for finish";
   event::wait(m, &task);
@@ -302,10 +306,10 @@ static void TestManagerImplementation_TaskTimeouts(event::Manager m) {
   LOG(INFO) << "creating timer at interval 1ms";
   event::Handle t;
   EXPECT_OK(m.timer(&t, event::handler(closure)));
-  EXPECT_OK(t.set_periodic(base::microseconds(250)));
+  EXPECT_OK(t.set_periodic(microseconds(250)));
 
   LOG(INFO) << "setting deadline";
-  base::MonotonicTime at = base::monotonic_now() + base::milliseconds(1);
+  auto at = monotonic_now() + milliseconds(1);
   EXPECT_OK(m.set_deadline(&task, at));
 
   LOG(INFO) << "waiting for task";

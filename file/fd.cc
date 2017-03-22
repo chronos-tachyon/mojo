@@ -14,7 +14,7 @@
 #include <cstddef>
 
 #include "base/cleanup.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "base/user.h"
 
 namespace file {
@@ -210,7 +210,7 @@ void FDFile::set_stat(event::Task* task, const SetStat& delta,
   bool has_owner, has_group, has_perm, has_mtime, has_atime;
   std::string owner, group;
   Perm perm;
-  base::Time mtime, atime;
+  base::time::Time mtime, atime;
 
   std::tie(has_owner, owner) = delta.owner();
   std::tie(has_group, group) = delta.group();
@@ -224,7 +224,7 @@ void FDFile::set_stat(event::Task* task, const SetStat& delta,
     struct timespec times[2];
 
     if (has_atime) {
-      base::Result r = base::timespec_from_time(&times[0], atime);
+      base::Result r = base::time::timespec_from_time(&times[0], atime);
       if (!r) {
         task->finish(std::move(r));
         return;
@@ -235,7 +235,7 @@ void FDFile::set_stat(event::Task* task, const SetStat& delta,
     }
 
     if (has_mtime) {
-      base::Result r = base::timespec_from_time(&times[1], mtime);
+      base::Result r = base::time::timespec_from_time(&times[1], mtime);
       if (!r) {
         task->finish(std::move(r));
         return;
@@ -342,12 +342,13 @@ base::Result convert_statfs(StatFS* out, const struct statfs& f) {
 base::Result convert_stat(Stat* out, const struct stat& st) {
   base::User u;
   base::Group g;
-  base::Time ctime, mtime, atime;
-  base::Result r = base::user_by_id(&u, st.st_uid)
-                       .and_then(base::group_by_id(&g, st.st_gid))
-                       .and_then(base::time_from_timespec(&ctime, &st.st_ctim))
-                       .and_then(base::time_from_timespec(&mtime, &st.st_mtim))
-                       .and_then(base::time_from_timespec(&atime, &st.st_atim));
+  base::time::Time ctime, mtime, atime;
+  base::Result r =
+      base::user_by_id(&u, st.st_uid)
+          .and_then(base::group_by_id(&g, st.st_gid))
+          .and_then(base::time::time_from_timespec(&ctime, &st.st_ctim))
+          .and_then(base::time::time_from_timespec(&mtime, &st.st_mtim))
+          .and_then(base::time::time_from_timespec(&atime, &st.st_atim));
   if (!r) return r;
   Stat tmp;
   tmp.type = filetype_from_mode(st.st_mode);

@@ -12,12 +12,12 @@
 #include <unordered_map>
 #include <vector>
 
-#include "base/clock.h"
-#include "base/duration.h"
 #include "base/fd.h"
 #include "base/logging.h"
 #include "base/result.h"
-#include "base/time.h"
+#include "base/time/clock.h"
+#include "base/time/duration.h"
+#include "base/time/time.h"
 #include "base/token.h"
 #include "event/callback.h"
 #include "event/data.h"
@@ -118,8 +118,8 @@ class ManagerImpl {
   base::Result timer_add(std::unique_ptr<Record>* out, HandlerPtr handler);
   base::Result generic_add(std::unique_ptr<Record>* out, HandlerPtr handler);
   base::Result modify(Record* myrec, Set set);
-  base::Result arm(Record* myrec, base::Duration delay,
-                   base::Duration period, bool delay_abs);
+  base::Result arm(Record* myrec, base::time::Duration delay,
+                   base::time::Duration period, bool delay_abs);
   base::Result fire(Record* myrec, int value);
   base::Result disable(Record* myrec);
 
@@ -193,28 +193,31 @@ class Handle {
   base::Result modify(Set set) const;
 
   // Arms the timer event as a one-shot timer for the given absolute time.
-  // The time is specified in terms of the |base::system_monotonic_clock()|.
-  base::Result set_at(base::MonotonicTime at) const;
-  base::Result set_at(base::Time at) const {
-    return set_at(base::system_monotonic_clock().convert(at));
+  // The time is specified in terms of the |system_monotonic_clock()|.
+  base::Result set_at(base::time::MonotonicTime at) const;
+  base::Result set_at(base::time::Time at) const {
+    return set_at(base::time::to_monotonic(at));
   }
 
   // Arms the timer event as a one-shot timer for a time relative to now.
-  base::Result set_delay(base::Duration delay) const;
+  base::Result set_delay(base::time::Duration delay) const;
 
   // Arms the timer event as a periodic timer with the given period.
-  base::Result set_periodic(base::Duration period) const;
+  base::Result set_periodic(base::time::Duration period) const;
 
   // Arms the timer event as a periodic timer with the given period.
   // The first event will arrive at the given absolute time.
-  base::Result set_periodic_at(base::Duration period, base::MonotonicTime at) const;
-  base::Result set_periodic_at(base::Duration period, base::Time at) const {
-    return set_periodic_at(period, base::system_monotonic_clock().convert(at));
+  base::Result set_periodic_at(base::time::Duration period,
+                               base::time::MonotonicTime at) const;
+  base::Result set_periodic_at(base::time::Duration period,
+                               base::time::Time at) const {
+    return set_periodic_at(period, base::time::to_monotonic(at));
   }
 
   // Arms the timer event as a periodic timer with the given period.
   // The first event will arrive after the specified delay.
-  base::Result set_periodic_delay(base::Duration period, base::Duration delay) const;
+  base::Result set_periodic_delay(base::time::Duration period,
+                                  base::time::Duration delay) const;
 
   // Disarms the timer event. The Handle remains valid, but it produces no
   // further events until it is armed again.
@@ -435,13 +438,13 @@ class Manager {
   base::Result generic(Handle* out, HandlerPtr handler) const;
 
   // Arranges for |task->expire()| to be called at time |at|.
-  base::Result set_deadline(Task* task, base::MonotonicTime at);
-  base::Result set_deadline(Task* task, base::Time at) {
-    return set_deadline(task, base::system_monotonic_clock().convert(at));
+  base::Result set_deadline(Task* task, base::time::MonotonicTime at);
+  base::Result set_deadline(Task* task, base::time::Time at) {
+    return set_deadline(task, base::time::to_monotonic(at));
   }
 
   // Arranges for |task->expire()| to be called after |delay|.
-  base::Result set_timeout(Task* task, base::Duration delay);
+  base::Result set_timeout(Task* task, base::time::Duration delay);
 
   // Donates the current thread to the Manager, if supported.
   void donate(bool forever) const noexcept {

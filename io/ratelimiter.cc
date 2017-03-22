@@ -7,10 +7,10 @@
 #include <mutex>
 
 #include "base/backport.h"
-#include "base/clock.h"
 #include "base/logging.h"
 #include "base/mutex.h"
-#include "base/time.h"
+#include "base/time/clock.h"
+#include "base/time/time.h"
 
 namespace io {
 
@@ -36,25 +36,25 @@ using Pointer = std::unique_ptr<Item>;
 
 class BasicRateLimiter : public RateLimiterImpl {
  public:
-  BasicRateLimiter(base::Duration ww, std::size_t wc, std::size_t wb) noexcept
-      : ww_(ww),
-        wc_(wc),
-        wb_(wb),
-        bank_(wb) {}
+  BasicRateLimiter(base::time::Duration ww, std::size_t wc,
+                   std::size_t wb) noexcept : ww_(ww),
+                                              wc_(wc),
+                                              wb_(wb),
+                                              bank_(wb) {}
 
   void gate(event::Task* task, std::size_t n,
             const base::Options& opts) override;
 
   void process();
-  void process_impl(base::Lock& lock, base::MonotonicTime now);
+  void process_impl(base::Lock& lock, base::time::MonotonicTime now);
 
  private:
-  const base::Duration ww_;
+  const base::time::Duration ww_;
   const std::size_t wc_;
   const std::size_t wb_;
   mutable std::mutex mu_;
   std::deque<Pointer> q_;
-  base::MonotonicTime last_;
+  base::time::MonotonicTime last_;
   std::size_t bank_;
 };
 
@@ -62,20 +62,21 @@ void BasicRateLimiter::gate(event::Task* task, std::size_t n,
                             const base::Options& opts) {
   CHECK_NOTNULL(task);
   auto lock = base::acquire_lock(mu_);
-  auto now = base::monotonic_now();
+  auto now = base::time::monotonic_now();
   q_.push_back(base::backport::make_unique<Item>(task, n, opts));
   process_impl(lock, now);
 }
 
 void BasicRateLimiter::process() {
   auto lock = base::acquire_lock(mu_);
-  auto now = base::monotonic_now();
+  auto now = base::time::monotonic_now();
   process_impl(lock, now);
 }
 
-void BasicRateLimiter::process_impl(base::Lock& lock, base::MonotonicTime now) {
+void BasicRateLimiter::process_impl(base::Lock& lock,
+                                    base::time::MonotonicTime now) {
   if (!last_.is_epoch()) {
-    base::Duration delta = now - last_;
+    base::time::Duration delta = now - last_;
     std::size_t earned = ::ceil(wc_ * (delta / ww_));
     bank_ = min(bank_ + earned, wb_);
   }
@@ -251,7 +252,7 @@ base::Result RateLimiterImpl::gate(std::size_t n, const base::Options& opts) {
   return task.result();
 }
 
-RateLimiter new_ratelimiter(base::Duration window, std::size_t count,
+RateLimiter new_ratelimiter(base::time::Duration window, std::size_t count,
                             std::size_t burst) {
   CHECK(!window.is_zero()) << ": " << window;
   CHECK(!window.is_neg()) << ": " << window;

@@ -1,17 +1,21 @@
 // Copyright © 2016 by Donald King <chronos@chronos-tachyon.net>
 // Available under the MIT License. See LICENSE for details.
 
-#include "base/duration.h"
+#include "base/time/duration.h"
 
 #include <cmath>
 #include <ostream>
 
+#include "base/concat.h"
 #include "base/int128.h"
 #include "base/logging.h"
 
-using namespace base::internal;
+using namespace base::time::internal;
+using base::internal::ui_append_to;
+using base::internal::ull_append_to;
 
 namespace base {
+namespace time {
 
 const Duration NANOSECOND = Duration::from_raw(false, 0U, 1U);
 const Duration MICROSECOND = Duration::from_raw(false, 0U, NS_PER_US);
@@ -205,4 +209,5 @@ Result timespec_from_duration(struct timespec* out, Duration dur) {
   return Result();
 }
 
+}  // namespace time
 }  // namespace base

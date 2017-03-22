@@ -1,29 +1,30 @@
 // Copyright © 2016 by Donald King <chronos@chronos-tachyon.net>
 // Available under the MIT License. See LICENSE for details.
 
-#include "base/stopwatch.h"
+#include "base/time/stopwatch.h"
 
 #include <stdexcept>
 
 #include "base/logging.h"
 
 namespace base {
+namespace time {
 
 void Stopwatch::Measurement::assert_valid() const {
   if (!ptr_) {
-    LOG(FATAL) << "BUG: base::Stopwatch::Measurement is empty!";
+    LOG(FATAL) << "BUG: base::time::Stopwatch::Measurement is empty!";
   }
 }
 
 void Stopwatch::assert_stopped() const {
   if (running_) {
-    LOG(DFATAL) << "BUG: base::Stopwatch is running!";
+    LOG(DFATAL) << "BUG: base::time::Stopwatch is running!";
   }
 }
 
 void Stopwatch::assert_running() const {
   if (!running_) {
-    LOG(DFATAL) << "BUG: base::Stopwatch is not running!";
+    LOG(DFATAL) << "BUG: base::time::Stopwatch is not running!";
   }
 }
 
@@ -55,4 +56,5 @@ void Stopwatch::reset() {
   running_ = false;
 }
 
+}  // namespace time
 }  // namespace base

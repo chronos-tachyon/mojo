@@ -10,8 +10,8 @@
 #include <vector>
 
 #include "base/cleanup.h"
-#include "base/clock.h"
 #include "base/mutex.h"
+#include "base/time/clock.h"
 #include "file/fs.h"
 #include "file/registry.h"
 #include "io/reader.h"
@@ -72,10 +72,10 @@ struct Inode {
   std::string owner;
   std::string group;
   std::size_t nlinks;
-  base::Time create_time;
-  base::Time change_time;
-  base::Time modify_time;
-  base::Time access_time;
+  base::time::Time create_time;
+  base::time::Time change_time;
+  base::time::Time modify_time;
+  base::time::Time access_time;
   Bytes data;
   DEntryMap dentries;
 
@@ -85,7 +85,7 @@ struct Inode {
         owner(std::move(owner)),
         group(std::move(group)),
         nlinks(0),
-        create_time(base::now()),
+        create_time(base::time::now()),
         change_time(create_time),
         modify_time(create_time),
         access_time(create_time) {}
@@ -444,7 +444,7 @@ void DescriptorReader::read(event::Task* task, char* out, std::size_t* n,
   if (len > max) len = max;
   ::memcpy(out, buf.data() + pos, len);
   pos += len;
-  desc_.inode->access_time = base::now();
+  desc_.inode->access_time = base::time::now();
 
   lock.unlock();
 
@@ -491,7 +491,7 @@ void DescriptorWriter::write(event::Task* task, std::size_t* n, const char* ptr,
   if (pos + len > buf.size()) buf.resize(pos + len);
   ::memcpy(buf.data() + pos, ptr, len);
   pos += len;
-  auto now = base::now();
+  auto now = base::time::now();
   desc_.inode->modify_time = now;
   desc_.inode->access_time = now;
 

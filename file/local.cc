@@ -13,7 +13,7 @@
 
 #include "base/cleanup.h"
 #include "base/mutex.h"
-#include "base/time.h"
+#include "base/time/time.h"
 #include "base/user.h"
 #include "file/fd.h"
 #include "file/registry.h"
@@ -113,7 +113,7 @@ void LocalFS::set_stat(event::Task* task, const std::string& path,
   bool has_owner, has_group, has_perm, has_mtime, has_atime;
   std::string owner, group;
   Perm perm;
-  base::Time mtime, atime;
+  base::time::Time mtime, atime;
 
   std::tie(has_owner, owner) = delta.owner();
   std::tie(has_group, group) = delta.group();
@@ -129,7 +129,7 @@ void LocalFS::set_stat(event::Task* task, const std::string& path,
     struct timespec times[2];
 
     if (has_atime) {
-      base::Result r = base::timespec_from_time(&times[0], atime);
+      base::Result r = base::time::timespec_from_time(&times[0], atime);
       if (!r) {
         task->finish(std::move(r));
         return;
@@ -140,7 +140,7 @@ void LocalFS::set_stat(event::Task* task, const std::string& path,
     }
 
     if (has_mtime) {
-      base::Result r = base::timespec_from_time(&times[1], mtime);
+      base::Result r = base::time::timespec_from_time(&times[1], mtime);
       if (!r) {
         task->finish(std::move(r));
         return;

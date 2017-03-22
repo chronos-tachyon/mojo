@@ -25,6 +25,7 @@ cc_library(
   ],
   deps = [
     "//base",
+    "//base/time",
     "//io",
   ],
   visibility = ["//visibility:public"],

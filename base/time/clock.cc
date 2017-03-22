@@ -1,7 +1,7 @@
 // Copyright © 2016 by Donald King <chronos@chronos-tachyon.net>
 // Available under the MIT License. See LICENSE for details.
 
-#include "base/clock.h"
+#include "base/time/clock.h"
 
 #include <time.h>
 
@@ -10,17 +10,18 @@
 #include <stdexcept>
 #include <system_error>
 
-#include "base/duration.h"
-#include "base/time.h"
+#include "base/time/duration.h"
+#include "base/time/time.h"
 
 namespace base {
+namespace time {
 
 void Clock::assert_valid() const {
-  if (!ptr_) throw std::logic_error("base::Clock is empty");
+  if (!ptr_) throw std::logic_error("base::time::Clock is empty");
 }
 
 void MonotonicClock::assert_valid() const {
-  if (!ptr_) throw std::logic_error("base::MonotonicClock is empty");
+  if (!ptr_) throw std::logic_error("base::time::MonotonicClock is empty");
 }
 
 class SystemWallClock : public ClockImpl {
@@ -58,8 +59,8 @@ static Duration compute_wall_minus_mono() {
       uint64_t(ts2.tv_sec) * internal::NS_PER_S + uint64_t(ts2.tv_nsec);
   ns /= 2;
 
-  Duration mt = Duration::from_raw(false, ts0.tv_sec, ts0.tv_nsec) +
-                base::nanoseconds(ns);
+  Duration mt =
+      Duration::from_raw(false, ts0.tv_sec, ts0.tv_nsec) + nanoseconds(ns);
   Duration wt = Duration::from_raw(false, ts1.tv_sec, ts1.tv_nsec);
   return wt - mt;
 }
@@ -131,4 +132,5 @@ void set_system_monotonic_clock(MonotonicClock clock) {
   *g_sysclk_mono = std::move(clock);
 }
 
+}  // namespace time
 }  // namespace base
