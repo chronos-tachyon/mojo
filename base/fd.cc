@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <exception>
 
+#include "base/env.h"
 #include "base/logging.h"
 #include "base/mutex.h"
 
@@ -279,8 +280,7 @@ static std::vector<char> build_temppath(const char* tmpl) {
   if (*tmpl == '/') {
     tmpdir = "";
   } else {
-    tmpdir = getenv("TMPDIR");
-    if (tmpdir == nullptr) tmpdir = "/tmp";
+    tmpdir = env::TMPDIR().c_str();
     if (!*tmpl) tmpl = "tmp.XXXXXX";
   }
 

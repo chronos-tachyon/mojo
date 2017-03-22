@@ -12,6 +12,7 @@ cc_library(
     "debug.cc",
     "duration.cc",
     "endian.cc",
+    "env.cc",
     "fd.cc",
     "int128.cc",
     "logging.cc",
@@ -34,6 +35,7 @@ cc_library(
     "debug.h",
     "duration.h",
     "endian.h",
+    "env.h",
     "fd.h",
     "int128.h",
     "logging.h",
@@ -245,6 +247,12 @@ cc_test(
 cc_binary(
   name = "cpu_list",
   srcs = ["cpu_list.cc"],
+  deps = [":base"],
+)
+
+cc_binary(
+  name = "printenv",
+  srcs = ["printenv.cc"],
   deps = [":base"],
 )
 
