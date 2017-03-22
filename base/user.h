@@ -138,6 +138,11 @@ base::Result user_by_name(User* out, const std::string& name);
 base::Result group_by_id(Group* out, int32_t id);
 base::Result group_by_name(Group* out, const std::string& name);
 
+const User& real_user();
+const User& effective_user();
+const Group& real_group();
+const Group& effective_group();
+
 }  // namespace base
 
 #endif  // BASE_USER_H

@@ -8,7 +8,11 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <memory>
+
+#include "base/backport.h"
 #include "base/concat.h"
+#include "base/logging.h"
 
 template <typename T>
 static std::size_t LH(T arg) {
@@ -158,6 +162,38 @@ base::Result group_by_name(Group* out, const std::string& name) {
                               struct group** ptr) {
                         return ::getgrnam_r(name.c_str(), gr, buf, len, ptr);
                       });
+}
+
+static std::unique_ptr<User> must_user(int32_t id) {
+  auto ptr = backport::make_unique<User>();
+  CHECK_OK(user_by_id(ptr.get(), id));
+  return ptr;
+}
+
+const User& real_user() {
+  static const User& ref = *must_user(::getuid()).release();
+  return ref;
+}
+
+const User& effective_user() {
+  static const User& ref = *must_user(::geteuid()).release();
+  return ref;
+}
+
+static std::unique_ptr<Group> must_group(int32_t id) {
+  auto ptr = backport::make_unique<Group>();
+  CHECK_OK(group_by_id(ptr.get(), id));
+  return ptr;
+}
+
+const Group& real_group() {
+  static const Group& ref = *must_group(::getgid()).release();
+  return ref;
+}
+
+const Group& effective_group() {
+  static const Group& ref = *must_group(::getegid()).release();
+  return ref;
 }
 
 }  // namespace base
