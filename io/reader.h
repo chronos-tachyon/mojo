@@ -471,6 +471,9 @@ Reader limited_reader(Reader r, std::size_t max);
 // Returns a Reader that produces bytes from a std::string.
 Reader stringreader(std::string str);
 Reader stringreader(base::StringPiece sp);
+inline Reader stringreader(const char* cstr) {
+  return stringreader(base::StringPiece(cstr));
+}
 
 // Returns a Reader that produces bytes from a ConstBuffer.
 Reader bufferreader(ConstBuffer buf);
