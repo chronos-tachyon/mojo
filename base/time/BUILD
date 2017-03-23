@@ -4,16 +4,24 @@
 cc_library(
   name = "time",
   srcs = [
+    "breakdown.cc",
     "clock.cc",
     "duration.cc",
     "stopwatch.cc",
     "time.cc",
+    "zone.cc",
+    "zone_posix.cc",
+    "zone_tzif.cc",
   ],
   hdrs = [
+    "breakdown.h",
     "clock.h",
     "duration.h",
     "stopwatch.h",
     "time.h",
+    "zone.h",
+    "zone_posix.h",
+    "zone_tzif.h",
   ],
   deps = ["//base"],
   visibility = ["//visibility:public"],
@@ -26,6 +34,18 @@ cc_library(
   deps = [":time"],
   visibility = ["//visibility:public"],
   testonly = True,
+)
+
+cc_test(
+  name = "breakdown_test",
+  srcs = ["breakdown_test.cc"],
+  deps = [
+    ":time",
+    "//base:result_testing",
+    "//external:gtest",
+  ],
+  size = "small",
+  timeout = "short",
 )
 
 cc_test(
@@ -70,4 +90,29 @@ cc_test(
   ],
   size = "small",
   timeout = "short",
+)
+
+cc_test(
+  name = "zone_test",
+  srcs = ["zone_test.cc"],
+  deps = [
+    ":time",
+    "//base:result_testing",
+    "//external:gtest",
+  ],
+  data = glob(["testdata/*"]),
+  size = "small",
+  timeout = "short",
+)
+
+cc_binary(
+  name = "tzdump",
+  srcs = ["tzdump.cc"],
+  deps = [":time"],
+)
+
+cc_binary(
+  name = "tzlist",
+  srcs = ["tzlist.cc"],
+  deps = [":time"],
 )

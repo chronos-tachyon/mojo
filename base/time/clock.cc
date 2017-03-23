@@ -52,11 +52,11 @@ static Duration compute_wall_minus_mono() {
   ts2.tv_sec -= ts0.tv_sec;
   while (ts2.tv_nsec < ts0.tv_nsec) {
     --ts2.tv_sec;
-    ts2.tv_nsec += internal::NS_PER_S;
+    ts2.tv_nsec += internal::NANO_PER_SEC;
   }
   ts2.tv_nsec -= ts0.tv_nsec;
   uint64_t ns =
-      uint64_t(ts2.tv_sec) * internal::NS_PER_S + uint64_t(ts2.tv_nsec);
+      uint64_t(ts2.tv_sec) * internal::NANO_PER_SEC + uint64_t(ts2.tv_nsec);
   ns /= 2;
 
   Duration mt =

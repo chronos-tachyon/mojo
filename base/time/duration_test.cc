@@ -115,12 +115,14 @@ TEST(Duration, RatioDivision) {
 }
 
 TEST(Duration, AsString) {
-  EXPECT_EQ("1h30m", hours(1.5).as_string());
-  EXPECT_EQ("15m", hours(0.25).as_string());
-  EXPECT_EQ("1m20s", minutes(4.0 / 3.0).as_string());
-  EXPECT_EQ("2.75s", milliseconds(2750).as_string());
+  EXPECT_EQ("+MAX", Duration::max().as_string());
+  EXPECT_EQ("-MAX", Duration::min().as_string());
+  EXPECT_EQ("+1h30m", hours(1.5).as_string());
+  EXPECT_EQ("+15m", hours(0.25).as_string());
+  EXPECT_EQ("+1m20s", minutes(4.0 / 3.0).as_string());
+  EXPECT_EQ("+2.75s", milliseconds(2750).as_string());
   EXPECT_EQ("-1.25s", milliseconds(-1250).as_string());
-  EXPECT_EQ("750ms", milliseconds(750).as_string());
-  EXPECT_EQ("500µs", milliseconds(0.5).as_string());
-  EXPECT_EQ("500ns", milliseconds(0.0005).as_string());
+  EXPECT_EQ("+750ms", milliseconds(750).as_string());
+  EXPECT_EQ("+500µs", milliseconds(0.5).as_string());
+  EXPECT_EQ("+500ns", milliseconds(0.0005).as_string());
 }

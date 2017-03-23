@@ -25,15 +25,49 @@ namespace time {
 
 namespace internal {
 
-static constexpr uint64_t NS_PER_S = 1000000000;
-static constexpr uint64_t NS_PER_MS = 1000000;
-static constexpr uint64_t NS_PER_US = 1000;
+constexpr int32_t NANO_PER_SEC = 1000000000;
+constexpr int32_t NANO_PER_MILLI = 1000000;
+constexpr int32_t NANO_PER_MICRO = 1000;
 
-static constexpr uint64_t US_PER_S = NS_PER_S / NS_PER_US;
-static constexpr uint64_t MS_PER_S = NS_PER_S / NS_PER_MS;
+constexpr int32_t MICRO_PER_SEC = NANO_PER_SEC / NANO_PER_MICRO;
+constexpr int32_t MILLI_PER_SEC = NANO_PER_SEC / NANO_PER_MILLI;
 
-static constexpr uint64_t S_PER_MIN = 60;
-static constexpr uint64_t S_PER_HR = 3600;
+constexpr int32_t SEC_PER_MIN = 60;
+constexpr int32_t MIN_PER_HOUR = 60;
+constexpr int32_t HOUR_PER_DAY = 24;
+constexpr int32_t MONTH_PER_YEAR = 12;
+
+constexpr int32_t SEC_PER_HOUR = SEC_PER_MIN * MIN_PER_HOUR;
+constexpr int32_t SEC_PER_DAY = SEC_PER_HOUR * HOUR_PER_DAY;
+
+constexpr int32_t DAY_PER_YEAR = 365;
+constexpr int32_t DAY_PER_4YEAR = 365 * 4 + 1;
+constexpr int32_t DAY_PER_100YEAR = 365 * 100 + 24;
+constexpr int32_t DAY_PER_400YEAR = 365 * 400 + 97;
+
+constexpr uint64_t SEC_MAX = std::numeric_limits<uint64_t>::max();
+constexpr uint32_t NANO_MAX = NANO_PER_SEC - 1;
+
+// 719,527 days from 0000-01-01 to 1970-01-01
+//
+//                 Days   Year
+//                    0      0
+//    + 146097 = 146097    400
+//    + 146097 = 292194    800
+//    + 146097 = 438291   1200
+//    + 146097 = 584388   1600
+//    +  36524 = 620912   1700
+//    +  36524 = 657436   1800
+//    +  36524 = 693960   1900
+//    +   7305 = 701265   1920
+//    +   7305 = 708570   1940
+//    +   7305 = 715875   1960
+//    +   1461 = 717336   1964
+//    +   1461 = 718797   1968
+//    +    365 = 719162   1969
+//    +    365 = 719527   1970
+//
+constexpr int32_t Y1970 = 719527;
 
 struct DurationRep {
   safe<uint64_t> s;
@@ -50,8 +84,8 @@ struct DurationRep {
   constexpr bool is_zero() const noexcept { return s == 0 && ns == 0; }
 
   constexpr DurationRep normalize() const {
-    return DurationRep(neg && !is_zero(), s + safe<uint64_t>(ns / NS_PER_S),
-                       ns % NS_PER_S);
+    return DurationRep(neg && !is_zero(), s + safe<uint64_t>(ns / NANO_PER_SEC),
+                       ns % NANO_PER_SEC);
   }
 
   constexpr bool operator==(DurationRep b) noexcept {
@@ -66,15 +100,15 @@ struct DurationRep {
 // - It is guaranteed to have a range equal to time_t or better.
 class Duration {
  private:
-  static constexpr uint64_t NS_PER_S = internal::NS_PER_S;
-  static constexpr uint64_t NS_PER_MS = internal::NS_PER_MS;
-  static constexpr uint64_t NS_PER_US = internal::NS_PER_US;
+  static constexpr uint64_t NANO_PER_SEC = internal::NANO_PER_SEC;
+  static constexpr uint64_t NANO_PER_MILLI = internal::NANO_PER_MILLI;
+  static constexpr uint64_t NANO_PER_MICRO = internal::NANO_PER_MICRO;
 
-  static constexpr uint64_t US_PER_S = internal::US_PER_S;
-  static constexpr uint64_t MS_PER_S = internal::MS_PER_S;
+  static constexpr uint64_t MICRO_PER_SEC = internal::MICRO_PER_SEC;
+  static constexpr uint64_t MILLI_PER_SEC = internal::MILLI_PER_SEC;
 
-  static constexpr uint64_t S_PER_MIN = internal::S_PER_MIN;
-  static constexpr uint64_t S_PER_HR = internal::S_PER_HR;
+  static constexpr uint64_t SEC_PER_MIN = internal::SEC_PER_MIN;
+  static constexpr uint64_t SEC_PER_HOUR = internal::SEC_PER_HOUR;
 
  public:
   // Duration is constructible from a DurationRep.
@@ -104,14 +138,14 @@ class Duration {
 
   // Returns the smallest possible finite Duration.
   constexpr static Duration min() noexcept {
-    return Duration(internal::DurationRep(
-        true, std::numeric_limits<uint64_t>::max(), NS_PER_S - 1));
+    using namespace internal;
+    return Duration(internal::DurationRep(true, SEC_MAX, NANO_MAX));
   }
 
   // Returns the largest possible finite Duration.
   constexpr static Duration max() noexcept {
-    return Duration(internal::DurationRep(
-        false, std::numeric_limits<uint64_t>::max(), NS_PER_S - 1));
+    using namespace internal;
+    return Duration(internal::DurationRep(false, SEC_MAX, NANO_MAX));
   }
 
   // Returns true iff this Duration is non-zero.
@@ -304,8 +338,9 @@ class Duration {
     // k*(s - b.s) + (ns + k - b.ns) - k
     // k*(s - b.s - 1) + (ns + k - b.ns)
     using namespace internal;
-    return (a.ns < b.ns) ? Rep(a.neg, (a.s - b.s - 1), (a.ns + NS_PER_S - b.ns))
-                         : Rep(a.neg, (a.s - b.s), (a.ns - b.ns));
+    return (a.ns < b.ns)
+               ? Rep(a.neg, (a.s - b.s - 1), (a.ns + NANO_PER_SEC - b.ns))
+               : Rep(a.neg, (a.s - b.s), (a.ns - b.ns));
   }
 
   constexpr static Rep sub_p(Rep a, Rep b) {
@@ -321,27 +356,27 @@ class Duration {
     return (a.neg == b.neg) ? sub_p(a, b) : add_p(a, negate(b));
   }
 
-  constexpr U64 u_ns() const { return rep_.s * NS_PER_S + U64(rep_.ns); }
+  constexpr U64 u_ns() const { return rep_.s * NANO_PER_SEC + U64(rep_.ns); }
   constexpr U64 u_us() const {
-    return rep_.s * US_PER_S + U64(rep_.ns) / NS_PER_US;
+    return rep_.s * MICRO_PER_SEC + U64(rep_.ns) / NANO_PER_MICRO;
   }
   constexpr U64 u_ms() const {
-    return rep_.s * MS_PER_S + U64(rep_.ns) / NS_PER_MS;
+    return rep_.s * MILLI_PER_SEC + U64(rep_.ns) / NANO_PER_MILLI;
   }
   constexpr U64 u_s() const { return rep_.s; }
-  constexpr U64 u_min() const { return rep_.s / S_PER_MIN; }
-  constexpr U64 u_hr() const { return rep_.s / S_PER_HR; }
+  constexpr U64 u_min() const { return rep_.s / SEC_PER_MIN; }
+  constexpr U64 u_hr() const { return rep_.s / SEC_PER_HOUR; }
 
-  constexpr D f_ns() const { return D(rep_.s) * NS_PER_S + D(rep_.ns); }
+  constexpr D f_ns() const { return D(rep_.s) * NANO_PER_SEC + D(rep_.ns); }
   constexpr D f_us() const {
-    return D(rep_.s) * US_PER_S + D(rep_.ns) / NS_PER_US;
+    return D(rep_.s) * MICRO_PER_SEC + D(rep_.ns) / NANO_PER_MICRO;
   }
   constexpr D f_ms() const {
-    return D(rep_.s) * MS_PER_S + D(rep_.ns) / NS_PER_MS;
+    return D(rep_.s) * MILLI_PER_SEC + D(rep_.ns) / NANO_PER_MILLI;
   }
-  constexpr D f_s() const { return D(rep_.s) + D(rep_.ns) / NS_PER_S; }
-  constexpr D f_min() const { return f_s() / S_PER_MIN; }
-  constexpr D f_hr() const { return f_s() / S_PER_HR; }
+  constexpr D f_s() const { return D(rep_.s) + D(rep_.ns) / NANO_PER_SEC; }
+  constexpr D f_min() const { return f_s() / SEC_PER_MIN; }
+  constexpr D f_hr() const { return f_s() / SEC_PER_HOUR; }
 
   Rep rep_;
 };

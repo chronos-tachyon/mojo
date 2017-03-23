@@ -4,25 +4,24 @@
 #include "base/time/time.h"
 #include "gtest/gtest.h"
 
-using base::time::Duration;
-using base::time::Time;
-using base::time::MonotonicTime;
+static const auto DELTA =
+    base::time::seconds(9000) + base::time::nanoseconds(1);
 
 TEST(Time, AsString) {
-  Duration delta = base::time::seconds(9000) + base::time::nanoseconds(1);
-  Time epoch;
-  Time t = epoch + delta;
-  Time u = epoch - delta;
-  EXPECT_EQ("T+0", epoch.as_string());
-  EXPECT_EQ("T+2h30m0.000000001s", t.as_string());
-  EXPECT_EQ("T-2h30m0.000000001s", u.as_string());
+  base::time::Time epoch;
+  auto t = epoch + DELTA;
+  auto u = epoch - DELTA;
+  EXPECT_EQ("[infinite past]", base::time::Time::min().as_string());
+  EXPECT_EQ("[infinite future]", base::time::Time::max().as_string());
+  EXPECT_EQ("1970-01-01T00:00:00.000000000Z", epoch.as_string());
+  EXPECT_EQ("1970-01-01T02:30:00.000000001Z", t.as_string());
+  EXPECT_EQ("1969-12-31T21:29:59.999999999Z", u.as_string());
 }
 
 TEST(MonotonicTime, AsString) {
-  Duration delta = base::time::seconds(9000) + base::time::nanoseconds(1);
-  MonotonicTime epoch;
-  MonotonicTime t = epoch + delta;
-  MonotonicTime u = epoch - delta;
+  base::time::MonotonicTime epoch;
+  auto t = epoch + DELTA;
+  auto u = epoch - DELTA;
   EXPECT_EQ("M+0", epoch.as_string());
   EXPECT_EQ("M+2h30m0.000000001s", t.as_string());
   EXPECT_EQ("M-2h30m0.000000001s", u.as_string());

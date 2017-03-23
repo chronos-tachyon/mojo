@@ -18,11 +18,11 @@ namespace base {
 namespace time {
 
 const Duration NANOSECOND = Duration::from_raw(false, 0U, 1U);
-const Duration MICROSECOND = Duration::from_raw(false, 0U, NS_PER_US);
-const Duration MILLISECOND = Duration::from_raw(false, 0U, NS_PER_MS);
+const Duration MICROSECOND = Duration::from_raw(false, 0U, NANO_PER_MICRO);
+const Duration MILLISECOND = Duration::from_raw(false, 0U, NANO_PER_MILLI);
 const Duration SECOND = Duration::from_raw(false, 1U, 0U);
-const Duration MINUTE = Duration::from_raw(false, S_PER_MIN, 0U);
-const Duration HOUR = Duration::from_raw(false, S_PER_HR, 0U);
+const Duration MINUTE = Duration::from_raw(false, SEC_PER_MIN, 0U);
+const Duration HOUR = Duration::from_raw(false, SEC_PER_HOUR, 0U);
 
 using U64 = safe<uint64_t>;
 using U32 = safe<uint32_t>;
@@ -31,11 +31,11 @@ using LD = long double;
 
 static UInt128 to_u128(Duration d) {
   auto rep = d.raw();
-  return UInt128(rep.s.value()) * NS_PER_S + UInt128(rep.ns.value());
+  return UInt128(rep.s.value()) * NANO_PER_SEC + UInt128(rep.ns.value());
 }
 
 static Duration from_u128(bool neg, UInt128 x) {
-  auto pair = divmod(x, NS_PER_S);
+  auto pair = divmod(x, NANO_PER_SEC);
   auto s = U64(uint64_t(pair.first));
   auto ns = U32(uint32_t(pair.second));
   return Duration::from_raw(neg, s, ns);
@@ -44,7 +44,7 @@ static Duration from_u128(bool neg, UInt128 x) {
 static LD to_ldbl(Duration d) {
   auto rep = d.raw();
   auto x = LD(rep.s);
-  auto y = LD(NS_PER_S);
+  auto y = LD(NANO_PER_SEC);
   auto z = LD(rep.ns);
   auto v = ::fma(x, y, z);
   if (rep.neg) v = -v;
@@ -58,8 +58,8 @@ static Duration from_ldbl(LD x) {
     x = -x;
   }
   x = ::round(x);
-  auto quo = ::floor(x / NS_PER_S);
-  auto rem = ::floor(x - quo * NS_PER_S);
+  auto quo = ::floor(x / NANO_PER_SEC);
+  auto rem = ::floor(x - quo * NANO_PER_SEC);
   return Duration::from_raw(neg, quo, rem);
 }
 
@@ -110,17 +110,19 @@ void Duration::append_to(std::string* out) const {
   CHECK_NOTNULL(out);
   uint64_t s = rep_.s.value();
   uint32_t ns = rep_.ns.value();
-  if (is_neg()) out->push_back('-');
-  if (s > 0) {
-    if (s >= S_PER_HR) {
-      auto hr = s / S_PER_HR;
-      s = s % S_PER_HR;
+  out->push_back(is_neg() ? '-' : '+');
+  if (s == SEC_MAX && ns == NANO_MAX) {
+    out->append("MAX");
+  } else if (s > 0) {
+    if (s >= SEC_PER_HOUR) {
+      auto hr = s / SEC_PER_HOUR;
+      s = s % SEC_PER_HOUR;
       ull_append_to(out, hr);
       out->push_back('h');
     }
-    if (s >= S_PER_MIN) {
-      auto min = s / S_PER_MIN;
-      s = s % S_PER_MIN;
+    if (s >= SEC_PER_MIN) {
+      auto min = s / SEC_PER_MIN;
+      s = s % SEC_PER_MIN;
       ui_append_to(out, min);
       out->push_back('m');
     }
@@ -145,11 +147,11 @@ void Duration::append_to(std::string* out) const {
       }
       out->push_back('s');
     }
-  } else if (ns >= NS_PER_MS && (ns % NS_PER_MS) == 0) {
-    ui_append_to(out, ns / NS_PER_MS);
+  } else if (ns >= NANO_PER_MILLI && (ns % NANO_PER_MILLI) == 0) {
+    ui_append_to(out, ns / NANO_PER_MILLI);
     out->append("ms");
-  } else if (ns >= NS_PER_US && (ns % NS_PER_US) == 0) {
-    ui_append_to(out, ns / NS_PER_US);
+  } else if (ns >= NANO_PER_MICRO && (ns % NANO_PER_MICRO) == 0) {
+    ui_append_to(out, ns / NANO_PER_MICRO);
     out->append("µs");
   } else if (ns > 0) {
     ui_append_to(out, ns);

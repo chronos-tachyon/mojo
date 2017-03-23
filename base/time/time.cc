@@ -10,18 +10,31 @@
 #include <stdexcept>
 
 #include "base/logging.h"
+#include "base/time/breakdown.h"
 
 namespace base {
 namespace time {
 
+using namespace internal;
+
+static constexpr uint64_t X = std::numeric_limits<int64_t>::max();
+static const Time MIN = Time(Duration(DurationRep(true, X, NANO_PER_SEC - 1)));
+static const Time MAX = Time(Duration(DurationRep(false, X, NANO_PER_SEC - 1)));
+
 void Time::append_to(std::string* out) const {
   CHECK_NOTNULL(out);
-  out->push_back('T');
-  if (!d_.is_neg()) out->push_back('+');
-  d_.append_to(out);
+  if (*this < MIN) {
+    out->append("[infinite past]");
+  } else if (*this > MAX) {
+    out->append("[infinite future]");
+  } else {
+    Breakdown b;
+    b.set(*this);
+    out->append(b.iso8601());
+  }
 }
 
-std::size_t Time::length_hint() const noexcept { return d_.length_hint() + 1; }
+std::size_t Time::length_hint() const noexcept { return 30; }
 
 std::string Time::as_string() const {
   std::string out;
@@ -36,7 +49,6 @@ std::ostream& operator<<(std::ostream& o, Time t) {
 void MonotonicTime::append_to(std::string* out) const {
   CHECK_NOTNULL(out);
   out->push_back('M');
-  if (!d_.is_neg()) out->push_back('+');
   d_.append_to(out);
 }
 
