@@ -12,10 +12,13 @@
 #include <vector>
 
 #include "base/strings.h"
+#include "crypto/common/common.h"
 #include "io/writer.h"
 
 namespace crypto {
 namespace hash {
+
+using Security = crypto::common::Security;
 
 class State;  // forward declaration
 
@@ -40,17 +43,6 @@ enum class ID : uint32_t {
   shake128 = 0xf,
   shake256 = 0x10,
 };
-
-enum class Security : uint8_t {
-  broken = 0x00,
-  weak = 0x40,
-  secure = 0x80,
-};
-
-base::StringPiece security_name(Security sec);
-void append_to(std::string* out, Security sec);
-std::size_t length_hint(Security sec);
-std::ostream& operator<<(std::ostream& o, Security sec);
 
 struct Algorithm {
   ID id;

@@ -36,47 +36,6 @@ static bool filter(const Algorithm* ptr, Security min_security) {
   return ptr && ptr->newfn && (ptr->security >= min_security);
 }
 
-static std::string canonical_name(base::StringPiece in) {
-  std::string out;
-  out.reserve(in.size());
-  for (char ch : in) {
-    if (ch >= '0' && ch <= '9') {
-      out.push_back(ch);
-    } else if (ch >= 'a' && ch <= 'z') {
-      out.push_back(ch);
-    } else if (ch >= 'A' && ch <= 'Z') {
-      out.push_back(ch + ('a' - 'A'));
-    }
-  }
-  return out;
-}
-
-static constexpr base::StringPiece SECURITY_BROKEN = "broken";
-static constexpr base::StringPiece SECURITY_WEAK = "weak";
-static constexpr base::StringPiece SECURITY_SECURE = "secure";
-
-base::StringPiece security_name(Security sec) {
-  if (sec < Security::weak) {
-    return SECURITY_BROKEN;
-  } else if (sec < Security::secure) {
-    return SECURITY_WEAK;
-  } else {
-    return SECURITY_SECURE;
-  }
-}
-
-void append_to(std::string* out, Security sec) {
-  security_name(sec).append_to(out);
-}
-
-std::size_t length_hint(Security sec) { return 6; }
-
-std::ostream& operator<<(std::ostream& o, Security sec) {
-  std::string str;
-  append_to(&str, sec);
-  return (o << str);
-}
-
 std::string State::sum_binary() {
   std::vector<uint8_t> raw;
   raw.resize(size());
@@ -237,6 +196,7 @@ const Algorithm* by_id(ID id, Security min_security) noexcept {
 
 const Algorithm* by_name(base::StringPiece name,
                          Security min_security) noexcept {
+  using crypto::common::canonical_name;
   std::string cname = canonical_name(name);
   for (const Algorithm* ptr : ALL) {
     if (filter(ptr, min_security))
