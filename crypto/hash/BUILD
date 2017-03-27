@@ -20,6 +20,8 @@ cc_library(
   deps = [
     "//base",
     "//crypto/common",
+    "//encoding:base64",
+    "//encoding:hex",
     "//io",
   ],
   visibility = ["//visibility:public"],

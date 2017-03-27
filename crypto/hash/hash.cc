@@ -5,12 +5,11 @@
 
 #include <ostream>
 
+#include "encoding/base64.h"
+#include "encoding/hex.h"
+
 namespace crypto {
 namespace hash {
-
-static constexpr char HEX[] = "0123456789abcdef";
-static constexpr char BASE64[] =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 static const Algorithm* const ALL[] = {
     nullptr,      // 0x00
@@ -47,70 +46,14 @@ std::string State::sum_hex() {
   std::vector<uint8_t> raw;
   raw.resize(size());
   sum(raw.data(), raw.size());
-
-  std::string hex;
-  hex.reserve(2 * raw.size());
-  for (uint8_t byte : raw) {
-    hex.push_back(HEX[byte >> 4]);
-    hex.push_back(HEX[byte & 15]);
-  }
-  return hex;
+  return encode(encoding::HEX, raw.data(), raw.size());
 }
 
 std::string State::sum_base64() {
   std::vector<uint8_t> raw;
   raw.resize(size());
   sum(raw.data(), raw.size());
-
-  std::size_t x = raw.size() / 3;
-  std::size_t m = x * 4;
-  std::size_t n = x * 3;
-  std::size_t d = raw.size() - n;
-  if (d) m += 4;
-
-  std::string b64;
-  b64.reserve(m);
-
-  std::size_t i;
-  uint32_t val;
-  uint8_t byte0, byte1, byte2;
-
-  for (i = 0; i < n; i += 3) {
-    byte0 = raw[i];
-    byte1 = raw[i + 1];
-    byte2 = raw[i + 2];
-    val = (byte0 << 16) | (byte1 << 8) | byte2;
-    b64.push_back(BASE64[(val >> 18) & 0x3f]);
-    b64.push_back(BASE64[(val >> 12) & 0x3f]);
-    b64.push_back(BASE64[(val >> 6) & 0x3f]);
-    b64.push_back(BASE64[val & 0x3f]);
-  }
-
-  switch (d) {
-    case 0:
-      break;
-
-    case 1:
-      byte0 = raw[i];
-      val = (byte0 << 16);
-      b64.push_back(BASE64[(val >> 18) & 0x3f]);
-      b64.push_back(BASE64[(val >> 12) & 0x3f]);
-      b64.push_back('=');
-      b64.push_back('=');
-      break;
-
-    case 2:
-      byte0 = raw[i];
-      byte1 = raw[i + 1];
-      val = (byte0 << 16) | (byte1 << 8);
-      b64.push_back(BASE64[(val >> 18) & 0x3f]);
-      b64.push_back(BASE64[(val >> 12) & 0x3f]);
-      b64.push_back(BASE64[(val >> 6) & 0x3f]);
-      b64.push_back('=');
-      break;
-  }
-
-  return b64;
+  return encode(encoding::BASE64, raw.data(), raw.size());
 }
 
 std::vector<const Algorithm*> all(Security min_security) {
