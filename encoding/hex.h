@@ -8,7 +8,8 @@
 #include <string>
 #include <utility>
 
-#include "base/strings.h"
+#include "base/bytes.h"
+#include "base/chars.h"
 
 namespace encoding {
 
@@ -28,49 +29,27 @@ constexpr Hex HEX_UPPERCASE = {true};
 
 // }}}
 
-// Returns the buffer size needed to encode a |len|-byte input as hexadecimal.
+// Returns the buffer size needed to encode a |len|-byte input as base-16.
 std::size_t encoded_length(Hex hex, std::size_t len) noexcept;
 
-// Reads the |len| bytes at |src|, encodes them as hexadecimal, and writes the
-// resulting characters to the buffer at |dst|, which must contain space for at
-// least |encoded_length(hex, len)| characters.
+// Reads the bytes in |src|, encodes them as base-16, and writes the resulting
+// characters to |dst|, which must contain space for at least
+// |encoded_length(hex, len)| characters.
 //
 // Returns the actual number of characters that were written to |dst|.
 //
-std::size_t encode_to(Hex hex, char* dst, const uint8_t* src,
-                      std::size_t len) noexcept;
+std::size_t encode_to(Hex hex, base::MutableChars dst,
+                      base::Bytes src) noexcept;
 
-// Convenience function.
-inline std::size_t encode_to(Hex hex, char* dst, const char* src,
-                             std::size_t len) noexcept {
-  return encode_to(hex, dst, reinterpret_cast<const uint8_t*>(src), len);
-}
+// Reads the bytes in |src|, encodes them as base-16, and returns the resulting
+// characters as a std::string.
+std::string encode(Hex hex, base::Bytes src);
 
-// Convenience function.
-inline std::size_t encode_to(Hex hex, char* dst,
-                             base::StringPiece src) noexcept {
-  return encode_to(hex, dst, src.data(), src.size());
-}
-
-// Reads the |len| bytes at |src|, encodes them as hexadecimal, and returns the
-// resulting characters as a std::string.
-std::string encode(Hex hex, const uint8_t* src, std::size_t len);
-
-// Convenience function.
-inline std::string encode(Hex hex, const char* src, std::size_t len) {
-  return encode(hex, reinterpret_cast<const uint8_t*>(src), len);
-}
-
-// Convenience function.
-inline std::string encode(Hex hex, base::StringPiece src) {
-  return encode(hex, src.data(), src.size());
-}
-
-// Returns the buffer size needed to decode a |len|-char hexadecimal input.
+// Returns the buffer size needed to decode a |len|-char base-16 input.
 std::size_t decoded_length(Hex hex, std::size_t len) noexcept;
 
-// Reads the |len| characters at |src|, decodes them as hexadecimal, and writes
-// the resulting bytes to |dst|, which must contain space for at least
+// Reads the characters in |src|, decodes them as base-16, and writes the
+// resulting bytes to |dst|, which must contain space for at least
 // |decoded_length(hex, len)| bytes.
 //
 // On success, returns |{true, outlen}| where |outlen| is the actual number of
@@ -78,35 +57,26 @@ std::size_t decoded_length(Hex hex, std::size_t len) noexcept;
 //
 // On failure, returns |{false, unspecified}|.
 //
-std::pair<bool, std::size_t> decode_to(Hex hex, uint8_t* dst, const char* src,
-                                       std::size_t len) noexcept;
+std::pair<bool, std::size_t> decode_to(Hex hex, base::MutableBytes dst,
+                                       base::Chars src) noexcept;
 
-// Convenience function.
-inline std::pair<bool, std::size_t> decode_to(Hex hex, char* dst,
-                                              const char* src,
-                                              std::size_t len) noexcept {
-  return decode_to(hex, reinterpret_cast<uint8_t*>(dst), src, len);
+// Reads the characters in |src|, decodes them as base-16, and returns the
+// resulting bytes as a std::string.
+std::pair<bool, std::string> decode(Hex hex, base::Chars src);
+
+// Convenience functions.
+inline std::size_t encode_to(Hex hex, base::MutableChars dst,
+                             base::Chars src) noexcept {
+  base::Bytes bsrc = src;
+  return encode_to(hex, dst, bsrc);
 }
-
-// Convenience function.
-inline std::pair<bool, std::size_t> decode_to(Hex hex, uint8_t* dst,
-                                              base::StringPiece src) noexcept {
-  return decode_to(hex, dst, src.data(), src.size());
+inline std::string encode(Hex hex, base::Chars src) {
+  base::Bytes bsrc = src;
+  return encode(hex, bsrc);
 }
-
-// Convenience function.
-inline std::pair<bool, std::size_t> decode_to(Hex hex, char* dst,
-                                              base::StringPiece src) noexcept {
-  return decode_to(hex, dst, src.data(), src.size());
-}
-
-// Reads the |len| characters at |src|, decodes them as hexadecimal, and
-// returns the resulting bytes as a std::string.
-std::pair<bool, std::string> decode(Hex hex, const char* src, std::size_t len);
-
-// Convenience function.
-inline std::pair<bool, std::string> decode(Hex hex, base::StringPiece src) {
-  return decode(hex, src.data(), src.size());
+inline std::pair<bool, std::size_t> decode_to(Hex hex, base::MutableChars dst,
+                                              base::Chars src) noexcept {
+  return decode_to(hex, base::MutableBytes(dst), src);
 }
 
 }  // namespace encoding

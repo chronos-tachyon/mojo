@@ -8,7 +8,8 @@
 #include <string>
 #include <utility>
 
-#include "base/strings.h"
+#include "base/bytes.h"
+#include "base/chars.h"
 
 namespace encoding {
 
@@ -37,45 +38,23 @@ constexpr Base64 BASE64_URLSAFE_NOPAD = {B64_URLSAFE_CHARSET, false};
 // Returns the buffer size needed to encode a |len|-byte input as base-64.
 std::size_t encoded_length(Base64 b64, std::size_t len) noexcept;
 
-// Reads the |len| bytes at |src|, encodes them as base-64, and writes the
-// resulting characters to the buffer at |dst|, which must contain space for at
-// least |encoded_length(b64, len)| characters.
+// Reads the bytes in |src|, encodes them as base-64, and writes the resulting
+// characters to |dst|, which must contain space for at least
+// |encoded_length(b64, len)| characters.
 //
 // Returns the actual number of characters that were written to |dst|.
 //
-std::size_t encode_to(Base64 b64, char* dst, const uint8_t* src,
-                      std::size_t len) noexcept;
+std::size_t encode_to(Base64 b64, base::MutableChars dst,
+                      base::Bytes src) noexcept;
 
-// Convenience function.
-inline std::size_t encode_to(Base64 b64, char* dst, const char* src,
-                             std::size_t len) noexcept {
-  return encode_to(b64, dst, reinterpret_cast<const uint8_t*>(src), len);
-}
-
-// Convenience function.
-inline std::size_t encode_to(Base64 b64, char* dst,
-                             base::StringPiece src) noexcept {
-  return encode_to(b64, dst, src.data(), src.size());
-}
-
-// Reads the |len| bytes at |src|, encodes them as base-64, and returns the
-// resulting characters as a std::string.
-std::string encode(Base64 b64, const uint8_t* src, std::size_t len);
-
-// Convenience function.
-inline std::string encode(Base64 b64, const char* src, std::size_t len) {
-  return encode(b64, reinterpret_cast<const uint8_t*>(src), len);
-}
-
-// Convenience function.
-inline std::string encode(Base64 b64, base::StringPiece src) {
-  return encode(b64, src.data(), src.size());
-}
+// Reads the bytes in |src|, encodes them as base-64, and returns the resulting
+// characters as a std::string.
+std::string encode(Base64 b64, base::Bytes src);
 
 // Returns the buffer size needed to decode a |len|-char base-64 input.
 std::size_t decoded_length(Base64 b64, std::size_t len) noexcept;
 
-// Reads the |len| characters at |src|, decodes them as base-64, and writes the
+// Reads the characters in |src|, decodes them as base-64, and writes the
 // resulting bytes to |dst|, which must contain space for at least
 // |decoded_length(b64, len)| bytes.
 //
@@ -84,37 +63,27 @@ std::size_t decoded_length(Base64 b64, std::size_t len) noexcept;
 //
 // On failure, returns |{false, unspecified}|.
 //
-std::pair<bool, std::size_t> decode_to(Base64 b64, uint8_t* dst,
-                                       const char* src,
-                                       std::size_t len) noexcept;
+std::pair<bool, std::size_t> decode_to(Base64 b64, base::MutableBytes dst,
+                                       base::Chars src) noexcept;
 
-// Convenience function.
-inline std::pair<bool, std::size_t> decode_to(Base64 b64, char* dst,
-                                              const char* src,
-                                              std::size_t len) noexcept {
-  return decode_to(b64, reinterpret_cast<uint8_t*>(dst), src, len);
+// Reads the characters in |src|, decodes them as base-64, and returns the
+// resulting bytes as a std::string.
+std::pair<bool, std::string> decode(Base64 b64, base::Chars src);
+
+// Convenience functions.
+inline std::size_t encode_to(Base64 b64, base::MutableChars dst,
+                             base::Chars src) noexcept {
+  base::Bytes bsrc = src;
+  return encode_to(b64, dst, bsrc);
 }
-
-// Convenience function.
-inline std::pair<bool, std::size_t> decode_to(Base64 b64, uint8_t* dst,
-                                              base::StringPiece src) noexcept {
-  return decode_to(b64, dst, src.data(), src.size());
+inline std::string encode(Base64 b64, base::Chars src) {
+  base::Bytes bsrc = src;
+  return encode(b64, bsrc);
 }
-
-// Convenience function.
-inline std::pair<bool, std::size_t> decode_to(Base64 b64, char* dst,
-                                              base::StringPiece src) noexcept {
-  return decode_to(b64, dst, src.data(), src.size());
-}
-
-// Reads the |len| characters at |src|, decodes them as base-64, and returns
-// the resulting bytes as a std::string.
-std::pair<bool, std::string> decode(Base64 b64, const char* src,
-                                    std::size_t len);
-
-// Convenience function.
-inline std::pair<bool, std::string> decode(Base64 b64, base::StringPiece src) {
-  return decode(b64, src.data(), src.size());
+inline std::pair<bool, std::size_t> decode_to(Base64 b64,
+                                              base::MutableChars dst,
+                                              base::Chars src) noexcept {
+  return decode_to(b64, base::MutableBytes(dst), src);
 }
 
 }  // namespace encoding
