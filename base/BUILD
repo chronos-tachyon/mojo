@@ -6,6 +6,7 @@ cc_library(
   srcs = [
     "backport.cc",
     "bytes.cc",
+    "chars.cc",
     "cleanup.cc",
     "concat.cc",
     "cpu.cc",
@@ -26,6 +27,7 @@ cc_library(
   hdrs = [
     "backport.h",
     "bytes.h",
+    "chars.h",
     "cleanup.h",
     "concat.h",
     "cpu.h",

@@ -183,29 +183,6 @@ static std::vector<std::string> V(const std::vector<StringPiece>& in) {
 
 }  // inline namespace implementation
 
-constexpr std::size_t StringPiece::npos;
-
-std::size_t StringPiece::hash() const noexcept {
-  if (empty()) return 0;
-  const unsigned char* p = reinterpret_cast<const unsigned char*>(data());
-  const unsigned char* q = p + size();
-  const std::size_t mul = 7907U + size() * 2U;
-  std::size_t h = size() * 3U;
-  while (p != q) {
-    h = rotate(h, 27) * mul + *p;
-    ++p;
-  }
-  return h;
-}
-
-void StringPiece::append_to(std::string* out) const {
-  out->append(data_, size_);
-}
-
-std::ostream& operator<<(std::ostream& o, StringPiece sp) {
-  return (o << sp.as_string());
-}
-
 void Splitter::assert_valid() const noexcept {
   if (ptr_) return;
   LOG(FATAL) << "BUG! base::Splitter is empty";
