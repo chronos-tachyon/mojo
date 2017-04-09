@@ -14,6 +14,7 @@ cc_library(
     "endian.cc",
     "env.cc",
     "fd.cc",
+    "flag.cc",
     "int128.cc",
     "logging.cc",
     "mutex.cc",
@@ -35,6 +36,7 @@ cc_library(
     "endian.h",
     "env.h",
     "fd.h",
+    "flag.h",
     "int128.h",
     "logging.h",
     "mutex.h",
@@ -190,6 +192,12 @@ cc_test(
 cc_binary(
   name = "cpu_list",
   srcs = ["cpu_list.cc"],
+  deps = [":base"],
+)
+
+cc_binary(
+  name = "flagdemo",
+  srcs = ["flagdemo.cc"],
   deps = [":base"],
 )
 
