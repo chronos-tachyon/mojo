@@ -310,14 +310,14 @@ void FlagSet::parse(int argc, const char* const* argv) {
 
     auto it = hooks_.find(flag);
     if (it == hooks_.end()) {
-      die("unknown flag: --", flag);
+      die(concat("unknown flag: --", flag));
     }
 
     FlagHook& hook = *it->second;
 
     if (!have_arg && hook.arg == FlagArgument::required) {
       if (i >= argc) {
-        die("missing required argument for flag --", flag);
+        die(concat("missing required argument for flag --", flag));
       }
       have_arg = true;
       arg = argv[i];
@@ -325,12 +325,12 @@ void FlagSet::parse(int argc, const char* const* argv) {
     }
 
     if (have_arg && hook.arg == FlagArgument::none) {
-      die("flag --", flag, " does not take an argument");
+      die(concat("flag --", flag, " does not take an argument"));
     }
 
     auto result = hook.setter(this, have_arg, arg);
     if (!result) {
-      die("--", flag, ": ", result);
+      die(concat("--", flag, ": ", result));
     }
   }
   while (i < argc) {
@@ -340,7 +340,7 @@ void FlagSet::parse(int argc, const char* const* argv) {
 
   for (const auto& flag : flags_) {
     if (flag->is_required() && !flag->is_set()) {
-      die("missing required flag --", flag->name());
+      die(concat("missing required flag --", flag->name()));
     }
   }
 }

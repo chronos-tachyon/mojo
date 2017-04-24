@@ -216,11 +216,6 @@ class FlagSet {
 
   __attribute__((noreturn)) void die(base::Chars msg);
 
-  template <typename... Args>
-  __attribute__((noreturn)) void die(Args&&... args) {
-    die(concat(std::forward<Args>(args)...));
-  }
-
  private:
   std::string progname_;
   std::string version_;
