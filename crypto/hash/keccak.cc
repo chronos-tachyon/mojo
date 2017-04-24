@@ -4,6 +4,11 @@
 #include "crypto/hash/keccak.h"
 
 #include "base/logging.h"
+#include "crypto/primitives.h"
+
+using crypto::primitives::ROL64;
+using crypto::primitives::RLE64;
+using crypto::primitives::WLE64;
 
 #define Aba state[0]
 #define Abe state[1]
@@ -31,13 +36,6 @@
 #define Aso state[23]
 #define Asu state[24]
 
-static constexpr bool OPT =
-#if defined(__i386__) || defined(__x86_64__)
-    true;
-#else
-    false;
-#endif
-
 static const uint64_t ROUND_CONSTANTS[24] = {
     0x0000000000000001ULL, 0x0000000000008082ULL, 0x800000000000808aULL,
     0x8000000080008000ULL, 0x000000000000808bULL, 0x0000000080000001ULL,
@@ -49,49 +47,6 @@ static const uint64_t ROUND_CONSTANTS[24] = {
     0x8000000000008080ULL, 0x0000000080000001ULL, 0x8000000080008008ULL,
 };
 
-static inline __attribute__((always_inline)) uint64_t ROL64(uint64_t x,
-                                                            unsigned int c) {
-  c &= 63;
-  return (x << c) | (x >> (64 - c));
-}
-
-static inline __attribute__((always_inline)) uint64_t X(const uint8_t* ptr,
-                                                        unsigned int index) {
-  if (OPT) {
-    const uint64_t* ptr64 = reinterpret_cast<const uint64_t*>(ptr);
-    return ptr64[index];
-  } else {
-    uint64_t byte0 = ptr[(index * 8) + 0];
-    uint64_t byte1 = ptr[(index * 8) + 1];
-    uint64_t byte2 = ptr[(index * 8) + 2];
-    uint64_t byte3 = ptr[(index * 8) + 3];
-    uint64_t byte4 = ptr[(index * 8) + 4];
-    uint64_t byte5 = ptr[(index * 8) + 5];
-    uint64_t byte6 = ptr[(index * 8) + 6];
-    uint64_t byte7 = ptr[(index * 8) + 7];
-    return byte0 | (byte1 << 8) | (byte2 << 16) | (byte3 << 24) |
-           (byte4 << 32) | (byte5 << 40) | (byte6 << 48) | (byte7 << 56);
-  }
-}
-
-static inline __attribute__((always_inline)) void Y(uint8_t* ptr,
-                                                    unsigned int index,
-                                                    uint64_t value) {
-  if (OPT) {
-    uint64_t* ptr64 = reinterpret_cast<uint64_t*>(ptr);
-    ptr64[index] = value;
-  } else {
-    ptr[(index * 8) + 0] = (value & 0xffU);
-    ptr[(index * 8) + 1] = ((value >> 8) & 0xffU);
-    ptr[(index * 8) + 2] = ((value >> 16) & 0xffU);
-    ptr[(index * 8) + 3] = ((value >> 24) & 0xffU);
-    ptr[(index * 8) + 4] = ((value >> 32) & 0xffU);
-    ptr[(index * 8) + 5] = ((value >> 40) & 0xffU);
-    ptr[(index * 8) + 6] = ((value >> 48) & 0xffU);
-    ptr[(index * 8) + 7] = ((value >> 56) & 0xffU);
-  }
-}
-
 namespace crypto {
 namespace hash {
 
@@ -102,7 +57,7 @@ void keccak_f1600_xor_in(uint64_t* state, const uint8_t* in, unsigned int len) {
   unsigned int i = len >> 3;
   while (i > 0) {
     --i;
-    state[i] ^= X(in, i);
+    state[i] ^= RLE64(in, i);
   }
 }
 
@@ -114,7 +69,7 @@ void keccak_f1600_copy_out(uint8_t* out, unsigned int len,
   unsigned int i = len >> 3;
   while (i > 0) {
     --i;
-    Y(out, i, state[i]);
+    WLE64(out, i, state[i]);
   }
 }
 

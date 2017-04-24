@@ -1,13 +1,15 @@
 // Copyright © 2017 by Donald King <chronos@chronos-tachyon.net>
 // Available under the MIT License. See LICENSE for details.
 
-#include "crypto/hash/hash.h"
+#include "crypto/hash/sha2.h"
 
 #include "base/logging.h"
+#include "crypto/primitives.h"
 
-static constexpr std::size_t BLOCKSIZE = 64;
-static constexpr std::size_t SHA224_SUMSIZE = 28;
-static constexpr std::size_t SHA256_SUMSIZE = 32;
+using crypto::primitives::ROR32;
+using crypto::primitives::RBE32;
+using crypto::primitives::WBE32;
+using crypto::primitives::WBE64;
 
 static const uint32_t SHA224_H[8] = {
     0xc1059ed8U, 0x367cd507U, 0x3070dd17U, 0xf70e5939U,
@@ -35,169 +37,58 @@ static const uint32_t K[64] = {
     0x90befffaU, 0xa4506cebU, 0xbef9a3f7U, 0xc67178f2U,
 };
 
-static inline __attribute__((always_inline)) uint32_t R(uint32_t x,
-                                                        unsigned int c) {
-  return (x >> c) | (x << (32 - c));
-}
-
-static inline __attribute__((always_inline)) uint32_t X(const uint8_t* ptr,
-                                                        unsigned int index) {
-  unsigned int byte0 = ptr[(index * 4) + 0];
-  unsigned int byte1 = ptr[(index * 4) + 1];
-  unsigned int byte2 = ptr[(index * 4) + 2];
-  unsigned int byte3 = ptr[(index * 4) + 3];
-  return (byte0 << 24) | (byte1 << 16) | (byte2 << 8) | byte3;
-}
-
-static inline __attribute__((always_inline)) void Y(uint8_t* out,
-                                                    uint32_t value,
-                                                    unsigned int index) {
-  out[(index * 4) + 0] = ((value >> 24) & 0xffU);
-  out[(index * 4) + 1] = ((value >> 16) & 0xffU);
-  out[(index * 4) + 2] = ((value >> 8) & 0xffU);
-  out[(index * 4) + 3] = (value & 0xffU);
-}
-
-static inline __attribute__((always_inline)) void YY(uint8_t* out,
-                                                     uint64_t value,
-                                                     unsigned int index) {
-  out[(index * 8) + 0] = ((value >> 56) & 0xffU);
-  out[(index * 8) + 1] = ((value >> 48) & 0xffU);
-  out[(index * 8) + 2] = ((value >> 40) & 0xffU);
-  out[(index * 8) + 3] = ((value >> 32) & 0xffU);
-  out[(index * 8) + 4] = ((value >> 24) & 0xffU);
-  out[(index * 8) + 5] = ((value >> 16) & 0xffU);
-  out[(index * 8) + 6] = ((value >> 8) & 0xffU);
-  out[(index * 8) + 7] = (value & 0xffU);
-}
-
 namespace crypto {
 namespace hash {
 
 inline namespace implementation {
-class SHA256State : public State {
+class SHA256Hasher : public Hasher {
  public:
   struct Raw {
-    uint8_t x[BLOCKSIZE];
+    uint8_t x[SHA256_BLOCKSIZE];
     uint32_t h[8];
     uint64_t len;
     uint8_t nx;
     bool finalized;
   };
 
-  explicit SHA256State(ID id) noexcept;
-  SHA256State(const SHA256State& src) noexcept;
+  explicit SHA256Hasher(bool narrow) noexcept;
+  SHA256Hasher(const SHA256Hasher& src) noexcept;
 
-  const Algorithm& algorithm() const noexcept override;
-  std::unique_ptr<State> copy() const override;
-  void write(const uint8_t* ptr, std::size_t len) override;
-  void finalize() override;
-  void sum(uint8_t* ptr, std::size_t len) override;
+  uint16_t block_size() const noexcept override { return SHA256_BLOCKSIZE; }
+  uint16_t output_size() const noexcept override;
+  bool is_sponge() const noexcept override { return false; }
+
+  std::unique_ptr<Hasher> copy() const override;
   void reset() override;
+  void write(base::Bytes in) override;
+  void finalize() override;
+  void sum(base::MutableBytes out) override;
 
  private:
   void block(const uint8_t* ptr, uint64_t len);
 
   Raw raw_;
-  ID id_;
+  bool narrow_;
 };
 
-SHA256State::SHA256State(ID id) noexcept : id_(id) { reset(); }
+SHA256Hasher::SHA256Hasher(bool narrow) noexcept : narrow_(narrow) { reset(); }
 
-SHA256State::SHA256State(const SHA256State& src) noexcept : id_(src.id_) {
+SHA256Hasher::SHA256Hasher(const SHA256Hasher& src) noexcept
+    : narrow_(src.narrow_) {
   ::memcpy(&raw_, &src.raw_, sizeof(raw_));
 }
 
-const Algorithm& SHA256State::algorithm() const noexcept {
-  switch (id_) {
-    case ID::sha224:
-      return SHA224;
-
-    default:
-      return SHA256;
-  }
+uint16_t SHA256Hasher::output_size() const noexcept {
+  return (narrow_ ? SHA224_SUMSIZE : SHA256_SUMSIZE);
 }
 
-std::unique_ptr<State> SHA256State::copy() const {
-  return base::backport::make_unique<SHA256State>(*this);
+std::unique_ptr<Hasher> SHA256Hasher::copy() const {
+  return base::backport::make_unique<SHA256Hasher>(*this);
 }
 
-void SHA256State::write(const uint8_t* ptr, std::size_t len) {
-  CHECK(!raw_.finalized) << ": hash is finalized";
-
-  raw_.len += len;
-  unsigned int nx = raw_.nx;
-  if (nx) {
-    auto n = std::min(BLOCKSIZE - nx, len);
-    ::memcpy(raw_.x + nx, ptr, n);
-    nx += n;
-    ptr += n;
-    len -= n;
-    if (nx == BLOCKSIZE) {
-      block(raw_.x, BLOCKSIZE);
-      nx = 0;
-    }
-    raw_.nx = nx;
-  }
-  if (len >= BLOCKSIZE) {
-    uint64_t n = len & ~(BLOCKSIZE - 1);
-    block(ptr, n);
-    ptr += n;
-    len -= n;
-  }
-  if (len) {
-    ::memcpy(raw_.x, ptr, len);
-    raw_.nx = len;
-  }
-}
-
-void SHA256State::finalize() {
-  CHECK(!raw_.finalized) << ": hash is finalized";
-
-  uint8_t tmp[BLOCKSIZE];
-  ::bzero(tmp, sizeof(tmp));
-  tmp[0] = 0x80;
-
-  uint64_t len = raw_.len;
-  uint8_t n = (len & (BLOCKSIZE - 1));
-  if (n < 56)
-    write(tmp, 56 - n);
-  else
-    write(tmp, BLOCKSIZE + 56 - n);
-
-  len <<= 3;
-  YY(tmp, len, 0);
-  write(tmp, 8);
-
-  DCHECK_EQ(raw_.nx, 0U);
-  raw_.finalized = true;
-}
-
-void SHA256State::sum(uint8_t* ptr, std::size_t len) {
-  CHECK(raw_.finalized) << ": hash is not finalized";
-  CHECK_EQ(len, size());
-  Y(ptr, raw_.h[0], 0);
-  Y(ptr, raw_.h[1], 1);
-  Y(ptr, raw_.h[2], 2);
-  Y(ptr, raw_.h[3], 3);
-  Y(ptr, raw_.h[4], 4);
-  Y(ptr, raw_.h[5], 5);
-  Y(ptr, raw_.h[6], 6);
-  if (id_ == ID::sha224) return;
-  Y(ptr, raw_.h[7], 7);
-}
-
-void SHA256State::reset() {
+void SHA256Hasher::reset() {
   ::bzero(&raw_, sizeof(raw_));
-  const uint32_t* h;
-  switch (id_) {
-    case ID::sha224:
-      h = SHA224_H;
-      break;
-
-    default:
-      h = SHA256_H;
-  }
+  const uint32_t* h = (narrow_ ? SHA224_H : SHA256_H);
   raw_.h[0] = h[0];
   raw_.h[1] = h[1];
   raw_.h[2] = h[2];
@@ -208,7 +99,75 @@ void SHA256State::reset() {
   raw_.h[7] = h[7];
 }
 
-void SHA256State::block(const uint8_t* ptr, uint64_t len) {
+void SHA256Hasher::write(base::Bytes in) {
+  CHECK(!raw_.finalized) << ": hash is finalized";
+
+  const auto* ptr = in.data();
+  auto len = in.size();
+
+  raw_.len += len;
+  unsigned int nx = raw_.nx;
+  if (nx) {
+    auto n = std::min(SHA256_BLOCKSIZE - nx, len);
+    ::memcpy(raw_.x + nx, ptr, n);
+    nx += n;
+    ptr += n;
+    len -= n;
+    if (nx == SHA256_BLOCKSIZE) {
+      block(raw_.x, SHA256_BLOCKSIZE);
+      nx = 0;
+    }
+    raw_.nx = nx;
+  }
+  if (len >= SHA256_BLOCKSIZE) {
+    uint64_t n = len & ~(SHA256_BLOCKSIZE - 1);
+    block(ptr, n);
+    ptr += n;
+    len -= n;
+  }
+  if (len) {
+    ::memcpy(raw_.x, ptr, len);
+    raw_.nx = len;
+  }
+}
+
+void SHA256Hasher::finalize() {
+  CHECK(!raw_.finalized) << ": hash is finalized";
+
+  uint8_t tmp[SHA256_BLOCKSIZE];
+  ::bzero(tmp, sizeof(tmp));
+  tmp[0] = 0x80;
+
+  uint64_t len = raw_.len;
+  uint8_t n = (len & (SHA256_BLOCKSIZE - 1));
+  if (n < 56)
+    write(base::Bytes(tmp, 56 - n));
+  else
+    write(base::Bytes(tmp, SHA256_BLOCKSIZE + 56 - n));
+
+  len <<= 3;
+  WBE64(tmp, 0, len);
+  write(base::Bytes(tmp, 8));
+
+  DCHECK_EQ(raw_.nx, 0U);
+  raw_.finalized = true;
+}
+
+void SHA256Hasher::sum(base::MutableBytes out) {
+  CHECK(raw_.finalized) << ": hash is not finalized";
+  CHECK_GE(out.size(), output_size());
+  WBE32(out.data(), 0, raw_.h[0]);
+  WBE32(out.data(), 1, raw_.h[1]);
+  WBE32(out.data(), 2, raw_.h[2]);
+  WBE32(out.data(), 3, raw_.h[3]);
+  WBE32(out.data(), 4, raw_.h[4]);
+  WBE32(out.data(), 5, raw_.h[5]);
+  WBE32(out.data(), 6, raw_.h[6]);
+  if (narrow_) return;
+  WBE32(out.data(), 7, raw_.h[7]);
+}
+
+void SHA256Hasher::block(const uint8_t* ptr, uint64_t len) {
   uint32_t w[64];
 
   uint32_t h0 = raw_.h[0];
@@ -224,17 +183,17 @@ void SHA256State::block(const uint8_t* ptr, uint64_t len) {
   uint32_t s0, s1, ch, maj, temp1, temp2;
   unsigned int i;
 
-  while (len >= BLOCKSIZE) {
+  while (len >= SHA256_BLOCKSIZE) {
     i = 0;
     while (i < 16) {
-      w[i] = X(ptr, i);
+      w[i] = RBE32(ptr, i);
       ++i;
     }
     while (i < 64) {
       s0 = w[i - 15];
       s1 = w[i - 2];
-      s0 = R(s0, 7) ^ R(s0, 18) ^ (s0 >> 3);
-      s1 = R(s1, 17) ^ R(s1, 19) ^ (s1 >> 10);
+      s0 = ROR32(s0, 7) ^ ROR32(s0, 18) ^ (s0 >> 3);
+      s1 = ROR32(s1, 17) ^ ROR32(s1, 19) ^ (s1 >> 10);
       w[i] = w[i - 16] + w[i - 7] + s0 + s1;
       ++i;
     }
@@ -249,10 +208,10 @@ void SHA256State::block(const uint8_t* ptr, uint64_t len) {
     h = h7;
 
     for (i = 0; i < 64; ++i) {
-      s1 = R(e, 6) ^ R(e, 11) ^ R(e, 25);
+      s1 = ROR32(e, 6) ^ ROR32(e, 11) ^ ROR32(e, 25);
       ch = (e & f) ^ ((~e) & g);
       temp1 = h + s1 + ch + K[i] + w[i];
-      s0 = R(a, 2) ^ R(a, 13) ^ R(a, 22);
+      s0 = ROR32(a, 2) ^ ROR32(a, 13) ^ ROR32(a, 22);
       maj = (a & b) ^ (a & c) ^ (b & c);
       temp2 = s0 + maj;
       h = g;
@@ -274,7 +233,8 @@ void SHA256State::block(const uint8_t* ptr, uint64_t len) {
     h6 += g;
     h7 += h;
 
-    len -= BLOCKSIZE;
+    ptr += SHA256_BLOCKSIZE;
+    len -= SHA256_BLOCKSIZE;
   }
   DCHECK_EQ(len, 0U);
 
@@ -287,25 +247,40 @@ void SHA256State::block(const uint8_t* ptr, uint64_t len) {
   raw_.h[6] = h6;
   raw_.h[7] = h7;
 }
-
-std::unique_ptr<State> new_sha224() {
-  return base::backport::make_unique<SHA256State>(ID::sha224);
-}
-
-std::unique_ptr<State> new_sha256() {
-  return base::backport::make_unique<SHA256State>(ID::sha256);
-}
 }  // inline namespace implementation
 
-const Algorithm SHA224 = {
-    ID::sha224,       "SHA-224",  BLOCKSIZE, SHA224_SUMSIZE,
-    Security::secure, new_sha224, nullptr,
-};
+std::unique_ptr<Hasher> new_sha224() {
+  return base::backport::make_unique<SHA256Hasher>(true);
+}
 
-const Algorithm SHA256 = {
-    ID::sha256,       "SHA-256",  BLOCKSIZE, SHA256_SUMSIZE,
-    Security::secure, new_sha256, nullptr,
-};
-
+std::unique_ptr<Hasher> new_sha256() {
+  return base::backport::make_unique<SHA256Hasher>(false);
+}
 }  // namespace hash
 }  // namespace crypto
+
+static const crypto::Hash SHA224 = {
+    crypto::hash::SHA256_BLOCKSIZE,  // block_size
+    crypto::hash::SHA224_SUMSIZE,    // output_size
+    crypto::Security::secure,        // security
+    0,                               // flags
+    "SHA-224",                       // name
+    crypto::hash::new_sha224,        // newfn
+    nullptr,                         // varfn
+};
+
+static const crypto::Hash SHA256 = {
+    crypto::hash::SHA256_BLOCKSIZE,  // block_size
+    crypto::hash::SHA256_SUMSIZE,    // output_size
+    crypto::Security::secure,        // security
+    0,                               // flags
+    "SHA-256",                       // name
+    crypto::hash::new_sha256,        // newfn
+    nullptr,                         // varfn
+};
+
+static void init() __attribute__((constructor));
+static void init() {
+  crypto::register_hash(&SHA224);
+  crypto::register_hash(&SHA256);
+}

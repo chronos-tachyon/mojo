@@ -1,15 +1,14 @@
 // Copyright © 2017 by Donald King <chronos@chronos-tachyon.net>
 // Available under the MIT License. See LICENSE for details.
 
-#include "crypto/hash/hash.h"
+#include "crypto/hash/sha2.h"
 
 #include "base/logging.h"
+#include "crypto/primitives.h"
 
-static constexpr std::size_t BLOCKSIZE = 128;
-static constexpr std::size_t SHA512_224_SUMSIZE = 28;
-static constexpr std::size_t SHA512_256_SUMSIZE = 32;
-static constexpr std::size_t SHA384_SUMSIZE = 48;
-static constexpr std::size_t SHA512_SUMSIZE = 64;
+using crypto::primitives::ROR64;
+using crypto::primitives::RBE64;
+using crypto::primitives::WBE64;
 
 static const uint64_t SHA512_224_H[8] = {
     0x8c3d37c819544da2ULL, 0x73e1996689dcd4d6ULL, 0x1dfab7ae32ff9c82ULL,
@@ -65,61 +64,39 @@ static const uint64_t K[80] = {
     0x5fcb6fab3ad6faecULL, 0x6c44198c4a475817ULL,
 };
 
-static inline __attribute__((always_inline)) uint64_t R(uint64_t x,
-                                                        unsigned int c) {
-  return (x >> c) | (x << (64 - c));
-}
-
-static inline __attribute__((always_inline)) uint64_t X(const uint8_t* ptr,
-                                                        unsigned int index) {
-  uint64_t byte0 = ptr[(index * 8) + 0];
-  uint64_t byte1 = ptr[(index * 8) + 1];
-  uint64_t byte2 = ptr[(index * 8) + 2];
-  uint64_t byte3 = ptr[(index * 8) + 3];
-  uint64_t byte4 = ptr[(index * 8) + 4];
-  uint64_t byte5 = ptr[(index * 8) + 5];
-  uint64_t byte6 = ptr[(index * 8) + 6];
-  uint64_t byte7 = ptr[(index * 8) + 7];
-  return (byte0 << 56) | (byte1 << 48) | (byte2 << 40) | (byte3 << 32) |
-         (byte4 << 24) | (byte5 << 16) | (byte6 << 8) | byte7;
-}
-
-static inline __attribute__((always_inline)) void Y(uint8_t* out,
-                                                    uint64_t value,
-                                                    unsigned int index) {
-  out[(index * 8) + 0] = ((value >> 56) & 0xffU);
-  out[(index * 8) + 1] = ((value >> 48) & 0xffU);
-  out[(index * 8) + 2] = ((value >> 40) & 0xffU);
-  out[(index * 8) + 3] = ((value >> 32) & 0xffU);
-  out[(index * 8) + 4] = ((value >> 24) & 0xffU);
-  out[(index * 8) + 5] = ((value >> 16) & 0xffU);
-  out[(index * 8) + 6] = ((value >> 8) & 0xffU);
-  out[(index * 8) + 7] = (value & 0xffU);
-}
-
 namespace crypto {
 namespace hash {
 
 inline namespace implementation {
-class SHA512State : public State {
+class SHA512Hasher : public Hasher {
  public:
   struct Raw {
-    uint8_t x[BLOCKSIZE];
+    uint8_t x[SHA512_BLOCKSIZE];
     uint64_t h[8];
     uint64_t len;
     uint8_t nx;
     bool finalized;
   };
 
-  explicit SHA512State(ID id) noexcept;
-  SHA512State(const SHA512State& src) noexcept;
+  enum class ID : unsigned int {
+    sha512_224 = 1,
+    sha512_256 = 2,
+    sha384 = 3,
+    sha512 = 4,
+  };
 
-  const Algorithm& algorithm() const noexcept override;
-  std::unique_ptr<State> copy() const override;
-  void write(const uint8_t* ptr, std::size_t len) override;
-  void finalize() override;
-  void sum(uint8_t* ptr, std::size_t len) override;
+  explicit SHA512Hasher(ID id) noexcept;
+  SHA512Hasher(const SHA512Hasher& src) noexcept;
+
+  uint16_t block_size() const noexcept override { return SHA512_BLOCKSIZE; }
+  uint16_t output_size() const noexcept override;
+  bool is_sponge() const noexcept override { return false; }
+
+  std::unique_ptr<Hasher> copy() const override;
   void reset() override;
+  void write(base::Bytes in) override;
+  void finalize() override;
+  void sum(base::MutableBytes out) override;
 
  private:
   void block(const uint8_t* ptr, uint64_t len);
@@ -128,108 +105,33 @@ class SHA512State : public State {
   ID id_;
 };
 
-SHA512State::SHA512State(ID id) noexcept : id_(id) { reset(); }
+SHA512Hasher::SHA512Hasher(ID id) noexcept : id_(id) { reset(); }
 
-SHA512State::SHA512State(const SHA512State& src) noexcept : id_(src.id_) {
+SHA512Hasher::SHA512Hasher(const SHA512Hasher& src) noexcept : id_(src.id_) {
   ::memcpy(&raw_, &src.raw_, sizeof(raw_));
 }
 
-const Algorithm& SHA512State::algorithm() const noexcept {
+uint16_t SHA512Hasher::output_size() const noexcept {
   switch (id_) {
     case ID::sha512_224:
-      return SHA512_224;
+      return SHA512_224_SUMSIZE;
 
     case ID::sha512_256:
-      return SHA512_256;
+      return SHA512_256_SUMSIZE;
 
     case ID::sha384:
-      return SHA384;
+      return SHA384_SUMSIZE;
 
     default:
-      return SHA512;
+      return SHA512_SUMSIZE;
   }
 }
 
-std::unique_ptr<State> SHA512State::copy() const {
-  return base::backport::make_unique<SHA512State>(*this);
+std::unique_ptr<Hasher> SHA512Hasher::copy() const {
+  return base::backport::make_unique<SHA512Hasher>(*this);
 }
 
-void SHA512State::write(const uint8_t* ptr, std::size_t len) {
-  CHECK(!raw_.finalized) << ": hash is finalized";
-
-  raw_.len += len;
-  unsigned int nx = raw_.nx;
-  if (nx) {
-    auto n = std::min(BLOCKSIZE - nx, len);
-    ::memcpy(raw_.x + nx, ptr, n);
-    nx += n;
-    ptr += n;
-    len -= n;
-    if (nx == BLOCKSIZE) {
-      block(raw_.x, BLOCKSIZE);
-      nx = 0;
-    }
-    raw_.nx = nx;
-  }
-  if (len >= BLOCKSIZE) {
-    uint64_t n = len & ~(BLOCKSIZE - 1);
-    block(ptr, n);
-    ptr += n;
-    len -= n;
-  }
-  if (len) {
-    ::memcpy(raw_.x, ptr, len);
-    raw_.nx = len;
-  }
-}
-
-void SHA512State::finalize() {
-  CHECK(!raw_.finalized) << ": hash is finalized";
-
-  uint8_t tmp[BLOCKSIZE];
-  ::bzero(tmp, sizeof(tmp));
-  tmp[0] = 0x80;
-
-  uint64_t len = raw_.len;
-  uint8_t n = (len & (BLOCKSIZE - 1));
-  if (n < 112)
-    write(tmp, 112 - n);
-  else
-    write(tmp, BLOCKSIZE + 112 - n);
-
-  uint64_t hi = (len >> 61);
-  uint64_t lo = (len << 3);
-  Y(tmp, hi, 0);
-  Y(tmp, lo, 1);
-  write(tmp, 16);
-
-  DCHECK_EQ(raw_.nx, 0U);
-  raw_.finalized = true;
-}
-
-void SHA512State::sum(uint8_t* ptr, std::size_t len) {
-  CHECK(raw_.finalized) << ": hash is not finalized";
-  CHECK_EQ(len, size());
-  Y(ptr, raw_.h[0], 0);
-  Y(ptr, raw_.h[1], 1);
-  Y(ptr, raw_.h[2], 2);
-  if (id_ == ID::sha512_224) {
-    ptr[24] = (raw_.h[3] >> 56);
-    ptr[25] = (raw_.h[3] >> 48);
-    ptr[26] = (raw_.h[3] >> 40);
-    ptr[27] = (raw_.h[3] >> 32);
-    return;
-  }
-  Y(ptr, raw_.h[3], 3);
-  if (id_ == ID::sha512_256) return;
-  Y(ptr, raw_.h[4], 4);
-  Y(ptr, raw_.h[5], 5);
-  if (id_ == ID::sha384) return;
-  Y(ptr, raw_.h[6], 6);
-  Y(ptr, raw_.h[7], 7);
-}
-
-void SHA512State::reset() {
+void SHA512Hasher::reset() {
   ::bzero(&raw_, sizeof(raw_));
   const uint64_t* h;
   switch (id_) {
@@ -258,7 +160,85 @@ void SHA512State::reset() {
   raw_.h[7] = h[7];
 }
 
-void SHA512State::block(const uint8_t* ptr, uint64_t len) {
+void SHA512Hasher::write(base::Bytes in) {
+  CHECK(!raw_.finalized) << ": hash is finalized";
+
+  const auto* ptr = in.data();
+  auto len = in.size();
+
+  raw_.len += len;
+  unsigned int nx = raw_.nx;
+  if (nx) {
+    auto n = std::min(SHA512_BLOCKSIZE - nx, len);
+    ::memcpy(raw_.x + nx, ptr, n);
+    nx += n;
+    ptr += n;
+    len -= n;
+    if (nx == SHA512_BLOCKSIZE) {
+      block(raw_.x, SHA512_BLOCKSIZE);
+      nx = 0;
+    }
+    raw_.nx = nx;
+  }
+  if (len >= SHA512_BLOCKSIZE) {
+    uint64_t n = len & ~(SHA512_BLOCKSIZE - 1);
+    block(ptr, n);
+    ptr += n;
+    len -= n;
+  }
+  if (len) {
+    ::memcpy(raw_.x, ptr, len);
+    raw_.nx = len;
+  }
+}
+
+void SHA512Hasher::finalize() {
+  CHECK(!raw_.finalized) << ": hash is finalized";
+
+  uint8_t tmp[SHA512_BLOCKSIZE];
+  ::bzero(tmp, sizeof(tmp));
+  tmp[0] = 0x80;
+
+  uint64_t len = raw_.len;
+  uint8_t n = (len & (SHA512_BLOCKSIZE - 1));
+  if (n < 112)
+    write(base::Bytes(tmp, 112 - n));
+  else
+    write(base::Bytes(tmp, SHA512_BLOCKSIZE + 112 - n));
+
+  uint64_t hi = (len >> 61);
+  uint64_t lo = (len << 3);
+  WBE64(tmp, 0, hi);
+  WBE64(tmp, 1, lo);
+  write(base::Bytes(tmp, 16));
+
+  DCHECK_EQ(raw_.nx, 0U);
+  raw_.finalized = true;
+}
+
+void SHA512Hasher::sum(base::MutableBytes out) {
+  CHECK(raw_.finalized) << ": hash is not finalized";
+  CHECK_GE(out.size(), output_size());
+  WBE64(out.data(), 0, raw_.h[0]);
+  WBE64(out.data(), 1, raw_.h[1]);
+  WBE64(out.data(), 2, raw_.h[2]);
+  if (id_ == ID::sha512_224) {
+    out[24] = (raw_.h[3] >> 56);
+    out[25] = (raw_.h[3] >> 48);
+    out[26] = (raw_.h[3] >> 40);
+    out[27] = (raw_.h[3] >> 32);
+    return;
+  }
+  WBE64(out.data(), 3, raw_.h[3]);
+  if (id_ == ID::sha512_256) return;
+  WBE64(out.data(), 4, raw_.h[4]);
+  WBE64(out.data(), 5, raw_.h[5]);
+  if (id_ == ID::sha384) return;
+  WBE64(out.data(), 6, raw_.h[6]);
+  WBE64(out.data(), 7, raw_.h[7]);
+}
+
+void SHA512Hasher::block(const uint8_t* ptr, uint64_t len) {
   uint64_t w[80];
 
   uint64_t h0 = raw_.h[0];
@@ -274,17 +254,17 @@ void SHA512State::block(const uint8_t* ptr, uint64_t len) {
   uint64_t s0, s1, ch, maj, temp1, temp2;
   unsigned int i;
 
-  while (len >= BLOCKSIZE) {
+  while (len >= SHA512_BLOCKSIZE) {
     i = 0;
     while (i < 16) {
-      w[i] = X(ptr, i);
+      w[i] = RBE64(ptr, i);
       ++i;
     }
     while (i < 80) {
       s0 = w[i - 15];
       s1 = w[i - 2];
-      s0 = R(s0, 1) ^ R(s0, 8) ^ (s0 >> 7);
-      s1 = R(s1, 19) ^ R(s1, 61) ^ (s1 >> 6);
+      s0 = ROR64(s0, 1) ^ ROR64(s0, 8) ^ (s0 >> 7);
+      s1 = ROR64(s1, 19) ^ ROR64(s1, 61) ^ (s1 >> 6);
       w[i] = w[i - 16] + w[i - 7] + s0 + s1;
       ++i;
     }
@@ -299,10 +279,10 @@ void SHA512State::block(const uint8_t* ptr, uint64_t len) {
     h = h7;
 
     for (i = 0; i < 80; ++i) {
-      s1 = R(e, 14) ^ R(e, 18) ^ R(e, 41);
+      s1 = ROR64(e, 14) ^ ROR64(e, 18) ^ ROR64(e, 41);
       ch = (e & f) ^ ((~e) & g);
       temp1 = h + s1 + ch + K[i] + w[i];
-      s0 = R(a, 28) ^ R(a, 34) ^ R(a, 39);
+      s0 = ROR64(a, 28) ^ ROR64(a, 34) ^ ROR64(a, 39);
       maj = (a & b) ^ (a & c) ^ (b & c);
       temp2 = s0 + maj;
       h = g;
@@ -324,7 +304,8 @@ void SHA512State::block(const uint8_t* ptr, uint64_t len) {
     h6 += g;
     h7 += h;
 
-    len -= BLOCKSIZE;
+    ptr += SHA512_BLOCKSIZE;
+    len -= SHA512_BLOCKSIZE;
   }
   DCHECK_EQ(len, 0U);
 
@@ -337,43 +318,72 @@ void SHA512State::block(const uint8_t* ptr, uint64_t len) {
   raw_.h[6] = h6;
   raw_.h[7] = h7;
 }
-
-std::unique_ptr<State> new_sha512_224() {
-  return base::backport::make_unique<SHA512State>(ID::sha512_224);
-}
-
-std::unique_ptr<State> new_sha512_256() {
-  return base::backport::make_unique<SHA512State>(ID::sha512_256);
-}
-
-std::unique_ptr<State> new_sha384() {
-  return base::backport::make_unique<SHA512State>(ID::sha384);
-}
-
-std::unique_ptr<State> new_sha512() {
-  return base::backport::make_unique<SHA512State>(ID::sha512);
-}
 }  // inline namespace implementation
 
-const Algorithm SHA512_224 = {
-    ID::sha512_224,   "SHA-512/224",  BLOCKSIZE, SHA512_224_SUMSIZE,
-    Security::secure, new_sha512_224, nullptr,
-};
+std::unique_ptr<Hasher> new_sha384() {
+  return base::backport::make_unique<SHA512Hasher>(SHA512Hasher::ID::sha384);
+}
 
-const Algorithm SHA512_256 = {
-    ID::sha512_256,   "SHA-512/256",  BLOCKSIZE, SHA512_256_SUMSIZE,
-    Security::secure, new_sha512_256, nullptr,
-};
+std::unique_ptr<Hasher> new_sha512() {
+  return base::backport::make_unique<SHA512Hasher>(SHA512Hasher::ID::sha512);
+}
 
-const Algorithm SHA384 = {
-    ID::sha384,       "SHA-384",  BLOCKSIZE, SHA384_SUMSIZE,
-    Security::secure, new_sha384, nullptr,
-};
+std::unique_ptr<Hasher> new_sha512_224() {
+  return base::backport::make_unique<SHA512Hasher>(
+      SHA512Hasher::ID::sha512_224);
+}
 
-const Algorithm SHA512 = {
-    ID::sha512,       "SHA-512",  BLOCKSIZE, SHA512_SUMSIZE,
-    Security::secure, new_sha512, nullptr,
-};
-
+std::unique_ptr<Hasher> new_sha512_256() {
+  return base::backport::make_unique<SHA512Hasher>(
+      SHA512Hasher::ID::sha512_256);
+}
 }  // namespace hash
 }  // namespace crypto
+
+static const crypto::Hash SHA384 = {
+    crypto::hash::SHA512_BLOCKSIZE,  // block_size
+    crypto::hash::SHA384_SUMSIZE,    // output_size
+    crypto::Security::secure,        // security
+    0,                               // flags
+    "SHA-384",                       // name
+    crypto::hash::new_sha384,        // newfn
+    nullptr,                         // varfn
+};
+
+static const crypto::Hash SHA512 = {
+    crypto::hash::SHA512_BLOCKSIZE,  // block_size
+    crypto::hash::SHA512_SUMSIZE,    // output_size
+    crypto::Security::secure,        // security
+    0,                               // flags
+    "SHA-512",                       // name
+    crypto::hash::new_sha512,        // newfn
+    nullptr,                         // varfn
+};
+
+static const crypto::Hash SHA512_224 = {
+    crypto::hash::SHA512_BLOCKSIZE,    // block_size
+    crypto::hash::SHA512_224_SUMSIZE,  // output_size
+    crypto::Security::secure,          // security
+    0,                                 // flags
+    "SHA-512/224",                     // name
+    crypto::hash::new_sha512_224,      // newfn
+    nullptr,                           // varfn
+};
+
+static const crypto::Hash SHA512_256 = {
+    crypto::hash::SHA512_BLOCKSIZE,    // block_size
+    crypto::hash::SHA512_256_SUMSIZE,  // output_size
+    crypto::Security::secure,          // security
+    0,                                 // flags
+    "SHA-512/256",                     // name
+    crypto::hash::new_sha512_256,      // newfn
+    nullptr,                           // varfn
+};
+
+static void init() __attribute__((constructor));
+static void init() {
+  crypto::register_hash(&SHA384);
+  crypto::register_hash(&SHA512);
+  crypto::register_hash(&SHA512_224);
+  crypto::register_hash(&SHA512_256);
+}

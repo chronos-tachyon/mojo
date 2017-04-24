@@ -2,33 +2,58 @@
 # vim: set ft=python sts=2 sw=2 et:
 
 cc_library(
-  name = "hash",
-  srcs = [
-    "dummy.cc",
-    "hash.cc",
-    "keccak.cc",
-    "md5.cc",
-    "sha1.cc",
-    "sha2-256.cc",
-    "sha2-512.cc",
-    "sha3.cc",
-  ],
-  hdrs = [
-    "hash.h",
-    "keccak.h",
-  ],
-  deps = [
-    "//base",
-    "//crypto/common",
-    "//encoding:base64",
-    "//encoding:hex",
-    "//io",
-  ],
-  visibility = ["//visibility:public"],
+    name = "md5",
+    srcs = ["md5.cc"],
+    hdrs = ["md5.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//base",
+        "//crypto:core",
+    ],
+    alwayslink = True,
 )
 
-cc_binary(
-  name = "hashutil",
-  srcs = ["hashutil.cc"],
-  deps = [":hash"],
+cc_library(
+    name = "sha1",
+    srcs = ["sha1.cc"],
+    hdrs = ["sha1.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//base",
+        "//crypto:core",
+    ],
+    alwayslink = True,
+)
+
+cc_library(
+    name = "sha2",
+    srcs = [
+        "sha2-256.cc",
+        "sha2-512.cc",
+    ],
+    hdrs = ["sha2.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//base",
+        "//crypto:core",
+    ],
+    alwayslink = True,
+)
+
+cc_library(
+    name = "sha3",
+    srcs = [
+        "keccak.cc",
+        "sha3.cc",
+    ],
+    hdrs = [
+        "keccak.h",
+        "sha3.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//base",
+        "//crypto:core",
+    ],
+    alwayslink = True,
 )

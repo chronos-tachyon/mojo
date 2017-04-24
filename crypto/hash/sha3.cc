@@ -1,25 +1,12 @@
 // Copyright © 2017 by Donald King <chronos@chronos-tachyon.net>
 // Available under the MIT License. See LICENSE for details.
 
-#include "crypto/hash/hash.h"
+#include "crypto/hash/sha3.h"
 
 #include "base/logging.h"
 #include "crypto/hash/keccak.h"
 
-static constexpr std::size_t SHA3_224_RATE = 144;
-static constexpr std::size_t SHA3_256_RATE = 136;
-static constexpr std::size_t SHA3_384_RATE = 104;
-static constexpr std::size_t SHA3_512_RATE = 72;
-static constexpr std::size_t SHAKE128_RATE = 168;
-static constexpr std::size_t SHAKE256_RATE = 136;
-static constexpr std::size_t MAX_RATE = SHAKE128_RATE;
-
-static constexpr std::size_t SHA3_224_SIZE = 28;
-static constexpr std::size_t SHA3_256_SIZE = 32;
-static constexpr std::size_t SHA3_384_SIZE = 48;
-static constexpr std::size_t SHA3_512_SIZE = 64;
-static constexpr std::size_t SHAKE128_SUGGESTED_SIZE = 32;
-static constexpr std::size_t SHAKE256_SUGGESTED_SIZE = 64;
+static constexpr std::size_t MAX_RATE = crypto::hash::SHAKE128_BLOCKSIZE;
 
 static inline std::size_t min_length(std::size_t a, std::size_t b) {
   return (a < b) ? a : b;
@@ -29,7 +16,7 @@ namespace crypto {
 namespace hash {
 
 inline namespace implementation {
-class SHA3State : public State {
+class SHA3Hasher : public Hasher {
  public:
   struct Raw {
     // Stores the Keccak permutation state (5 × 5 × 64 bits)
@@ -55,66 +42,70 @@ class SHA3State : public State {
     bool finalized;
   };
 
-  explicit SHA3State(ID id, unsigned int rate, unsigned int size) noexcept;
-  SHA3State(const SHA3State& src) noexcept;
+  enum class ID : unsigned int {
+    sha3_224 = 1,
+    sha3_256 = 2,
+    sha3_384 = 3,
+    sha3_512 = 4,
+    shake128 = 5,
+    shake256 = 6,
+  };
 
-  const Algorithm& algorithm() const noexcept override;
-  uint32_t block_size() const noexcept override { return rate_; }
-  uint32_t size() const noexcept override { return size_; }
-  std::unique_ptr<State> copy() const override;
-  void write(const uint8_t* ptr, std::size_t len) override;
-  void finalize() override;
-  void sum(uint8_t* ptr, std::size_t len) override;
+  explicit SHA3Hasher(ID id, uint16_t rate, uint16_t size) noexcept;
+  SHA3Hasher(const SHA3Hasher& src) noexcept;
+
+  uint16_t block_size() const noexcept override { return rate_; }
+  uint16_t output_size() const noexcept override { return size_; }
+  bool is_sponge() const noexcept override;
+
+  std::unique_ptr<Hasher> copy() const override;
   void reset() override;
+  void write(base::Bytes in) override;
+  void finalize() override;
+  void sum(base::MutableBytes out) override;
 
  private:
   Raw raw_;
   ID id_;
-  unsigned int rate_;  // input block size
-  unsigned int size_;  // output length
+  uint16_t rate_;  // input block size
+  uint16_t size_;  // output length
 };
 
-SHA3State::SHA3State(ID id, unsigned int rate, unsigned int size) noexcept
+SHA3Hasher::SHA3Hasher(ID id, uint16_t rate, uint16_t size) noexcept
     : id_(id),
       rate_(rate),
       size_(size) {
   reset();
 }
 
-SHA3State::SHA3State(const SHA3State& src) noexcept : id_(src.id_),
-                                                      rate_(src.rate_),
-                                                      size_(src.size_) {
+SHA3Hasher::SHA3Hasher(const SHA3Hasher& src) noexcept : id_(src.id_),
+                                                         rate_(src.rate_),
+                                                         size_(src.size_) {
   ::memcpy(&raw_, &src.raw_, sizeof(raw_));
 }
 
-const Algorithm& SHA3State::algorithm() const noexcept {
+bool SHA3Hasher::is_sponge() const noexcept {
   switch (id_) {
-    case ID::sha3_224:
-      return SHA3_224;
-
-    case ID::sha3_256:
-      return SHA3_256;
-
-    case ID::sha3_384:
-      return SHA3_384;
-
-    case ID::sha3_512:
-      return SHA3_512;
-
     case ID::shake128:
-      return SHAKE128;
+    case ID::shake256:
+      return true;
 
     default:
-      return SHAKE256;
+      return false;
   }
 }
 
-std::unique_ptr<State> SHA3State::copy() const {
-  return base::backport::make_unique<SHA3State>(*this);
+std::unique_ptr<Hasher> SHA3Hasher::copy() const {
+  return base::backport::make_unique<SHA3Hasher>(*this);
 }
 
-void SHA3State::write(const uint8_t* ptr, std::size_t len) {
+void SHA3Hasher::reset() { ::bzero(&raw_, sizeof(raw_)); }
+
+void SHA3Hasher::write(base::Bytes in) {
   CHECK(!raw_.finalized) << ": hash is finalized";
+
+  const auto* ptr = in.data();
+  auto len = in.size();
 
   unsigned int nx = raw_.nx;
   if (nx) {
@@ -143,22 +134,20 @@ void SHA3State::write(const uint8_t* ptr, std::size_t len) {
   raw_.nx = nx;
 }
 
-void SHA3State::finalize() {
+void SHA3Hasher::finalize() {
   CHECK(!raw_.finalized) << ": hash is finalized";
 
   // Pad as "M || S || 10*1", where "S" depends on algorithm.
   // Bits are specified LSB-first!
   uint8_t b;
   switch (id_) {
-    case ID::sha3_224:
-    case ID::sha3_256:
-    case ID::sha3_384:
-    case ID::sha3_512:
-      b = 0x06;  // 01 10 00 00
+    case ID::shake128:
+    case ID::shake256:
+      b = 0x1f;  // 11 11 10 00
       break;
 
     default:
-      b = 0x1f;  // 11 11 10 00
+      b = 0x06;  // 01 10 00 00
       break;
   }
 
@@ -176,8 +165,11 @@ void SHA3State::finalize() {
   raw_.nx = rate_;  // all bytes in x have been consumed
 }
 
-void SHA3State::sum(uint8_t* ptr, std::size_t len) {
+void SHA3Hasher::sum(base::MutableBytes out) {
   CHECK(raw_.finalized) << ": hash is not finalized";
+
+  auto* ptr = out.data();
+  auto len = out.size();
 
   unsigned int nx = raw_.nx;
   if (nx < rate_) {
@@ -202,79 +194,122 @@ void SHA3State::sum(uint8_t* ptr, std::size_t len) {
   }
   raw_.nx = nx;
 }
-
-void SHA3State::reset() { ::bzero(&raw_, sizeof(raw_)); }
-
-std::unique_ptr<State> new_sha3_224() {
-  return base::backport::make_unique<SHA3State>(ID::sha3_224, SHA3_224_RATE,
-                                                SHA3_224_SIZE);
-}
-
-std::unique_ptr<State> new_sha3_256() {
-  return base::backport::make_unique<SHA3State>(ID::sha3_256, SHA3_256_RATE,
-                                                SHA3_256_SIZE);
-}
-
-std::unique_ptr<State> new_sha3_384() {
-  return base::backport::make_unique<SHA3State>(ID::sha3_384, SHA3_384_RATE,
-                                                SHA3_384_SIZE);
-}
-
-std::unique_ptr<State> new_sha3_512() {
-  return base::backport::make_unique<SHA3State>(ID::sha3_512, SHA3_512_RATE,
-                                                SHA3_512_SIZE);
-}
-
-std::unique_ptr<State> new_shake128(unsigned int d) {
-  return base::backport::make_unique<SHA3State>(ID::shake128, SHAKE128_RATE, d);
-}
-
-std::unique_ptr<State> new_shake128_suggested() {
-  return new_shake128(SHAKE128_SUGGESTED_SIZE);
-}
-
-std::unique_ptr<State> new_shake256(unsigned int d) {
-  return base::backport::make_unique<SHA3State>(ID::shake256, SHAKE256_RATE, d);
-}
-
-std::unique_ptr<State> new_shake256_suggested() {
-  return new_shake256(SHAKE256_SUGGESTED_SIZE);
-}
 }  // inline namespace implementation
 
-const Algorithm SHA3_224 = {
-    ID::sha3_224,     "SHA3-224",   SHA3_224_RATE, SHA3_224_SIZE,
-    Security::secure, new_sha3_224, nullptr,
-};
+std::unique_ptr<Hasher> new_sha3_224() {
+  return base::backport::make_unique<SHA3Hasher>(
+      SHA3Hasher::ID::sha3_224, SHA3_224_BLOCKSIZE, SHA3_224_SUMSIZE);
+}
 
-const Algorithm SHA3_256 = {
-    ID::sha3_256,     "SHA3-256",   SHA3_256_RATE, SHA3_256_SIZE,
-    Security::secure, new_sha3_256, nullptr,
-};
+std::unique_ptr<Hasher> new_sha3_256() {
+  return base::backport::make_unique<SHA3Hasher>(
+      SHA3Hasher::ID::sha3_256, SHA3_256_BLOCKSIZE, SHA3_256_SUMSIZE);
+}
 
-const Algorithm SHA3_384 = {
-    ID::sha3_384,     "SHA3-384",   SHA3_384_RATE, SHA3_384_SIZE,
-    Security::secure, new_sha3_384, nullptr,
-};
+std::unique_ptr<Hasher> new_sha3_384() {
+  return base::backport::make_unique<SHA3Hasher>(
+      SHA3Hasher::ID::sha3_384, SHA3_384_BLOCKSIZE, SHA3_384_SUMSIZE);
+}
 
-const Algorithm SHA3_512 = {
-    ID::sha3_512,     "SHA3-512",   SHA3_512_RATE, SHA3_512_SIZE,
-    Security::secure, new_sha3_512, nullptr,
-};
+std::unique_ptr<Hasher> new_sha3_512() {
+  return base::backport::make_unique<SHA3Hasher>(
+      SHA3Hasher::ID::sha3_512, SHA3_512_BLOCKSIZE, SHA3_512_SUMSIZE);
+}
 
-const Algorithm SHAKE128 = {
-    ID::shake128,     "SHAKE128",
-    SHAKE128_RATE,    SHAKE128_SUGGESTED_SIZE,
-    Security::secure, new_shake128_suggested,
-    new_shake128,
-};
+std::unique_ptr<Hasher> new_shake128(uint16_t d) {
+  if (d == 0) d = SHAKE128_SUGGESTED_SUMSIZE;
+  return base::backport::make_unique<SHA3Hasher>(SHA3Hasher::ID::shake128,
+                                                 SHAKE128_BLOCKSIZE, d);
+}
 
-const Algorithm SHAKE256 = {
-    ID::shake256,     "SHAKE256",
-    SHAKE256_RATE,    SHAKE256_SUGGESTED_SIZE,
-    Security::secure, new_shake256_suggested,
-    new_shake256,
-};
+static std::unique_ptr<Hasher> new_shake128_fixed() { return new_shake128(); }
 
+static std::unique_ptr<Hasher> new_shake128_variable(uint16_t d) {
+  return new_shake128(d);
+}
+
+std::unique_ptr<Hasher> new_shake256(uint16_t d) {
+  if (d == 0) d = SHAKE256_SUGGESTED_SUMSIZE;
+  return base::backport::make_unique<SHA3Hasher>(SHA3Hasher::ID::shake256,
+                                                 SHAKE256_BLOCKSIZE, d);
+}
+
+static std::unique_ptr<Hasher> new_shake256_fixed() { return new_shake256(); }
+
+static std::unique_ptr<Hasher> new_shake256_variable(uint16_t d) {
+  return new_shake256(d);
+}
 }  // namespace hash
 }  // namespace crypto
+
+using CH = crypto::Hash;
+
+static const crypto::Hash SHA3_224 = {
+    crypto::hash::SHA3_224_BLOCKSIZE,  // block_size
+    crypto::hash::SHA3_224_SUMSIZE,    // output_size
+    crypto::Security::secure,          // security
+    0,                                 // flags
+    "SHA3-224",                        // name
+    crypto::hash::new_sha3_224,        // newfn
+    nullptr,                           // varfn
+};
+
+static const crypto::Hash SHA3_256 = {
+    crypto::hash::SHA3_256_BLOCKSIZE,  // block_size
+    crypto::hash::SHA3_256_SUMSIZE,    // output_size
+    crypto::Security::secure,          // security
+    0,                                 // flags
+    "SHA3-256",                        // name
+    crypto::hash::new_sha3_256,        // newfn
+    nullptr,                           // varfn
+};
+
+static const crypto::Hash SHA3_384 = {
+    crypto::hash::SHA3_384_BLOCKSIZE,  // block_size
+    crypto::hash::SHA3_384_SUMSIZE,    // output_size
+    crypto::Security::secure,          // security
+    0,                                 // flags
+    "SHA3-384",                        // name
+    crypto::hash::new_sha3_384,        // newfn
+    nullptr,                           // varfn
+};
+
+static const crypto::Hash SHA3_512 = {
+    crypto::hash::SHA3_512_BLOCKSIZE,  // block_size
+    crypto::hash::SHA3_512_SUMSIZE,    // output_size
+    crypto::Security::secure,          // security
+    0,                                 // flags
+    "SHA3-512",                        // name
+    crypto::hash::new_sha3_512,        // newfn
+    nullptr,                           // varfn
+};
+
+static const crypto::Hash SHAKE128 = {
+    crypto::hash::SHAKE128_BLOCKSIZE,          // block_size
+    crypto::hash::SHAKE128_SUGGESTED_SUMSIZE,  // output_size
+    crypto::Security::secure,                  // security
+    CH::FLAG_VARLEN | CH::FLAG_SPONGE,         // flags
+    "SHAKE128",                                // name
+    crypto::hash::new_shake128_fixed,          // newfn
+    crypto::hash::new_shake128_variable,       // varfn
+};
+
+static const crypto::Hash SHAKE256 = {
+    crypto::hash::SHAKE256_BLOCKSIZE,          // block_size
+    crypto::hash::SHAKE256_SUGGESTED_SUMSIZE,  // output_size
+    crypto::Security::secure,                  // security
+    CH::FLAG_VARLEN | CH::FLAG_SPONGE,         // flags
+    "SHAKE256",                                // name
+    crypto::hash::new_shake256_fixed,          // newfn
+    crypto::hash::new_shake256_variable,       // varfn
+};
+
+static void init() __attribute__((constructor));
+static void init() {
+  crypto::register_hash(&SHA3_224);
+  crypto::register_hash(&SHA3_256);
+  crypto::register_hash(&SHA3_384);
+  crypto::register_hash(&SHA3_512);
+  crypto::register_hash(&SHAKE128);
+  crypto::register_hash(&SHAKE256);
+}

@@ -1,19 +1,15 @@
 // Copyright © 2017 by Donald King <chronos@chronos-tachyon.net>
 // Available under the MIT License. See LICENSE for details.
 
-#include "crypto/hash/hash.h"
+#include "crypto/hash/md5.h"
 
 #include "base/logging.h"
+#include "crypto/primitives.h"
 
-static constexpr bool OPT =
-#if defined(__i386__) || defined(__x86_64__)
-    true;
-#else
-    false;
-#endif
-
-static constexpr std::size_t BLOCKSIZE = 64;
-static constexpr std::size_t SUMSIZE = 16;
+using crypto::primitives::ROL32;
+using crypto::primitives::RLE32;
+using crypto::primitives::WLE32;
+using crypto::primitives::WLE64;
 
 static const uint32_t H[4] = {
     0x67452301U, 0xefcdab89U, 0x98badcfeU, 0x10325476U,
@@ -42,100 +38,48 @@ static const uint32_t K[64] = {
     0xf7537e82U, 0xbd3af235U, 0x2ad7d2bbU, 0xeb86d391U,
 };
 
-static inline __attribute__((always_inline)) uint32_t L(uint32_t x,
-                                                        unsigned int c) {
-  return (x << c) | (x >> (32 - c));
-}
-
-static inline __attribute__((always_inline)) uint32_t F0(uint32_t p, uint32_t q,
-                                                         uint32_t r) {
+static inline uint32_t F0(uint32_t p, uint32_t q, uint32_t r) {
   // return (p & q) | ((~p) & r);
   return ((q ^ r) & p) ^ r;
 }
 
-static inline __attribute__((always_inline)) uint32_t F1(uint32_t p, uint32_t q,
-                                                         uint32_t r) {
+static inline uint32_t F1(uint32_t p, uint32_t q, uint32_t r) {
   return F0(r, p, q);
 }
 
-static inline __attribute__((always_inline)) uint32_t F2(uint32_t p, uint32_t q,
-                                                         uint32_t r) {
+static inline uint32_t F2(uint32_t p, uint32_t q, uint32_t r) {
   return p ^ q ^ r;
 }
 
-static inline __attribute__((always_inline)) uint32_t F3(uint32_t p, uint32_t q,
-                                                         uint32_t r) {
+static inline uint32_t F3(uint32_t p, uint32_t q, uint32_t r) {
   return q ^ (p | (~r));
-}
-
-static inline __attribute__((always_inline)) uint32_t X(const uint8_t* ptr,
-                                                        unsigned int index) {
-  if (OPT) {
-    const uint32_t* ptr32 = reinterpret_cast<const uint32_t*>(ptr);
-    return ptr32[index];
-  } else {
-    unsigned int byte0 = ptr[(index * 4) + 0];
-    unsigned int byte1 = ptr[(index * 4) + 1];
-    unsigned int byte2 = ptr[(index * 4) + 2];
-    unsigned int byte3 = ptr[(index * 4) + 3];
-    return byte0 | (byte1 << 8) | (byte2 << 16) | (byte3 << 24);
-  }
-}
-
-static inline __attribute__((always_inline)) void Y(uint8_t* out,
-                                                    uint32_t value,
-                                                    unsigned int index) {
-  if (OPT) {
-    uint32_t* out32 = reinterpret_cast<uint32_t*>(out);
-    out32[index] = value;
-  } else {
-    out[(index * 4) + 0] = (value & 0xffU);
-    out[(index * 4) + 1] = ((value >> 8) & 0xffU);
-    out[(index * 4) + 2] = ((value >> 16) & 0xffU);
-    out[(index * 4) + 3] = ((value >> 24) & 0xffU);
-  }
-}
-
-static inline __attribute__((always_inline)) void YY(uint8_t* out,
-                                                     uint64_t value,
-                                                     unsigned int index) {
-  if (OPT) {
-    uint64_t* out64 = reinterpret_cast<uint64_t*>(out);
-    out64[index] = value;
-  } else {
-    out[(index * 8) + 0] = (value & 0xffU);
-    out[(index * 8) + 1] = ((value >> 8) & 0xffU);
-    out[(index * 8) + 2] = ((value >> 16) & 0xffU);
-    out[(index * 8) + 3] = ((value >> 24) & 0xffU);
-    out[(index * 8) + 4] = ((value >> 32) & 0xffU);
-    out[(index * 8) + 5] = ((value >> 40) & 0xffU);
-    out[(index * 8) + 6] = ((value >> 48) & 0xffU);
-    out[(index * 8) + 7] = ((value >> 56) & 0xffU);
-  }
 }
 
 namespace crypto {
 namespace hash {
 inline namespace implementation {
-class MD5State : public State {
+class MD5Hasher : public Hasher {
  public:
   struct Raw {
-    uint8_t x[BLOCKSIZE];
+    uint8_t x[MD5_BLOCKSIZE];
     uint32_t h[4];
     uint64_t len;
     uint8_t nx;
     bool finalized;
   };
 
-  MD5State() noexcept;
-  MD5State(const MD5State& src) noexcept;
+  MD5Hasher() noexcept;
+  MD5Hasher(const MD5Hasher& src) noexcept;
 
-  const Algorithm& algorithm() const noexcept override { return MD5; }
-  std::unique_ptr<State> copy() const override;
-  void write(const uint8_t* ptr, std::size_t len) override;
-  void finalize() override;
-  void sum(uint8_t* ptr, std::size_t len) override;
+  uint16_t block_size() const noexcept override { return MD5_BLOCKSIZE; }
+  uint16_t output_size() const noexcept override { return MD5_SUMSIZE; }
+  bool is_sponge() const noexcept override { return false; }
+
+  std::unique_ptr<Hasher> copy() const override;
   void reset() override;
+  void write(base::Bytes in) override;
+  void finalize() override;
+  void sum(base::MutableBytes out) override;
 
  private:
   void block(const uint8_t* ptr, uint64_t len);
@@ -143,35 +87,46 @@ class MD5State : public State {
   Raw raw_;
 };
 
-MD5State::MD5State() noexcept { reset(); }
+MD5Hasher::MD5Hasher() noexcept { reset(); }
 
-MD5State::MD5State(const MD5State& src) noexcept {
+MD5Hasher::MD5Hasher(const MD5Hasher& src) noexcept {
   ::memcpy(&raw_, &src.raw_, sizeof(raw_));
 }
 
-std::unique_ptr<State> MD5State::copy() const {
-  return base::backport::make_unique<MD5State>(*this);
+std::unique_ptr<Hasher> MD5Hasher::copy() const {
+  return base::backport::make_unique<MD5Hasher>(*this);
 }
 
-void MD5State::write(const uint8_t* ptr, std::size_t len) {
+void MD5Hasher::reset() {
+  ::bzero(&raw_, sizeof(raw_));
+  raw_.h[0] = H[0];
+  raw_.h[1] = H[1];
+  raw_.h[2] = H[2];
+  raw_.h[3] = H[3];
+}
+
+void MD5Hasher::write(base::Bytes in) {
   CHECK(!raw_.finalized) << ": hash is finalized";
+
+  const auto* ptr = in.data();
+  auto len = in.size();
 
   raw_.len += len;
   unsigned int nx = raw_.nx;
   if (nx) {
-    auto n = std::min(BLOCKSIZE - nx, len);
+    auto n = std::min(MD5_BLOCKSIZE - nx, len);
     ::memcpy(raw_.x + nx, ptr, n);
     nx += n;
     ptr += n;
     len -= n;
-    if (nx == BLOCKSIZE) {
-      block(raw_.x, BLOCKSIZE);
+    if (nx == MD5_BLOCKSIZE) {
+      block(raw_.x, MD5_BLOCKSIZE);
       nx = 0;
     }
     raw_.nx = nx;
   }
-  if (len >= BLOCKSIZE) {
-    uint64_t n = len & ~(BLOCKSIZE - 1);
+  if (len >= MD5_BLOCKSIZE) {
+    uint64_t n = len & ~(MD5_BLOCKSIZE - 1);
     block(ptr, n);
     ptr += n;
     len -= n;
@@ -182,46 +137,38 @@ void MD5State::write(const uint8_t* ptr, std::size_t len) {
   }
 }
 
-void MD5State::finalize() {
+void MD5Hasher::finalize() {
   CHECK(!raw_.finalized) << ": hash is finalized";
 
-  uint8_t tmp[BLOCKSIZE];
+  uint8_t tmp[MD5_BLOCKSIZE];
   ::bzero(tmp, sizeof(tmp));
   tmp[0] = 0x80;
 
   uint64_t len = raw_.len;
-  uint8_t n = (len & (BLOCKSIZE - 1));
+  uint8_t n = (len & (MD5_BLOCKSIZE - 1));
   if (n < 56)
-    write(tmp, 56 - n);
+    write(base::Bytes(tmp, 56 - n));
   else
-    write(tmp, BLOCKSIZE + 56 - n);
+    write(base::Bytes(tmp, MD5_BLOCKSIZE + 56 - n));
 
   len <<= 3;
-  YY(tmp, len, 0);
-  write(tmp, 8);
+  WLE64(tmp, 0, len);
+  write(base::Bytes(tmp, 8));
 
   DCHECK_EQ(raw_.nx, 0U);
   raw_.finalized = true;
 }
 
-void MD5State::sum(uint8_t* ptr, std::size_t len) {
+void MD5Hasher::sum(base::MutableBytes out) {
   CHECK(raw_.finalized) << ": hash is not finalized";
-  CHECK_EQ(len, SUMSIZE);
-  Y(ptr, raw_.h[0], 0);
-  Y(ptr, raw_.h[1], 1);
-  Y(ptr, raw_.h[2], 2);
-  Y(ptr, raw_.h[3], 3);
+  CHECK_GE(out.size(), MD5_SUMSIZE);
+  WLE32(out.data(), 0, raw_.h[0]);
+  WLE32(out.data(), 1, raw_.h[1]);
+  WLE32(out.data(), 2, raw_.h[2]);
+  WLE32(out.data(), 3, raw_.h[3]);
 }
 
-void MD5State::reset() {
-  ::bzero(&raw_, sizeof(raw_));
-  raw_.h[0] = H[0];
-  raw_.h[1] = H[1];
-  raw_.h[2] = H[2];
-  raw_.h[3] = H[3];
-}
-
-void MD5State::block(const uint8_t* ptr, uint64_t len) {
+void MD5Hasher::block(const uint8_t* ptr, uint64_t len) {
   uint32_t m[16];
 
   uint32_t h0 = raw_.h[0];
@@ -232,10 +179,10 @@ void MD5State::block(const uint8_t* ptr, uint64_t len) {
   uint32_t a, b, c, d, f, temp;
   unsigned int i, g;
 
-  while (len >= BLOCKSIZE) {
+  while (len >= MD5_BLOCKSIZE) {
     i = 0;
     while (i < 16) {
-      m[i] = X(ptr, i);
+      m[i] = RLE32(ptr, i);
       ++i;
     }
 
@@ -250,7 +197,7 @@ void MD5State::block(const uint8_t* ptr, uint64_t len) {
       temp = d;
       d = c;
       c = b;
-      b = b + L(a + f + K[i] + m[g], S[i]);
+      b = b + ROL32(a + f + K[i] + m[g], S[i]);
       a = temp;
     }
     for (i = 16; i < 32; ++i) {
@@ -259,7 +206,7 @@ void MD5State::block(const uint8_t* ptr, uint64_t len) {
       temp = d;
       d = c;
       c = b;
-      b = b + L(a + f + K[i] + m[g], S[i]);
+      b = b + ROL32(a + f + K[i] + m[g], S[i]);
       a = temp;
     }
     for (i = 32; i < 48; ++i) {
@@ -268,7 +215,7 @@ void MD5State::block(const uint8_t* ptr, uint64_t len) {
       temp = d;
       d = c;
       c = b;
-      b = b + L(a + f + K[i] + m[g], S[i]);
+      b = b + ROL32(a + f + K[i] + m[g], S[i]);
       a = temp;
     }
     for (i = 48; i < 64; ++i) {
@@ -277,7 +224,7 @@ void MD5State::block(const uint8_t* ptr, uint64_t len) {
       temp = d;
       d = c;
       c = b;
-      b = b + L(a + f + K[i] + m[g], S[i]);
+      b = b + ROL32(a + f + K[i] + m[g], S[i]);
       a = temp;
     }
 
@@ -286,7 +233,8 @@ void MD5State::block(const uint8_t* ptr, uint64_t len) {
     h2 += c;
     h3 += d;
 
-    len -= BLOCKSIZE;
+    ptr += MD5_BLOCKSIZE;
+    len -= MD5_BLOCKSIZE;
   }
   DCHECK_EQ(len, 0U);
 
@@ -295,15 +243,23 @@ void MD5State::block(const uint8_t* ptr, uint64_t len) {
   raw_.h[2] = h2;
   raw_.h[3] = h3;
 }
-
-std::unique_ptr<State> new_md5() {
-  return base::backport::make_unique<MD5State>();
-}
 }  // inline namespace implementation
 
-const Algorithm MD5 = {
-    ID::md5, "MD5", BLOCKSIZE, SUMSIZE, Security::broken, new_md5, nullptr,
-};
-
+std::unique_ptr<Hasher> new_md5() {
+  return base::backport::make_unique<MD5Hasher>();
+}
 }  // namespace hash
 }  // namespace crypto
+
+static const crypto::Hash MD5 = {
+    crypto::hash::MD5_BLOCKSIZE,  // block_size
+    crypto::hash::MD5_SUMSIZE,    // output_size
+    crypto::Security::broken,     // security
+    0,                            // flags
+    "MD5",                        // name
+    crypto::hash::new_md5,        // newfn
+    nullptr,                      // varfn
+};
+
+static void init() __attribute__((constructor));
+static void init() { crypto::register_hash(&MD5); }
